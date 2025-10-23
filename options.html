@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AI Helper Settings</title>
+    <style>
+        body { font-family: sans-serif; padding: 10px; }
+        div { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input[type="text"], input[type="password"], textarea { width: 400px; padding: 5px; box-sizing: border-box; }
+        textarea { resize: vertical; min-height: 80px; }
+        small { color: #888; }
+        button { padding: 8px 12px; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <h2>AI Chatbot Settings</h2>
+    <div>
+        <label for="endpoint">Endpoint URL</label>
+        <input type="text" id="endpoint" placeholder="https://generativelanguage.googleapis.com/v1beta/openai/chat/completions">
+    </div>
+    <div>
+        <label for="modelName">Model Name</label>
+        <input type="text" id="modelName" placeholder="gemini-2.0-flash">
+    </div>
+    <div>
+        <label for="apiKey">API Key</label>
+        <input type="password" id="apiKey">
+    </div>
+    
+    <div>
+        <label for="customPrompt">Custom Prompt</label>
+        <textarea id="customPrompt"></textarea>
+        <small>Use <strong>{word}</strong> as the placeholder for the selected text.
+        <br>Example: Explain {word} to a 5-year-old.</small>
+    </div>
+    <button id="save">Save</button>
+    <div id="status"></div>
+
+    <script src="options.js"></script>
+</body>
+</html>
