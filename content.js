@@ -14,7 +14,6 @@ document.addEventListener('mouseup', (event) => {
   // Count the words. We split by one or more whitespace characters.
   const wordCount = selectedText.split(/\s+/).length;
 
-  // --- This is the new logic ---
   // Only proceed if 1 to 4 words are selected
   if (wordCount > 0 && wordCount <= 4) {
     
@@ -32,13 +31,15 @@ document.addEventListener('mouseup', (event) => {
     chrome.runtime.sendMessage(
       { type: "getAiDefinition", word: selectedText },
       (response) => {
+        if (!popup) return; // Popup might have been closed while loading
+        
         if (response.error) {
           updatePopup(response.error);
         } else {
           updatePopup(response.definition);
-          // After content is loaded, adjust position if it goes off screen
-          adjustPopupPosition();
         }
+        // After content is loaded, adjust position
+        adjustPopupPosition();
       }
     );
   } else {
@@ -77,12 +78,12 @@ function showPopup(x, y, content) {
   popup.id = 'ai-definition-popup';
   popup.innerHTML = content;
   
-  // Temporarily add to get its dimensions before final positioning
-  document.body.appendChild(popup);
-
-  // Position it initially below/near the selection, we'll adjust in adjustPopupPosition
+  // Set initial position at the top-left of the selection
+  // This is temporary until adjustPopupPosition() runs
   popup.style.left = `${x}px`;
-  popup.style.top = `${y}px`; // This is the top of the selected word
+  popup.style.top = `${y}px`; 
+
+  document.body.appendChild(popup);
 }
 
 function updatePopup(content) {
@@ -99,42 +100,50 @@ function removePopup() {
   }
 }
 
+// --- THIS IS THE UPDATED FUNCTION ---
 function adjustPopupPosition() {
     if (!popup) return;
 
+    const selection = window.getSelection();
+    if (selection.rangeCount === 0) {
+        removePopup(); // Close popup if selection is lost
+        return;
+    }
+    
+    const range = selection.getRangeAt(0);
+    const selectionRect = range.getBoundingClientRect(); // Viewport-relative rect of *selection*
+    
+    // We need the popup's dimensions *after* content is loaded
     const popupRect = popup.getBoundingClientRect();
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight;
 
-    let newLeft = popupRect.left;
-    let newTop = popupRect.top; // Current position is top of selected word
+    let newLeft = selectionRect.left; // Start by aligning with the left of selection
+    let newTop; // This will be our final viewport-relative top
 
-    // Calculate position to be *above* the selected word
-    newTop = newTop - popupRect.height - 10; // 10px padding above selected word
+    // --- NEW DYNAMIC VERTICAL PLACEMENT ---
+    // Check if there's enough space *above* the selection
+    // (space above selection > popup height + 10px margin)
+    if (selectionRect.top > popupRect.height + 10) {
+        // Yes, place it ABOVE
+        newTop = selectionRect.top - popupRect.height - 10; // 10px padding
+    } else {
+        // No, place it BELOW
+        newTop = selectionRect.bottom + 10; // 10px padding
+    }
+    // --- END NEW LOGIC ---
 
-    // --- Horizontal adjustment ---
+    // --- Horizontal Adjustment ---
     // If it goes off the right side
-    if (newLeft + popupRect.width > viewportWidth - 10) { // 10px margin from right edge
-        newLeft = viewportWidth - popupRect.width - 10;
+    if (newLeft + popupRect.width > viewportWidth - 10) {
+        newLeft = viewportWidth - popupRect.width - 10; // 10px margin from right
     }
     // If it goes off the left side
-    if (newLeft < 10) { // 10px margin from left edge
-        newLeft = 10;
+    if (newLeft < 10) {
+        newLeft = 10; // 10px margin from left
     }
-
-    // --- Vertical adjustment ---
-    // If it goes off the top (because we moved it above)
-    if (newTop < 10) { // 10px margin from top edge
-        // If it can't fit above, try to place it below the selected word instead
-        const selection = window.getSelection();
-        const range = selection.getRangeAt(0);
-        const rect = range.getBoundingClientRect();
-        
-        newTop = rect.bottom + window.scrollY + 10; // 10px padding below selected word
-    }
-
-
-    // Apply final positions (relative to the document, accounting for scroll)
+    
+    // Apply final positions (we add scrollY/scrollX to convert viewport-relative to document-relative)
     popup.style.left = `${newLeft + window.scrollX}px`;
     popup.style.top = `${newTop + window.scrollY}px`;
 }
