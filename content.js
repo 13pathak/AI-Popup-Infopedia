@@ -38,8 +38,20 @@ document.addEventListener('mouseup', (event) => {
         } else {
           updatePopup(response.definition);
         }
+        
         // After content is loaded, adjust position
         adjustPopupPosition();
+
+        // We use setTimeout(..., 0) to run this code *after* the current
+        // JavaScript execution stack. This gives other extensions (like
+        // the toolbar) a chance to render, and *then* we re-append
+        // our popup to ensure it's truly the last element on top.
+        setTimeout(() => {
+          if (popup) {
+            popup.remove();
+            document.body.appendChild(popup);
+          }
+        }, 0); // 0 milliseconds is all we need
       }
     );
   } else {
@@ -86,12 +98,20 @@ function showPopup(x, y, content) {
   document.body.appendChild(popup);
 }
 
+// --- THIS FUNCTION IS UPDATED ---
 function updatePopup(content) {
   if (popup) {
-    // Basic formatting for newlines from AI
-    popup.innerHTML = content.replace(/\n/g, '<br>');
+    // Convert Markdown bold (**) to HTML <strong>
+    let formattedContent = content.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    
+    // Convert newlines to <br>
+    formattedContent = formattedContent.replace(/\n/g, '<br>');
+    
+    // Set the formatted HTML
+    popup.innerHTML = formattedContent;
   }
 }
+// --- END OF UPDATE ---
 
 function removePopup() {
   if (popup) {
@@ -100,7 +120,6 @@ function removePopup() {
   }
 }
 
-// --- THIS IS THE UPDATED FUNCTION ---
 function adjustPopupPosition() {
     if (!popup) return;
 
@@ -121,9 +140,8 @@ function adjustPopupPosition() {
     let newLeft = selectionRect.left; // Start by aligning with the left of selection
     let newTop; // This will be our final viewport-relative top
 
-    // --- NEW DYNAMIC VERTICAL PLACEMENT ---
+    // --- DYNAMIC VERTICAL PLACEMENT ---
     // Check if there's enough space *above* the selection
-    // (space above selection > popup height + 10px margin)
     if (selectionRect.top > popupRect.height + 10) {
         // Yes, place it ABOVE
         newTop = selectionRect.top - popupRect.height - 10; // 10px padding
@@ -131,7 +149,6 @@ function adjustPopupPosition() {
         // No, place it BELOW
         newTop = selectionRect.bottom + 10; // 10px padding
     }
-    // --- END NEW LOGIC ---
 
     // --- Horizontal Adjustment ---
     // If it goes off the right side
