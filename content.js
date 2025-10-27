@@ -30,6 +30,7 @@ document.addEventListener('mouseup', (event) => {
     // Send the selected word to the background script
     chrome.runtime.sendMessage(
       { type: "getAiDefinition", word: selectedText },
+      // --- THIS IS YOUR NEW, UPDATED CALLBACK ---
       (response) => {
         if (!popup) return; // Popup might have been closed while loading
         
@@ -38,21 +39,22 @@ document.addEventListener('mouseup', (event) => {
         } else {
           updatePopup(response.definition);
         }
-        
+                
         // After content is loaded, adjust position
         adjustPopupPosition();
-
-        // We use setTimeout(..., 0) to run this code *after* the current
-        // JavaScript execution stack. This gives other extensions (like
-        // the toolbar) a chance to render, and *then* we re-append
-        // our popup to ensure it's truly the last element on top.
+        
+        // Re-append popup to ensure it's on top, with a longer delay
+        // to give other extensions time to render their toolbars
         setTimeout(() => {
-          if (popup) {
+          if (popup && document.body.contains(popup)) {
             popup.remove();
             document.body.appendChild(popup);
+            // Force a reflow to ensure z-index is applied
+            popup.offsetHeight; 
           }
-        }, 0); // 0 milliseconds is all we need
+        }, 150); // Increased delay to 50ms
       }
+      // --- END OF YOUR NEW CALLBACK ---
     );
   } else {
     // If more than 4 words are selected, ensure the popup is closed
@@ -98,7 +100,6 @@ function showPopup(x, y, content) {
   document.body.appendChild(popup);
 }
 
-// --- THIS FUNCTION IS UPDATED ---
 function updatePopup(content) {
   if (popup) {
     // Convert Markdown bold (**) to HTML <strong>
@@ -111,7 +112,6 @@ function updatePopup(content) {
     popup.innerHTML = formattedContent;
   }
 }
-// --- END OF UPDATE ---
 
 function removePopup() {
   if (popup) {
