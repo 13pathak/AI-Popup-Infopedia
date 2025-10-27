@@ -1,6 +1,6 @@
 #ai-definition-popup {
   position: absolute;
-  z-index: 2147483647; /* Set to the maximum possible z-index to ensure it's on top */
+  z-index: 2147483647 !important; /* Added !important to escalate the z-index war */
   background-color: #333;
   color: #eee;
   border: 1px solid #555;
@@ -11,5 +11,4 @@
   line-height: 1.5;
   max-width: 350px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
-  /* Removed pointer-events: none; as it might interfere with future interactivity if needed */
 }
