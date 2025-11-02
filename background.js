@@ -1,3 +1,10 @@
+// --- NEW: Open options page when toolbar icon is clicked ---
+chrome.action.onClicked.addListener((tab) => {
+  chrome.runtime.openOptionsPage();
+});
+// --- END NEW ---
+
+
 // Listen for messages from the content script
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.type === "getAiDefinition") {
@@ -37,7 +44,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + apiKey
+            'Authorization': `Bearer ${apiKey}`
           },
           body: JSON.stringify(payload)
         });
@@ -50,10 +57,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         const data = await response.json();
         const aiText = data.choices[0].message.content;
-
-        // --- NEW HISTORY SAVING LOGIC ---
+        
+        // --- HISTORY SAVING LOGIC ---
         saveToHistory(request.word, aiText);
-        // --- END NEW LOGIC ---
+        // --- END HISTORY LOGIC ---
         
         sendResponse({ definition: aiText });
 
@@ -68,7 +75,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 });
 
-// --- NEW FUNCTION TO SAVE HISTORY ---
+// --- FUNCTION TO SAVE HISTORY ---
 function saveToHistory(word, definition) {
   chrome.storage.local.get(['history'], (result) => {
     let history = result.history || [];
