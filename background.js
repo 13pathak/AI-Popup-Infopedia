@@ -18,10 +18,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return;
       }
 
-      // --- THIS IS THE NEW LOGIC ---
       // Replace the {word} placeholder with the actual selected text
       const prompt = promptTemplate.replace('{word}', request.word);
-      // --- END NEW LOGIC ---
 
       // Create the OpenAI-style payload
       const payload = {
@@ -39,7 +37,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`
+            'Authorization': 'Bearer ' + apiKey
           },
           body: JSON.stringify(payload)
         });
@@ -52,6 +50,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         const data = await response.json();
         const aiText = data.choices[0].message.content;
+
+        // --- NEW HISTORY SAVING LOGIC ---
+        saveToHistory(request.word, aiText);
+        // --- END NEW LOGIC ---
         
         sendResponse({ definition: aiText });
 
@@ -65,3 +67,28 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 });
+
+// --- NEW FUNCTION TO SAVE HISTORY ---
+function saveToHistory(word, definition) {
+  chrome.storage.local.get(['history'], (result) => {
+    let history = result.history || [];
+    
+    // Create new history item
+    const newItem = {
+      word: word,
+      definition: definition,
+      timestamp: new Date().toISOString() // Store timestamp
+    };
+
+    // Add new item to the beginning of the array
+    history.unshift(newItem);
+
+    // Keep history limited to 100 items
+    if (history.length > 100) {
+      history = history.slice(0, 100);
+    }
+
+    // Save back to storage
+    chrome.storage.local.set({ history: history });
+  });
+}
