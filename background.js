@@ -2,19 +2,17 @@
 chrome.action.onClicked.addListener((tab) => {
   chrome.runtime.openOptionsPage();
 });
-// --- END NEW ---
 
-
-// Listen for messages from the content script
+// --- UPDATED: This listener now handles TWO types of messages ---
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  
+  // --- Case 1: Get a definition ---
   if (request.type === "getAiDefinition") {
     
     // Get all our saved settings, including the new customPrompt
     chrome.storage.sync.get(['endpointUrl', 'modelName', 'apiKey', 'customPrompt'], async (items) => {
       
       const defaultPrompt = "Explain the following word or concept in a concise paragraph: {word}";
-      
-      // Use the saved prompt, or the default if it's somehow missing
       const promptTemplate = items.customPrompt || defaultPrompt;
       const apiKey = items.apiKey;
       const url = items.endpointUrl;
@@ -25,7 +23,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return;
       }
 
-      // Replace the {word} placeholder with the actual selected text
       const prompt = promptTemplate.replace('{word}', request.word);
 
       // Create the OpenAI-style payload
@@ -34,7 +31,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         "messages": [
           {
             "role": "user",
-            "content": prompt // Use the new dynamic prompt
+            "content": prompt 
           }
         ]
       };
@@ -58,10 +55,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         const data = await response.json();
         const aiText = data.choices[0].message.content;
         
-        // --- HISTORY SAVING LOGIC ---
-        saveToHistory(request.word, aiText);
-        // --- END HISTORY LOGIC ---
-        
         sendResponse({ definition: aiText });
 
       } catch (error) {
@@ -73,10 +66,22 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     // Return true to indicate that we will send a response asynchronously
     return true;
   }
+
+  // --- Case 2: Save an item to history ---
+  if (request.type === "saveToHistory") {
+    // We pass sendResponse as a callback to run *after* saving
+    saveToHistory(request.word, request.definition, () => {
+      sendResponse({ status: "saved" });
+    });
+    // --- THIS IS THE FIX ---
+    // Return true to tell Chrome this is an async operation
+    return true; 
+  }
+
 });
 
-// --- FUNCTION TO SAVE HISTORY ---
-function saveToHistory(word, definition) {
+// --- UPDATED to accept a callback ---
+function saveToHistory(word, definition, callback) {
   chrome.storage.local.get(['history'], (result) => {
     let history = result.history || [];
     
@@ -95,7 +100,11 @@ function saveToHistory(word, definition) {
       history = history.slice(0, 100);
     }
 
-    // Save back to storage
-    chrome.storage.local.set({ history: history });
+    // Save back to storage and *then* run the callback
+    chrome.storage.local.set({ history: history }, () => {
+      if (callback) {
+        callback();
+      }
+    });
   });
 }
