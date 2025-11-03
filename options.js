@@ -1,113 +1,131 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>AI Helper Settings</title>
-    <style>
-        body { font-family: sans-serif; padding: 10px; width: 420px; }
-        div { margin-bottom: 15px; }
-        label { display: block; margin-bottom: 5px; font-weight: bold; }
-        input[type="text"], input[type="password"], textarea { width: 400px; padding: 5px; box-sizing: border-box; }
-        textarea { resize: vertical; min-height: 80px; }
-        small { color: #888; }
-        button { padding: 8px 12px; cursor: pointer; }
+// --- TAB SWITCHING LOGIC ---
+document.addEventListener('DOMContentLoaded', () => {
+  const tabs = document.querySelectorAll('.tab-button');
+  const tabContents = document.querySelectorAll('.tab-content');
 
-        /* --- NEW TAB STYLES --- */
-        .tab-nav {
-            display: flex;
-            border-bottom: 1px solid #555;
-            margin-bottom: 20px;
-        }
-        .tab-button {
-            padding: 10px 15px;
-            cursor: pointer;
-            border: none;
-            background-color: transparent;
-            font-size: 16px;
-            border-bottom: 3px solid transparent;
-        }
-        .tab-button.active {
-            border-bottom: 3px solid #337ab7;
-            font-weight: bold;
-        }
-        .tab-content {
-            display: none; /* Hidden by default */
-        }
-        .tab-content.active {
-            display: block; /* Shown when active */
-        }
-        #clear-history {
-            background-color: #d9534f;
-            color: white;
-            border: none;
-        }
-        
-        /* --- NEW HISTORY STYLES --- */
-        #history-list {
-            max-height: 400px;
-            overflow-y: auto;
-            border: 1px solid #ccc;
-            padding: 10px;
-            border-radius: 4px;
-        }
-        .history-item {
-            border-bottom: 1px solid #444;
-            padding: 10px 5px;
-        }
-        .history-item:last-child {
-            border-bottom: none;
-        }
-        .history-word {
-            font-weight: bold;
-            font-size: 1.1em;
-            margin-bottom: 5px;
-        }
-        .history-definition {
-            font-size: 0.95em;
-            line-height: 1.4;
-        }
-    </style>
-</head>
-<body>
+  // --- THIS IS YOUR NEW, CORRECTED LOGIC ---
+  tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      // Deactivate all
+      tabs.forEach(t => t.classList.remove('active'));
+      tabContents.forEach(c => c.classList.remove('active'));
 
-    <div class="tab-nav">
-        <button class="tab-button active" data-tab="settings-content">Settings</button>
-        <button class="tab-button" data-tab="history-content">History</button>
-    </div>
+      // Activate clicked
+      tab.classList.add('active');
+      document.getElementById(tab.dataset.tab).classList.add('active');
 
-    <div id="settings-content" class="tab-content active">
-        <h2>AI Chatbot Settings</h2>
-        <div>
-            <label for="endpoint">Endpoint URL</label>
-            <input type="text" id="endpoint" placeholder="https://generativelanguage.googleapis.com/v1beta/openai/chat/completions">
-        </div>
-        <div>
-            <label for="modelName">Model Name</label>
-            <input type="text" id="modelName" placeholder="gemini-2.0-flash">
-        </div>
-        <div>
-            <label for="apiKey">API Key</label>
-            <input type="password" id="apiKey">
-        </div>
-        
-        <div>
-            <label for="customPrompt">Custom Prompt</label>
-            <textarea id="customPrompt"></textarea>
-            <small>Use <strong>{word}</strong> as the placeholder for the selected text.
-            <br>Example: Explain {word} to a 5-year-old.</small>
-        </div>
-        <button id="save">Save Settings</button>
-        <div id="status"></div>
-    </div>
+      // Reload history every time you open the History tab
+      if (tab.dataset.tab === "history-content") {
+        loadHistory();
+      }
+    });
+  });
+  // --- END OF YOUR NEW LOGIC ---
 
-    <div id="history-content" class="tab-content">
-        <h2>Search History</h2>
-        <button id="clear-history">Clear All History</button>
-        <div id="history-list-container">
-            <p id="no-history-message" style="display: none;">No history yet.</p>
-            <div id="history-list"></div>
-        </div>
-    </div>
+  // --- ADD ORIGINAL AND NEW LISTENERS ---
+  restoreSettings();
+  loadHistory(); // Load history once on initial page load
+  document.getElementById('save').addEventListener('click', saveSettings);
+  document.getElementById('clear-history').addEventListener('click', clearHistory);
+});
 
-    <script src="options.js"></script>
-</body>
-</html>
+
+// --- RENAMED save_options TO saveSettings ---
+function saveSettings() {
+  const endpoint = document.getElementById('endpoint').value;
+  const modelName = document.getElementById('modelName').value;
+  const apiKey = document.getElementById('apiKey').value;
+  const customPrompt = document.getElementById('customPrompt').value; 
+
+  chrome.storage.sync.set({
+    endpointUrl: endpoint,
+    modelName: modelName,
+    apiKey: apiKey,
+    customPrompt: customPrompt
+  }, function() {
+    // Update status to let user know options were saved.
+    const status = document.getElementById('status');
+    status.textContent = 'Options saved.';
+    setTimeout(function() {
+      status.textContent = '';
+    }, 1000);
+  });
+}
+
+// --- RENAMED restore_options TO restoreSettings ---
+function restoreSettings() {
+  // Set a default prompt
+  const defaultPrompt = "Explain the following word or concept in a concise paragraph: {word}";
+
+  chrome.storage.sync.get({
+    endpointUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
+    modelName: 'gemini-2.0-flash',
+    apiKey: '',
+    customPrompt: defaultPrompt
+  }, function(items) {
+    document.getElementById('endpoint').value = items.endpointUrl;
+    document.getElementById('modelName').value = items.modelName;
+    document.getElementById('apiKey').value = items.apiKey;
+    document.getElementById('customPrompt').value = items.customPrompt;
+  });
+}
+
+// --- NEW FUNCTION TO LOAD HISTORY ---
+function loadHistory() {
+  const historyList = document.getElementById('history-list');
+  const noHistoryMessage = document.getElementById('no-history-message');
+  historyList.innerHTML = ''; // Clear old list
+
+  chrome.storage.local.get(['history'], (result) => {
+    const history = result.history || [];
+
+    if (history.length === 0) {
+      noHistoryMessage.style.display = 'block';
+      historyList.style.display = 'none';
+    } else {
+      noHistoryMessage.style.display = 'none';
+      historyList.style.display = 'block';
+      
+      history.forEach(item => {
+        const itemElement = document.createElement('div');
+        itemElement.className = 'history-item';
+
+        // Format the definition just like in content.js
+        let formattedDefinition = item.definition
+          .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+          .replace(/\n/g, '<br>');
+
+        itemElement.innerHTML = `
+          <div class="history-word">${escapeHTML(item.word)}</div>
+          <div class="history-definition">${formattedDefinition}</div>
+        `;
+        historyList.appendChild(itemElement);
+      });
+    }
+  });
+}
+
+// --- NEW FUNCTION TO CLEAR HISTORY ---
+function clearHistory() {
+  // Confirmation dialog
+  if (confirm("Are you sure you want to clear all history? This cannot be undone.")) {
+    chrome.storage.local.set({ history: [] }, () => {
+      // Reload the history list (which will now be empty)
+      loadHistory();
+      console.log("History cleared.");
+    });
+  }
+}
+
+// --- NEW HELPER TO PREVENT XSS ---
+function escapeHTML(str) {
+  return str.replace(/[&<>"']/g, function(m) {
+    return {
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#039;'
+    }[m];
+  });
+}
