@@ -1,7 +1,63 @@
-let popup;
+let popupContainer = null;
+let popup = null;
+let isClickInsidePopup = false; // --- Our flag to prevent the bug ---
 
-// Listen for text selection (e.g., mouse up after selecting)
+// --- Styles (unchanged) ---
+const popupStyles = `
+  #ai-definition-popup {
+    position: fixed; /* Use fixed positioning relative to the viewport */
+    background-color: #333;
+    color: #eee;
+    border: 1px solid #555;
+    border-radius: 8px;
+    padding: 12px;
+    font-family: sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    max-width: 350px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    pointer-events: auto; /* Re-enable pointer events for the popup itself */
+    z-index: 1; /* z-index is now relative to its container */
+  }
+
+  /* Wrapper for the AI-generated text */
+  #ai-popup-content {
+    /* no styles needed, but useful for structure */
+  }
+
+  /* --- STYLES FOR BUTTONS --- */
+  .ai-popup-actions {
+    display: flex;
+    justify-content: flex-start; /* Aligns the single button to the LEFT */
+    margin-top: 15px;
+    padding-top: 10px;
+    border-top: 1px solid #555;
+  }
+
+  .ai-popup-button {
+    font-family: sans-serif;
+    font-size: 14px; /* Matches popup text */
+    font-weight: bold; /* Make it stand out */
+    color: #ff6b6b; /* Make it red */
+    cursor: pointer;
+    background: none;
+    border: none;
+    padding: 5px 0; /* Padding only top/bottom */
+  }
+
+  .ai-popup-button:hover {
+    opacity: 0.8;
+  }
+`;
+
+// --- Main mouseup listener ---
 document.addEventListener('mouseup', (event) => {
+  // If the click started inside our popup, do nothing.
+  if (isClickInsidePopup) {
+    isClickInsidePopup = false; // Reset flag
+    return;
+  }
+
   const selection = window.getSelection();
   const selectedText = selection.toString().trim();
 
@@ -14,65 +70,67 @@ document.addEventListener('mouseup', (event) => {
   // Count the words. We split by one or more whitespace characters.
   const wordCount = selectedText.split(/\s+/).length;
 
-  // Only proceed if 1 to 4 words are selected
-  if (wordCount > 0 && wordCount <= 4) {
+  // --- THIS IS THE CHANGE ---
+  // Only proceed if 1 to 6 words are selected
+  if (wordCount > 0 && wordCount <= 6) {
+  // --- END OF CHANGE ---
     
     const range = selection.getRangeAt(0);
-    const rect = range.getBoundingClientRect(); // Get the bounding box of the selection
-
-    // Calculate position based on the selected text's bounding rectangle
-    const popupX = rect.left + window.scrollX;
-    const popupY = rect.top + window.scrollY; // Position relative to the top of the selected text
+    const rect = range.getBoundingClientRect(); // This is already viewport-relative!
 
     // Create and show the popup
-    showPopup(popupX, popupY, "Loading...");
+    // We pass the viewport-relative coordinates
+    showPopup(rect.left, rect.top, "Loading...");
 
     // Send the selected word to the background script
     chrome.runtime.sendMessage(
       { type: "getAiDefinition", word: selectedText },
-      // --- THIS IS YOUR NEW, UPDATED CALLBACK ---
       (response) => {
         if (!popup) return; // Popup might have been closed while loading
         
-        if (response.error) {
-          updatePopup(response.error);
-        } else {
-          updatePopup(response.definition);
+        const definitionText = response.error ? response.error : response.definition;
+        
+        updatePopup(definitionText); // Show the definition
+        
+        if (!response.error) {
+          createActionButtons(selectedText, definitionText);
         }
                 
-        // After content is loaded, adjust position
         adjustPopupPosition();
         
-        // Re-append popup to ensure it's on top, with a longer delay
-        // to give other extensions time to render their toolbars
         setTimeout(() => {
-          if (popup && document.body.contains(popup)) {
-            popup.remove();
-            document.body.appendChild(popup);
-            // Force a reflow to ensure z-index is applied
-            popup.offsetHeight; 
+          if (popupContainer && document.documentElement.contains(popupContainer)) {
+            popupContainer.remove();
+            document.documentElement.appendChild(popupContainer);
           }
-        }, 150); // Increased delay to 50ms
+        }, 150); // 150ms delay
       }
-      // --- END OF YOUR NEW CALLBACK ---
     );
   } else {
-    // If more than 4 words are selected, ensure the popup is closed
+    // If more than 6 words are selected, ensure the popup is closed
     removePopup();
   }
 });
 
 
-// Close the popup if clicking outside of it, or pressing escape
+// --- Mousedown listener ---
 document.addEventListener('mousedown', (event) => {
-  // Check if the click is outside the popup
-  if (popup && !popup.contains(event.target)) {
-    // We also need to check if the click is *on* the selected text.
-    // If it is, the 'mouseup' listener will handle it.
-    // If it's not, we should close the popup.
-    const selection = window.getSelection();
-    if (selection.isCollapsed || !selection.getRangeAt(0).getBoundingClientRect()) {
-        removePopup();
+  // Reset the flag on every single click
+  isClickInsidePopup = false; 
+  
+  if (popupContainer && popupContainer.shadowRoot) {
+    const path = event.composedPath();
+    const isClickInside = popupContainer.shadowRoot.contains(path[0]);
+
+    if (isClickInside) {
+      // If click starts inside, set the flag so the mouseup listener will ignore it
+      isClickInsidePopup = true;
+    } else {
+      // Click was outside, so check if we should close
+      const selection = window.getSelection();
+      if (selection.isCollapsed) {
+          removePopup();
+      }
     }
   }
 });
@@ -83,64 +141,148 @@ document.addEventListener('keydown', (event) => {
     }
 });
 
-
+// --- UPDATED showPopup ---
 function showPopup(x, y, content) {
   // Remove existing popup if any
   removePopup();
 
+  // Create the isolated container
+  popupContainer = document.createElement('div');
+  popupContainer.style.all = 'initial'; // Reset all inherited styles
+  popupContainer.style.position = 'fixed';
+  popupContainer.style.top = '0';
+  popupContainer.style.left = '0';
+  popupContainer.style.width = '0'; 
+  popupContainer.style.height = '0'; 
+  popupContainer.style.zIndex = '2147483647'; // This wins the z-index war
+  popupContainer.style.pointerEvents = 'none'; // Click-through
+
+  // Attach the shadow root
+  const shadow = popupContainer.attachShadow({ mode: 'open' });
+
+  // Inject our styles
+  const styleTag = document.createElement('style');
+  styleTag.textContent = popupStyles;
+  shadow.appendChild(styleTag);
+
+  // Create the popup element
   popup = document.createElement('div');
   popup.id = 'ai-definition-popup';
-  popup.innerHTML = content;
   
-  // Set initial position at the top-left of the selection
-  // This is temporary until adjustPopupPosition() runs
+  const contentWrapper = document.createElement('div');
+  contentWrapper.id = 'ai-popup-content';
+  contentWrapper.innerHTML = content; // "Loading..."
+  popup.appendChild(contentWrapper);
+  
+  // Set initial position (viewport-relative)
   popup.style.left = `${x}px`;
   popup.style.top = `${y}px`; 
 
-  document.body.appendChild(popup);
+  // Add the popup to the shadow DOM
+  shadow.appendChild(popup);
+  
+  // Add our container to the main page
+  document.documentElement.appendChild(popupContainer);
 }
 
+// --- UPDATED updatePopup ---
 function updatePopup(content) {
   if (popup) {
-    // Convert Markdown bold (**) to HTML <strong>
-    let formattedContent = content.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-    
-    // Convert newlines to <br>
-    formattedContent = formattedContent.replace(/\n/g, '<br>');
-    
-    // Set the formatted HTML
-    popup.innerHTML = formattedContent;
+    const contentWrapper = popup.querySelector('#ai-popup-content');
+    if (contentWrapper) {
+      // Convert Markdown bold (**) to HTML <strong>
+      let formattedContent = content.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+      // Convert newlines to <br>
+      formattedContent = formattedContent.replace(/\n/g, '<br>');
+      
+      // Set the formatted HTML
+      contentWrapper.innerHTML = formattedContent;
+    }
   }
 }
 
+// --- UPDATED function to only add Save button ---
+function createActionButtons(word, definition) {
+  if (!popup) return;
+
+  const actionsContainer = document.createElement('div');
+  actionsContainer.className = 'ai-popup-actions';
+
+  const saveButton = document.createElement('button');
+  saveButton.className = 'ai-popup-button';
+  saveButton.textContent = 'Save';
+
+  // --- Add Listener ---
+  saveButton.addEventListener('click', (e) => {
+    e.stopPropagation(); // Stop click from propagating to mousedown listener
+    
+    // Deselect the text to prevent the main mouseup listener from firing again
+    window.getSelection().removeAllRanges(); 
+
+    // Send message to background to save
+    chrome.runtime.sendMessage({
+      type: "saveToHistory",
+      word: word,
+      definition: definition // Send the raw definition
+    }, (response) => {
+      // Optional: Check if save was successful
+      if (response && response.status === 'saved') {
+        console.log('Definition saved.');
+      }
+    });
+    
+    // --- NEW: Change text to "Saved!" ---
+    saveButton.textContent = 'Saved!';
+    saveButton.disabled = true; // Disable button after clicking
+    saveButton.style.cursor = 'default';
+    saveButton.style.opacity = '0.6';
+
+    // Optional: close popup after a short delay
+    setTimeout(() => {
+        removePopup();
+    }, 800);
+  });
+
+  actionsContainer.appendChild(saveButton);
+  
+  // Add the container to the popup
+  popup.appendChild(actionsContainer);
+}
+
+
+// --- UPDATED removePopup ---
 function removePopup() {
-  if (popup) {
-    popup.remove();
-    popup = null;
+  if (popupContainer) {
+    popupContainer.remove();
+    popupContainer = null;
   }
+  popup = null; // Clear the reference
 }
 
+// --- UPDATED adjustPopupPosition ---
 function adjustPopupPosition() {
     if (!popup) return;
 
     const selection = window.getSelection();
-    if (selection.rangeCount === 0) {
-        removePopup(); // Close popup if selection is lost
+    // We check rangeCount *and* if the selection is collapsed (no text)
+    if (selection.rangeCount === 0 || selection.isCollapsed) {
+        // Don't remove popup if it's in the 'Saved!' state
+        if (popup.querySelector('.ai-popup-button:disabled')) {
+            return;
+        }
+        removePopup(); 
         return;
     }
     
-    const range = selection.getRangeAt(0);
-    const selectionRect = range.getBoundingClientRect(); // Viewport-relative rect of *selection*
-    
-    // We need the popup's dimensions *after* content is loaded
-    const popupRect = popup.getBoundingClientRect();
+    const selectionRect = selection.getRangeAt(0).getBoundingClientRect(); // Viewport-relative
+    const popupRect = popup.getBoundingClientRect(); // Viewport-relative
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight;
 
-    let newLeft = selectionRect.left; // Start by aligning with the left of selection
-    let newTop; // This will be our final viewport-relative top
+    let newLeft = selectionRect.left; // Start with selection's left
+    let newTop; 
 
-    // --- DYNAMIC VERTICAL PLACEMENT ---
+    // --- DYNAMIC VERTICAL PLACEMENT (VIEWPORT-RELATIVE) ---
     // Check if there's enough space *above* the selection
     if (selectionRect.top > popupRect.height + 10) {
         // Yes, place it ABOVE
@@ -151,16 +293,14 @@ function adjustPopupPosition() {
     }
 
     // --- Horizontal Adjustment ---
-    // If it goes off the right side
     if (newLeft + popupRect.width > viewportWidth - 10) {
-        newLeft = viewportWidth - popupRect.width - 10; // 10px margin from right
+        newLeft = viewportWidth - popupRect.width - 10; 
     }
-    // If it goes off the left side
     if (newLeft < 10) {
-        newLeft = 10; // 10px margin from left
+        newLeft = 10; 
     }
     
-    // Apply final positions (we add scrollY/scrollX to convert viewport-relative to document-relative)
-    popup.style.left = `${newLeft + window.scrollX}px`;
-    popup.style.top = `${newTop + window.scrollY}px`;
+    // Apply final positions (NO scrollX/scrollY needed!)
+    popup.style.left = `${newLeft}px`;
+    popup.style.top = `${newTop}px`;
 }
