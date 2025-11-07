@@ -3,7 +3,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const tabs = document.querySelectorAll('.tab-button');
   const tabContents = document.querySelectorAll('.tab-content');
 
-  // --- THIS IS YOUR NEW, CORRECTED LOGIC ---
   tabs.forEach(tab => {
     tab.addEventListener('click', () => {
       // Deactivate all
@@ -20,9 +19,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   });
-  // --- END OF YOUR NEW LOGIC ---
 
-  // --- ADD ORIGINAL AND NEW LISTENERS ---
   restoreSettings();
   loadHistory(); // Load history once on initial page load
   document.getElementById('save').addEventListener('click', saveSettings);
@@ -30,7 +27,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 
-// --- RENAMED save_options TO saveSettings ---
+// --- saveSettings ---
 function saveSettings() {
   const endpoint = document.getElementById('endpoint').value;
   const modelName = document.getElementById('modelName').value;
@@ -52,9 +49,8 @@ function saveSettings() {
   });
 }
 
-// --- RENAMED restore_options TO restoreSettings ---
+// --- restoreSettings ---
 function restoreSettings() {
-  // Set a default prompt
   const defaultPrompt = "Explain the following word or concept in a concise paragraph: {word}";
 
   chrome.storage.sync.get({
@@ -70,10 +66,14 @@ function restoreSettings() {
   });
 }
 
-// --- NEW FUNCTION TO LOAD HISTORY ---
+// --- UPDATED to save/restore scroll position ---
 function loadHistory() {
   const historyList = document.getElementById('history-list');
   const noHistoryMessage = document.getElementById('no-history-message');
+
+  // --- NEW: Save current scroll position ---
+  const oldScrollTop = historyList.scrollTop;
+
   historyList.innerHTML = ''; // Clear old list
 
   chrome.storage.local.get(['history'], (result) => {
@@ -90,7 +90,6 @@ function loadHistory() {
         const itemElement = document.createElement('div');
         itemElement.className = 'history-item';
 
-        // Format the definition just like in content.js
         let formattedDefinition = item.definition
           .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
           .replace(/\n/g, '<br>');
@@ -99,25 +98,60 @@ function loadHistory() {
           <div class="history-word">${escapeHTML(item.word)}</div>
           <div class="history-definition">${formattedDefinition}</div>
         `;
+        
+        const deleteButton = document.createElement('button');
+        deleteButton.className = 'delete-item-btn';
+        deleteButton.innerHTML = '&#128465;'; // HTML entity for dustbin
+        deleteButton.title = 'Delete this item';
+        deleteButton.dataset.timestamp = item.timestamp; 
+        deleteButton.addEventListener('click', handleDeleteClick);
+        
+        itemElement.appendChild(deleteButton);
         historyList.appendChild(itemElement);
       });
     }
+
+    // --- NEW: Restore scroll position after list is rebuilt ---
+    historyList.scrollTop = oldScrollTop;
   });
 }
 
-// --- NEW FUNCTION TO CLEAR HISTORY ---
+// --- Handle click on individual delete button ---
+function handleDeleteClick(event) {
+  const btn = event.currentTarget;
+  const timestamp = btn.dataset.timestamp;
+  
+  if (timestamp) {
+    deleteHistoryItem(timestamp);
+  }
+}
+
+// --- Delete a single item from history ---
+function deleteHistoryItem(timestamp) {
+  chrome.storage.local.get(['history'], (result) => {
+    let history = result.history || [];
+    
+    const newHistory = history.filter(item => item.timestamp !== timestamp);
+
+    chrome.storage.local.set({ history: newHistory }, () => {
+      // Refresh the list (which will now save scroll)
+      loadHistory(); 
+    });
+  });
+}
+
+
+// --- clearHistory ---
 function clearHistory() {
-  // Confirmation dialog
   if (confirm("Are you sure you want to clear all history? This cannot be undone.")) {
     chrome.storage.local.set({ history: [] }, () => {
-      // Reload the history list (which will now be empty)
       loadHistory();
       console.log("History cleared.");
     });
   }
 }
 
-// --- NEW HELPER TO PREVENT XSS ---
+// --- escapeHTML ---
 function escapeHTML(str) {
   return str.replace(/[&<>"']/g, function(m) {
     return {
