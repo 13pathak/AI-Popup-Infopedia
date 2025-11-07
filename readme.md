@@ -1,7 +1,3 @@
-Here is a comprehensive `readme.md` file for your extension, detailing all the features you've built.
-
----
-
 # AI Context Helper
 
 **AI Context Helper** is a browser extension that gives you instant, AI-powered explanations for any word or concept you select on the web. Get definitions from powerful online models like Gemini or connect to your own local Ollama server for 100% offline use.
@@ -72,3 +68,4 @@ This is the best option for privacy and offline access.
 2.  Click the **"History"** tab.
 3.  Here you will see a list of all the words and definitions you have saved.
 4.  You can clear all entries by clicking the **"Clear All History"** button.
+
