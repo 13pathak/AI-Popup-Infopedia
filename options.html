@@ -11,7 +11,7 @@
         small { color: #888; }
         button { padding: 8px 12px; cursor: pointer; }
 
-        /* --- NEW TAB STYLES --- */
+        /* --- TAB STYLES --- */
         .tab-nav {
             display: flex;
             border-bottom: 1px solid #555;
@@ -41,7 +41,7 @@
             border: none;
         }
         
-        /* --- NEW HISTORY STYLES --- */
+        /* --- HISTORY STYLES --- */
         #history-list {
             max-height: 400px;
             overflow-y: auto;
@@ -52,6 +52,8 @@
         .history-item {
             border-bottom: 1px solid #444;
             padding: 10px 5px;
+            padding-right: 35px; /* Add space for the delete button */
+            position: relative; /* --- NEW: Allows absolute positioning inside --- */
         }
         .history-item:last-child {
             border-bottom: none;
@@ -65,6 +67,26 @@
             font-size: 0.95em;
             line-height: 1.4;
         }
+        
+        /* --- NEW: Style for the delete button --- */
+        .delete-item-btn {
+            position: absolute;
+            top: 10px;
+            right: 8px;
+            background: none;
+            border: none;
+            font-size: 1.1em; /* Make emoji a good size */
+            cursor: pointer;
+            color: #aaa; /* Default color */
+            padding: 2px 5px;
+            border-radius: 4px;
+            line-height: 1;
+        }
+        .delete-item-btn:hover {
+            color: #d9534f; /* Red on hover */
+            background-color: #444;
+        }
+        /* --- END NEW --- */
     </style>
 </head>
 <body>
