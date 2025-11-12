@@ -35,11 +35,6 @@
         .tab-content.active {
             display: block; /* Shown when active */
         }
-        #clear-history {
-            background-color: #d9534f;
-            color: white;
-            border: none;
-        }
         
         /* --- HISTORY STYLES --- */
         #history-list {
@@ -52,8 +47,8 @@
         .history-item {
             border-bottom: 1px solid #444;
             padding: 10px 5px;
-            padding-right: 35px; /* Add space for the delete button */
-            position: relative; /* --- NEW: Allows absolute positioning inside --- */
+            padding-right: 65px; 
+            position: relative; 
         }
         .history-item:last-child {
             border-bottom: none;
@@ -68,23 +63,102 @@
             line-height: 1.4;
         }
         
-        /* --- NEW: Style for the delete button --- */
         .delete-item-btn {
             position: absolute;
             top: 10px;
             right: 8px;
             background: none;
             border: none;
-            font-size: 1.1em; /* Make emoji a good size */
+            font-size: 1.1em; 
             cursor: pointer;
-            color: #aaa; /* Default color */
+            color: #aaa; 
             padding: 2px 5px;
             border-radius: 4px;
             line-height: 1;
         }
         .delete-item-btn:hover {
-            color: #d9534f; /* Red on hover */
+            color: #d9534f; 
             background-color: #444;
+        }
+        
+        .edit-item-btn {
+            position: absolute;
+            top: 10px;
+            right: 38px; 
+            background: none;
+            border: none;
+            font-size: 1.1em;
+            cursor: pointer;
+            color: #aaa;
+            padding: 2px 5px;
+            border-radius: 4px;
+            line-height: 1;
+        }
+        .edit-item-btn:hover {
+            color: #337ab7; 
+            background-color: #444;
+        }
+
+        .history-item-editing {
+            padding-right: 5px;
+        }
+        .edit-word-input {
+            width: 100%;
+            padding: 5px;
+            box-sizing: border-box;
+            font-size: 1.1em;
+            font-weight: bold;
+            margin-bottom: 8px;
+        }
+        .edit-definition-textarea {
+            width: 100%;
+            min-height: 100px;
+            resize: vertical;
+            padding: 5px;
+            box-sizing: border-box;
+            font-size: 0.95em;
+            line-height: 1.4;
+        }
+        .edit-actions {
+            margin-top: 10px;
+        }
+        .edit-actions button {
+            margin-right: 8px;
+            padding: 5px 10px;
+        }
+        .save-edit-btn {
+            background-color: #5cb85c;
+            color: white;
+            border: none;
+        }
+        .cancel-edit-btn {
+            background-color: #777;
+            color: white;
+            border: none;
+        }
+
+        /* --- NEW: Import/Export Styles --- */
+        #history-io {
+            margin-top: 20px;
+            padding: 10px;
+            border: 1px solid #555;
+            border-radius: 4px;
+        }
+        #history-io button {
+            background-color: #337ab7;
+            color: white;
+            border: none;
+            margin-right: 10px;
+        }
+        #io-status {
+            margin-top: 10px;
+            font-size: 0.9em;
+        }
+        #clear-history {
+            background-color: #d9534f;
+            color: white;
+            border: none;
+            margin-top: 20px;
         }
         /* --- END NEW --- */
     </style>
@@ -123,7 +197,16 @@
 
     <div id="history-content" class="tab-content">
         <h2>Search History</h2>
+
+        <div id="history-io">
+            <h4>Import / Export</h4>
+            <button id="export-history">Export History (.csv)</button>
+            <button id="import-history">Import History (.csv)</button>
+            <input type="file" id="import-file-input" accept=".csv" style="display: none;">
+            <div id="io-status"></div>
+        </div>
         <button id="clear-history">Clear All History</button>
+        
         <div id="history-list-container">
             <p id="no-history-message" style="display: none;">No history yet.</p>
             <div id="history-list"></div>
