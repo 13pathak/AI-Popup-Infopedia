@@ -1,71 +1,71 @@
-# AI Context Helper
+# AI Popup Infopedia
 
-**AI Context Helper** is a browser extension that gives you instant, AI-powered explanations for any word or concept you select on the web. Get definitions from powerful online models like Gemini or connect to your own local Ollama server for 100% offline use.
+A simple browser extension to get instant AI explanations for any word or phrase (1-6 words) you select. Save your favorite definitions, edit them, and even import or export your entire history.
 
-## Features
-
-* **Contextual Popups:** Select 1 to 6 words on any webpage to instantly summon a popup with an AI-generated explanation.
-* **Smart Positioning:** The popup automatically appears above or below your selection, avoiding on-screen clutter.
-* **Flexible AI Backend:** The options page allows you to connect to any OpenAI-compatible API, including:
-    * **Online APIs:** Such as the Google Gemini API (via a compatible endpoint).
-    * **Offline Mode:** Connect to a local [Ollama](https://ollama.com/) server for complete privacy and offline functionality.
-* **Custom Prompts:** Tailor the AI's responses to your needs. Use the `{word}` placeholder in the options to create any prompt you want (e.g., `"Explain {word} to a 5-year-old"` or `"Translate {word} to Spanish"`).
-* **Save to History:** Like a definition? Click the "Save" button in the popup to store the word and its explanation.
-* **View History:** A "History" tab in the options page lets you review all your saved definitions.
-* **Clear History:** Easily clear your entire saved history with a single click.
-* **Markdown Support:** Renders bold text (`**...**`) and newlines from the AI's response for better readability.
-* **Isolated Styling:** Uses a Shadow DOM to ensure the popup's style never conflicts with the host website's CSS.
+> **Note:** Please add a screenshot or GIF here! A short recording of the selection-to-popup-to-save flow is highly recommended.
+>
+> `![AI Popup Infopedia in action](link_to_your_screenshot.gif)`
 
 ---
 
-## How to Use
+## 🚀 Features
 
-1.  **Select Text:** On any webpage, highlight a word or short phrase (up to 6 words).
-2.  **Get Definition:** The AI helper popup will appear instantly with a "Loading..." message, which is then replaced by the AI's definition.
-3.  **Save (Optional):** Click the "Save" button at the bottom of the popup to add the definition to your history.
-4.  **Dismiss:** Click anywhere outside the popup (or press the `Esc` key) to close it.
-
----
-
-## Configuration
-
-To get started, you must configure your AI endpoint.
-
-1.  Click the **AI Context Helper** icon in your Chrome toolbar to open the **Options** page.
-2.  Go to the **Settings** tab.
-
-### Option 1: Using a Local Ollama Server (Recommended for Offline Use)
-
-This is the best option for privacy and offline access.
-
-1.  Ensure your Ollama server is running.
-2.  **Important:** You must configure your Ollama server to accept requests from the extension. On Windows, this is done by setting an environment variable:
-    * **Variable name:** `OLLAMA_ORIGINS`
-    * **Variable value:** `chrome-extension://*`
-    * *Remember to fully quit and restart the Ollama service after setting this variable.*
-3.  In the extension's **Settings** tab, enter the following:
-    * **Endpoint URL:** `http://localhost:11434/v1/chat/completions`
-    * **Model Name:** `gemma3:1b` (or any other model you have, like `llama3`)
-    * **API Key:** (Leave this field blank)
-4.  Click **"Save Settings"**.
-
-### Option 2: Using an Online API (e.g., Google Gemini)
-
-1.  Obtain an API key from your chosen AI provider (e.g., Google AI Studio).
-2.  Find the correct OpenAI-compatible **Endpoint URL** for the service.
-    * *For Google Gemini, this might look like: `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions`*
-3.  In the extension's **Settings** tab, enter the following:
-    * **Endpoint URL:** The URL from your provider.
-    * **Model Name:** The model you wish to use (e.g., `gemini-2.0-flash`).
-    * **API Key:** Your secret API key.
-4.  Click **"Save Settings"**.
+* ⚡ **Instant Definitions:** Select 1-6 words on any webpage to get a concise, AI-powered explanation in a clean popup.
+* ⚙️ **Custom AI Backend:** Configure the extension to use any OpenAI-compatible endpoint. Perfect for local models via **Ollama**, **LM Studio**, or cloud services like **Google's Gemini**.
+* 📝 **Save for Later:** Click the "Save" button on any definition to add it to your personal history list.
+* 🎨 **Custom Prompts:** Tailor the AI's responses from the options page. (e.g., "Explain {word} like I'm five" or "Translate {word} to Hindi").
+* 📚 **Full-Featured History Page:**
+    * **View & Edit:** See your full history. Click any word or definition to edit it directly in-place.
+    * **Delete:** Remove individual items or clear the entire list with a single click.
+    * **Export:** Download your complete history (including your edits) as a `.csv` file for backup or use in other apps.
+    * **Import:** Upload a `.csv` file to merge with your existing history. The importer is robust and automatically handles:
+        * Newline characters inside definitions.
+        * Non-UTF-8 character encodings (like `windows-1252` from Excel).
+        * Missing timestamps (it generates new ones).
 
 ---
 
-## View Your History
+## 🛠️ Installation & Configuration
 
-1.  Click the extension icon in your toolbar to open the **Options** page.
-2.  Click the **"History"** tab.
-3.  Here you will see a list of all the words and definitions you have saved.
-4.  You can clear all entries by clicking the **"Clear All History"** button.
+This extension requires you to provide your own AI endpoint.
 
+### 1. Installation (from Source)
+
+1.  Download this project's folder.
+2.  Open your browser and navigate to `chrome://extensions`.
+3.  Enable **"Developer mode"** (usually a toggle in the top-right corner).
+4.  Click the **"Load unpacked"** button.
+5.  Select the folder containing this project (the one with `manifest.json` inside).
+
+### 2. Configuration (Required)
+
+1.  Click the "AI Popup Infopedia" icon in your browser's toolbar. This will open the **Settings** page.
+2.  Fill in the "Settings" tab:
+    * **Endpoint URL:** The API URL for your AI service.
+        * *Ollama (local):* `http://localhost:11434/v1/chat/completions`
+        * *Google AI (Gemini):* `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions`
+    * **Model Name:** The exact model you want to use.
+        * *Ollama (local):* `llama3`, `mistral`, etc.
+        * *Google AI (Gemini):* `gemini-2.0-flash`
+    * **API Key (Optional):** Your API key, if required by your service (like Google AI).
+    * **Custom Prompt (Optional):** The default is `Explain the following word or concept in a concise paragraph: {word}`. You can change this, but **must** include `{word}`.
+3.  Click **"Save Settings"**. You are now ready to use the extension!
+
+---
+
+## 💡 How to Use
+
+1.  **Highlight:** On any webpage, select a short piece of text (1-6 words).
+2.  **Read:** The AI popup will appear with the definition.
+3.  **Save:** Click "Save" to add the item to your history.
+4.  **Manage:** Click the extension icon in your toolbar to visit the "History" tab to view, edit, or manage your saved items.
+
+---
+
+## 💻 Technology
+
+* **Manifest V3:** The modern standard for Chrome extensions.
+* **Vanilla JavaScript (ES6+):** No frameworks for a lightweight and fast experience.
+* **Shadow DOM:** The popup is injected into a Shadow DOM to prevent website styles from breaking it (and vice-versa).
+* **HTML5 & CSS3:** For the popup and options page.
+* **`chrome.storage` API:** Uses `storage.sync` for settings and `storage.local` for history.
