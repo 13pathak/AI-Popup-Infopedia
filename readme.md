@@ -2,10 +2,6 @@
 
 A simple browser extension to get instant AI explanations for any word or phrase (1-6 words) you select. Save your favorite definitions, edit them, and even import or export your entire history.
 
-> **Note:** Please add a screenshot or GIF here! A short recording of the selection-to-popup-to-save flow is highly recommended.
->
-> `![AI Popup Infopedia in action](link_to_your_screenshot.gif)`
-
 ---
 
 ## 🚀 Features
@@ -69,3 +65,4 @@ This extension requires you to provide your own AI endpoint.
 * **Shadow DOM:** The popup is injected into a Shadow DOM to prevent website styles from breaking it (and vice-versa).
 * **HTML5 & CSS3:** For the popup and options page.
 * **`chrome.storage` API:** Uses `storage.sync` for settings and `storage.local` for history.
+
