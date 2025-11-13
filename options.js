@@ -15,16 +15,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Reload history every time you open the History tab
       if (tab.dataset.tab === "history-content") {
-        loadHistory();
+        loadLists(); // This will in turn load history for the selected list
       }
     });
   });
 
-  restoreSettings();
-  loadHistory(); // Load history once on initial page load
-  document.getElementById('save').addEventListener('click', saveSettings);
-  document.getElementById('clear-history').addEventListener('click', clearHistory);
+  loadModels();
+  loadLists(); // Load lists on initial page load
+  loadGlobalPrompt();
 
+  // --- REVISED: Model Management Event Listeners ---
+  document.getElementById('add-model-btn').addEventListener('click', showModelForm);
+  document.getElementById('edit-model-btn').addEventListener('click', editSelectedModel);
+  document.getElementById('delete-model-btn').addEventListener('click', deleteSelectedModel);
+  document.getElementById('model-select').addEventListener('change', (e) => setDefaultModel(e.target.value));
+  document.getElementById('save-model-btn').addEventListener('click', saveModel);
+  document.getElementById('save-prompt-btn').addEventListener('click', saveGlobalPrompt);
+  document.getElementById('cancel-model-btn').addEventListener('click', hideModelForm);
   // --- Event Listeners for Import/Export ---
   document.getElementById('export-history').addEventListener('click', exportHistory);
   document.getElementById('import-history').addEventListener('click', () => {
@@ -32,57 +39,467 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('import-file-input').click();
   });
   document.getElementById('import-file-input').addEventListener('change', importHistory);
+
+  // --- NEW: Event Listeners for List Management ---
+  document.getElementById('list-select').addEventListener('change', (e) => loadHistory(e.target.value));
+  document.getElementById('add-list-btn').addEventListener('click', addList);
+  document.getElementById('rename-list-btn').addEventListener('click', renameList);
+  document.getElementById('delete-list-btn').addEventListener('click', deleteList);
+
+  // --- NEW: Event Listeners for List Reordering ---
+  document.getElementById('move-list-up-btn').addEventListener('click', () => moveList('up'));
+  document.getElementById('move-list-down-btn').addEventListener('click', () => moveList('down'));
+
+
+  // --- NEW: Event Listeners for Global Import/Export ---
+  document.getElementById('export-all-history').addEventListener('click', exportAllHistory);
+  document.getElementById('import-all-history').addEventListener('click', () => {
+    document.getElementById('import-file-input').click();
+  });
+
+  // --- NEW: Event Listeners for Clear Actions ---
+  document.getElementById('clear-history').addEventListener('click', clearAllHistory);
+  document.getElementById('clear-list-history').addEventListener('click', clearListHistory);
+
+  // --- NEW: Event Listeners for Global Settings I/O ---
+  document.getElementById('export-all-settings-btn').addEventListener('click', exportAllSettings);
+  document.getElementById('import-all-settings-btn').addEventListener('click', () => {
+    document.getElementById('import-settings-file-input').click();
+  });
+  document.getElementById('import-settings-file-input').addEventListener('change', importAllSettings);
 });
 
 
-// --- saveSettings ---
-function saveSettings() {
-  const endpoint = document.getElementById('endpoint').value;
-  const modelName = document.getElementById('modelName').value;
-  const apiKey = document.getElementById('apiKey').value;
-  const customPrompt = document.getElementById('customPrompt').value; 
+// --- NEW: MODEL MANAGEMENT ---
 
-  chrome.storage.sync.set({
-    endpointUrl: endpoint,
-    modelName: modelName,
-    apiKey: apiKey,
-    customPrompt: customPrompt
-  }, function() {
-    // Update status to let user know options were saved.
-    const status = document.getElementById('status');
-    status.textContent = 'Options saved.';
-    setTimeout(function() {
-      status.textContent = '';
-    }, 1000);
-  });
+function showModelForm(isEdit = false, model = {}) {
+    document.getElementById('form-title').textContent = isEdit ? 'Edit Model' : 'Add New Model';
+    document.getElementById('model-id').value = model.id || '';
+    document.getElementById('configName').value = model.name || '';
+    document.getElementById('endpoint').value = model.endpointUrl || 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
+    document.getElementById('modelName').value = model.modelName || 'gemini-1.5-flash-latest';
+    document.getElementById('apiKey').value = model.apiKey || '';
+
+    document.getElementById('model-form-container').style.display = 'block';
+    document.getElementById('model-selection-container').style.display = 'none';
+    document.getElementById('global-prompt-container').style.display = 'none';
 }
 
-// --- restoreSettings ---
-function restoreSettings() {
-  const defaultPrompt = "Explain the following word or concept in a concise paragraph: {word}";
-
-  chrome.storage.sync.get({
-    endpointUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
-    modelName: 'gemini-2.0-flash',
-    apiKey: '',
-    customPrompt: defaultPrompt
-  }, function(items) {
-    document.getElementById('endpoint').value = items.endpointUrl;
-    document.getElementById('modelName').value = items.modelName;
-    document.getElementById('apiKey').value = items.apiKey;
-    document.getElementById('customPrompt').value = items.customPrompt;
-  });
+function hideModelForm() {
+    document.getElementById('model-form-container').style.display = 'none';
+    document.getElementById('model-selection-container').style.display = 'flex';
+    document.getElementById('global-prompt-container').style.display = 'block';
+    // Clear form fields
+    document.getElementById('model-id').value = '';
+    document.getElementById('configName').value = '';
+    document.getElementById('endpoint').value = '';
+    document.getElementById('modelName').value = '';
+    document.getElementById('apiKey').value = '';
 }
+
+function saveModel() {
+    const modelId = document.getElementById('model-id').value;
+    const newModelConfig = {
+        id: modelId || `model_${new Date().getTime()}`,
+        name: document.getElementById('configName').value.trim(),
+        endpointUrl: document.getElementById('endpoint').value.trim(),
+        modelName: document.getElementById('modelName').value.trim(),
+        apiKey: document.getElementById('apiKey').value.trim()
+    };
+
+    if (!newModelConfig.name || !newModelConfig.endpointUrl || !newModelConfig.modelName) {
+        updateStatus('Configuration Name, Endpoint URL, and Model Name are required.', 'error');
+        return;
+    }
+
+    chrome.storage.sync.get(['models', 'defaultModelId'], (data) => {
+        let models = data.models || [];
+        if (modelId) { // Editing existing
+            models = models.map(m => m.id === modelId ? newModelConfig : m);
+        } else { // Adding new
+            models.push(newModelConfig);
+        }
+
+        // If this is the very first model, make it the default
+        let defaultModelId = data.defaultModelId;
+        if (!defaultModelId && models.length > 0) {
+            defaultModelId = models[0].id;
+        }
+
+        chrome.storage.sync.set({ models, defaultModelId }, () => {
+            updateStatus('Model saved successfully!', 'success');
+            hideModelForm();
+            loadModels();
+        });
+    });
+}
+
+function loadModels() {
+    chrome.storage.sync.get(['models', 'defaultModelId'], (data) => {
+        const models = data.models || [];
+        const defaultModelId = data.defaultModelId;
+        const selectEl = document.getElementById('model-select');
+        const noModelsMsg = document.getElementById('no-models-message');
+        const editModelBtn = document.getElementById('edit-model-btn');
+        const deleteModelBtn = document.getElementById('delete-model-btn');
+        selectEl.innerHTML = '';
+
+        if (models.length === 0) {
+            noModelsMsg.style.display = 'block';
+            selectEl.style.display = 'none'; // Hide the select dropdown
+            editModelBtn.style.display = 'none'; // Hide edit button
+            deleteModelBtn.style.display = 'none'; // Hide delete button
+        } else {
+            noModelsMsg.style.display = 'none';
+            selectEl.style.display = 'block'; // Show the select dropdown
+            editModelBtn.style.display = 'inline-block'; // Show edit button
+            deleteModelBtn.style.display = 'inline-block'; // Show delete button
+
+            models.forEach(model => {
+                const option = document.createElement('option');
+                option.value = model.id;
+                option.textContent = model.name;
+                if (model.id === defaultModelId) {
+                    option.selected = true;
+                }
+                selectEl.appendChild(option);
+            });
+        }
+    });
+}
+
+function editSelectedModel() {
+    const selectedId = document.getElementById('model-select').value;
+    if (!selectedId) {
+        alert("No model selected to edit.");
+        return;
+    }
+    chrome.storage.sync.get(['models'], (data) => {
+        const modelToEdit = (data.models || []).find(m => m.id === selectedId);
+        if (modelToEdit) {
+            showModelForm(true, modelToEdit);
+        }
+    });
+}
+
+function deleteSelectedModel() {
+    const modelIdToDelete = document.getElementById('model-select').value;
+    if (!modelIdToDelete) {
+        alert("No model selected to delete.");
+        return;
+    }
+
+    if (!confirm('Are you sure you want to delete the selected model configuration?')) return;
+
+    chrome.storage.sync.get(['models', 'defaultModelId'], (data) => {
+        let models = data.models || [];
+        let defaultModelId = data.defaultModelId;
+
+        models = models.filter(m => m.id !== modelIdToDelete);
+
+        // If the deleted model was the default, pick a new default
+        if (defaultModelId === modelIdToDelete) {
+            defaultModelId = models.length > 0 ? models[0].id : null;
+        }
+
+        chrome.storage.sync.set({ models, defaultModelId }, () => {
+            updateStatus('Model deleted.', 'success');
+            loadModels();
+        });
+    });
+}
+
+function setDefaultModel(modelId) {
+    chrome.storage.sync.set({ defaultModelId: modelId }, () => {
+        updateStatus('Default model updated.', 'success');
+        loadModels();
+    });
+}
+
+function saveGlobalPrompt() {
+    const customPrompt = document.getElementById('customPrompt').value;
+    chrome.storage.sync.set({ globalCustomPrompt: customPrompt }, () => {
+        updateStatus('Global prompt saved!', 'success');
+    });
+}
+
+function loadGlobalPrompt() {
+    const defaultPrompt = "Explain {word} to a high schooler in 500 characters or less.";
+    chrome.storage.sync.get({
+        globalCustomPrompt: defaultPrompt
+    }, (items) => {
+        document.getElementById('customPrompt').value = items.globalCustomPrompt;
+    });
+}
+
+function updateStatus(message, type = 'info') {
+    const statusEl = document.getElementById('status');
+    statusEl.textContent = message;
+    statusEl.style.color = type === 'error' ? '#d9534f' : (type === 'success' ? '#5cb85c' : '#eee');
+    setTimeout(() => {
+        statusEl.textContent = '';
+    }, 3000);
+}
+
+// ---
+// --- NEW: GLOBAL SETTINGS IMPORT/EXPORT
+// ---
+
+async function exportAllSettings() {
+  try {
+    // 1. Get all data from sync storage (models, prompts)
+    const syncData = await new Promise(resolve => chrome.storage.sync.get(null, resolve));
+
+    // 2. Create the settings object
+    const allSettings = {
+      syncData: syncData,
+      exportFormatVersion: "1.0",
+      exportedAt: new Date().toISOString()
+    };
+
+    // 3. Create and download the JSON file
+    const jsonString = JSON.stringify(allSettings, null, 2);
+    const blob = new Blob([jsonString], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    const date = new Date().toISOString().slice(0, 10);
+    link.download = `ai_infopedia_models_prompts_${date}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    updateGlobalIOStatus('All settings exported successfully!', 'success');
+  } catch (error) {
+    console.error("Error exporting models & prompts:", error);
+    updateGlobalIOStatus(`Error exporting settings: ${error.message}`, 'error');
+  }
+}
+
+function importAllSettings(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    try {
+      const settings = JSON.parse(e.target.result);
+
+      // Basic validation
+      if (!settings.syncData) {
+        throw new Error("Invalid settings file. Missing required 'syncData'.");
+      }
+
+      // Confirmation from the user
+      if (!confirm("Are you sure you want to import settings? This will overwrite all current models and prompts.")) {
+        updateGlobalIOStatus('Import cancelled.', 'info');
+        return;
+      }
+
+      // Clear existing sync storage before importing
+      await new Promise(resolve => chrome.storage.sync.clear(resolve));
+
+      // Import new data into sync storage
+      await new Promise(resolve => chrome.storage.sync.set(settings.syncData, resolve));
+
+      updateGlobalIOStatus('Settings imported successfully! Reloading...', 'success');
+
+      // Reload only the relevant data on the page
+      setTimeout(() => {
+        loadModels();
+        loadGlobalPrompt();
+      }, 1000);
+
+    } catch (error) {
+      console.error("Error importing settings:", error);
+      updateGlobalIOStatus(`Error importing settings: ${error.message}`, 'error');
+    } finally {
+      // Reset file input so the same file can be imported again
+      event.target.value = null;
+    }
+  };
+
+  reader.onerror = () => {
+    updateGlobalIOStatus("Error reading file.", "error");
+  };
+
+  reader.readAsText(file);
+}
+
+function updateGlobalIOStatus(message, type = 'info') {
+    const statusEl = document.getElementById('global-io-status');
+    if (!statusEl) return;
+
+    statusEl.textContent = message;
+    statusEl.style.color = type === 'error' ? '#d9534f' : (type === 'success' ? '#5cb85c' : '#eee');
+    
+    setTimeout(() => {
+        statusEl.textContent = '';
+    }, 5000);
+}
+
+
+// ---
+// --- LIST MANAGEMENT FUNCTIONS
+// ---
+
+function loadLists() {
+    chrome.storage.local.get({ wordLists: [] }, (data) => {
+        let lists = data.wordLists;
+        const listSelect = document.getElementById('list-select');
+        const renameBtn = document.getElementById('rename-list-btn');
+        const deleteBtn = document.getElementById('delete-list-btn');
+        const moveUpBtn = document.getElementById('move-list-up-btn');
+        const moveDownBtn = document.getElementById('move-list-down-btn');
+        const clearListBtn = document.getElementById('clear-list-history');
+        const currentVal = listSelect.value;
+        listSelect.innerHTML = '';
+
+        if (lists.length === 0) {
+            // --- NEW: Handle empty state ---
+            renameBtn.disabled = true;
+            deleteBtn.disabled = true;
+            moveUpBtn.disabled = true;
+            moveDownBtn.disabled = true;
+            clearListBtn.style.display = 'none'; // Hide button
+            loadHistory(null); // Load history with no list ID
+        } else {
+            renameBtn.disabled = false;
+            deleteBtn.disabled = false;
+            
+            // --- NEW: Show and update clear list button ---
+            const selectedListName = listSelect.options[listSelect.selectedIndex]?.text || lists[0].name;
+            clearListBtn.textContent = `Clear Selected List`;
+            clearListBtn.style.display = 'inline-block';
+            // Buttons will be enabled/disabled later based on selection
+        }
+
+        lists.forEach(list => {
+            const option = document.createElement('option');
+            option.value = list.id;
+            option.textContent = list.name;
+            listSelect.appendChild(option);
+        });
+
+        // Try to re-select the previously selected list
+        if (currentVal && listSelect.querySelector(`option[value="${currentVal}"]`)) {
+            listSelect.value = currentVal;
+        }
+
+        // --- NEW: Disable/Enable move buttons based on selection ---
+        const selectedIndex = listSelect.selectedIndex;
+        const listCount = lists.length;
+        moveUpBtn.disabled = selectedIndex <= 0;
+        moveDownBtn.disabled = selectedIndex >= listCount - 1 || listCount <= 1;
+
+        // --- NEW: Update clear list button text on change ---
+        if (lists.length > 0) {
+            clearListBtn.textContent = `Clear Selected List`;
+        }
+
+        // Load history for the currently selected list
+        loadHistory(listSelect.value);
+    });
+}
+
+function addList() {
+    const listName = prompt("Enter the name for the new list:");
+    if (listName && listName.trim()) {
+        chrome.storage.local.get({ wordLists: [] }, (data) => {
+            const lists = data.wordLists;
+            const newList = { id: `list_${new Date().getTime()}`, name: listName.trim() };
+            lists.push(newList);
+            chrome.storage.local.set({ wordLists: lists }, () => {
+                updateStatus('List created!', 'success');
+                loadLists();
+            });
+        });
+    }
+}
+
+function renameList() {
+    const listSelect = document.getElementById('list-select');
+    const listId = listSelect.value;
+    if (!listId) return;
+
+    const currentName = listSelect.options[listSelect.selectedIndex].text;
+    const newName = prompt("Enter the new name for the list:", currentName);
+
+    if (newName && newName.trim() && newName.trim() !== currentName) {
+        chrome.storage.local.get({ wordLists: [] }, (data) => {
+            const lists = data.wordLists.map(list => 
+                list.id === listId ? { ...list, name: newName.trim() } : list
+            );
+            chrome.storage.local.set({ wordLists: lists }, () => {
+                updateStatus('List renamed!', 'success');
+                loadLists();
+            });
+        });
+    }
+}
+
+function deleteList() {
+    const listSelect = document.getElementById('list-select');
+    const listId = listSelect.value;
+    if (!listId || listSelect.options.length <= 1) {
+        alert("You cannot delete the last remaining list.");
+        return;
+    }
+
+    if (confirm("Are you sure you want to delete this list? Words in it will NOT be deleted but will become unlisted.")) {
+        chrome.storage.local.get({ wordLists: [] }, (data) => {
+            const lists = data.wordLists.filter(list => list.id !== listId);
+            chrome.storage.local.set({ wordLists: lists }, () => {
+                updateStatus('List deleted.', 'success');
+                loadLists();
+            });
+        });
+    }
+}
+
+// --- NEW: Function to move a list up or down ---
+function moveList(direction) {
+    const listSelect = document.getElementById('list-select');
+    const selectedId = listSelect.value;
+    if (!selectedId) return;
+
+    chrome.storage.local.get({ wordLists: [] }, (data) => {
+        let lists = data.wordLists;
+        const index = lists.findIndex(list => list.id === selectedId);
+
+        if (direction === 'up' && index > 0) {
+            // Swap with the element before it
+            [lists[index - 1], lists[index]] = [lists[index], lists[index - 1]];
+        } else if (direction === 'down' && index < lists.length - 1) {
+            // Swap with the element after it
+            [lists[index + 1], lists[index]] = [lists[index], lists[index + 1]];
+        } else {
+            return; // Can't move further
+        }
+
+        // Save the reordered list and reload the UI
+        chrome.storage.local.set({ wordLists: lists }, () => {
+            // We don't need to show a status message for this, the change is visual
+            // The `loadLists` function will preserve the selection and update the UI
+            loadLists();
+        });
+    });
+}
+
 
 // --- loadHistory ---
-function loadHistory() {
+function loadHistory(listId) {
   const historyList = document.getElementById('history-list');
   const noHistoryMessage = document.getElementById('no-history-message');
-  const oldScrollTop = historyList.scrollTop;
   historyList.innerHTML = ''; 
 
   chrome.storage.local.get(['history'], (result) => {
-    const history = result.history || [];
+    // If no listId is provided (e.g., no lists exist), show no items.
+    // Otherwise, filter for the selected list.
+    const history = listId 
+      ? (result.history || []).filter(item => item.listId === listId)
+      : [];
 
     if (history.length === 0) {
       noHistoryMessage.style.display = 'block';
@@ -95,6 +512,7 @@ function loadHistory() {
         const itemElement = document.createElement('div');
         itemElement.className = 'history-item';
         itemElement.dataset.timestamp = item.timestamp;
+        itemElement.dataset.listId = item.listId; // Add listId to the element
 
         let formattedDefinition = item.definition
           .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
@@ -127,7 +545,6 @@ function loadHistory() {
         historyList.appendChild(itemElement);
       });
     }
-    historyList.scrollTop = oldScrollTop;
   });
 }
 
@@ -135,6 +552,7 @@ function loadHistory() {
 function handleEditClick(event) {
   const btn = event.currentTarget;
   const itemElement = btn.closest('.history-item');
+  const currentListId = itemElement.dataset.listId;
 
   if (itemElement.classList.contains('history-item-editing')) {
     return;
@@ -158,6 +576,27 @@ function handleEditClick(event) {
   editWordInput.className = 'edit-word-input';
   editWordInput.value = currentWord;
 
+  // --- NEW: Create and populate list selector ---
+  const listSelector = document.createElement('select');
+  listSelector.className = 'edit-list-selector';
+
+  // This container will hold the inputs and selector
+  const editControlsContainer = document.createElement('div');
+  editControlsContainer.className = 'edit-controls'; // For potential future styling
+
+  chrome.storage.local.get({ wordLists: [] }, (data) => {
+    data.wordLists.forEach(list => {
+      const option = document.createElement('option');
+      option.value = list.id;
+      option.textContent = list.name;
+      if (list.id === currentListId) {
+        option.selected = true;
+      }
+      listSelector.appendChild(option);
+    });
+    editControlsContainer.appendChild(listSelector); // Add selector to container
+  });
+
   const editDefinitionTextarea = document.createElement('textarea');
   editDefinitionTextarea.className = 'edit-definition-textarea';
   editDefinitionTextarea.value = currentDefinitionText;
@@ -176,7 +615,10 @@ function handleEditClick(event) {
   cancelBtn.addEventListener('click', handleCancelClick);
 
   actionsDiv.append(saveBtn, cancelBtn);
-  itemElement.append(editWordInput, editDefinitionTextarea, actionsDiv);
+  
+  // Add the controls to the item element
+  editControlsContainer.prepend(editWordInput); // Word input at the top
+  itemElement.append(editControlsContainer, editDefinitionTextarea, actionsDiv);
 }
 
 // --- handleSaveClick ---
@@ -186,18 +628,20 @@ function handleSaveClick(event) {
   const timestamp = itemElement.dataset.timestamp;
 
   const newWord = itemElement.querySelector('.edit-word-input').value;
+  const newListId = itemElement.querySelector('.edit-list-selector').value;
   const newDefinition = itemElement.querySelector('.edit-definition-textarea').value;
 
-  updateHistoryItem(timestamp, newWord, newDefinition);
+  updateHistoryItem(timestamp, newWord, newDefinition, newListId);
 }
 
 // --- handleCancelClick ---
 function handleCancelClick(event) {
-  loadHistory();
+  // Simply reload the current list's history to discard changes
+  loadHistory(document.getElementById('list-select').value);
 }
 
 // --- updateHistoryItem ---
-function updateHistoryItem(timestamp, newWord, newDefinition) {
+function updateHistoryItem(timestamp, newWord, newDefinition, newListId) {
   chrome.storage.local.get(['history'], (result) => {
     let history = result.history || [];
     
@@ -206,14 +650,15 @@ function updateHistoryItem(timestamp, newWord, newDefinition) {
         return {
           ...item,
           word: newWord,
-          definition: newDefinition
+          definition: newDefinition,
+          listId: newListId // Update the listId
         };
       }
       return item;
     });
 
     chrome.storage.local.set({ history: newHistory }, () => {
-      loadHistory(); 
+      loadHistory(document.getElementById('list-select').value);
     });
   });
 }
@@ -235,20 +680,42 @@ function deleteHistoryItem(timestamp) {
     let history = result.history || [];
     const newHistory = history.filter(item => item.timestamp !== timestamp);
     chrome.storage.local.set({ history: newHistory }, () => {
-      loadHistory(); 
+      loadHistory(document.getElementById('list-select').value);
     });
   });
 }
 
 
 // --- clearHistory ---
-function clearHistory() {
+function clearAllHistory() {
   if (confirm("Are you sure you want to clear all history? This cannot be undone.")) {
     chrome.storage.local.set({ history: [] }, () => {
-      loadHistory();
+      loadLists();
       console.log("History cleared.");
     });
   }
+}
+
+// --- NEW: Function to clear history for a specific list ---
+function clearListHistory() {
+    const listSelect = document.getElementById('list-select');
+    const listId = listSelect.value;
+    const listName = listSelect.options[listSelect.selectedIndex]?.text;
+
+    if (!listId) return;
+
+    if (confirm(`Are you sure you want to clear all words from the "${listName}" list? This cannot be undone.`)) {
+        chrome.storage.local.get(['history'], (result) => {
+            let history = result.history || [];
+            // Keep all items that DO NOT belong to the selected list
+            const newHistory = history.filter(item => item.listId !== listId);
+
+            chrome.storage.local.set({ history: newHistory }, () => {
+                updateIOStatus(`History for "${listName}" cleared.`, 'success');
+                loadHistory(listId); // Reload the view for the current list
+            });
+        });
+    }
 }
 
 // --- escapeHTML ---
@@ -271,13 +738,18 @@ function escapeHTML(str) {
 
 // --- Helper to show status messages ---
 function updateIOStatus(message, type = 'info') {
-  const statusEl = document.getElementById('io-status');
-  statusEl.textContent = message;
-  statusEl.style.color = type === 'error' ? '#d9534f' : (type === 'success' ? '#5cb85c' : '#eee');
+  const statusEl1 = document.getElementById('io-status');
+  const statusEl2 = document.getElementById('io-status-all');
+  
+  [statusEl1, statusEl2].forEach(el => {
+    el.textContent = message;
+    el.style.color = type === 'error' ? '#d9534f' : (type === 'success' ? '#5cb85c' : '#eee');
+  });
   
   // Clear message after 5 seconds
   setTimeout(() => {
-    statusEl.textContent = '';
+    statusEl1.textContent = '';
+    statusEl2.textContent = '';
   }, 5000);
 }
 
@@ -292,31 +764,56 @@ function escapeCSV(str) {
 
 // --- Export Function ---
 function exportHistory() {
-  chrome.storage.local.get(['history'], (result) => {
-    const history = result.history || [];
+  const listSelect = document.getElementById('list-select');
+  const selectedListId = listSelect.value;
+  const selectedListName = listSelect.options[listSelect.selectedIndex]?.text;
+
+  if (!selectedListId) {
+    updateIOStatus("No list selected to export.", "error");
+    return;
+  }
+
+  // Fetch both history and wordLists to map listId to listName
+  chrome.storage.local.get(['history', 'wordLists'], (result) => {
+    const allHistory = result.history || [];
+    const wordLists = result.wordLists || [];
     
-    if (history.length === 0) {
-      updateIOStatus("History is empty. Nothing to export.", "error");
+    // Create a map for quick lookup of list names by ID
+    const listIdToNameMap = {};
+    wordLists.forEach(list => {
+      listIdToNameMap[list.id] = list.name;
+    });
+    
+    // --- REVISED: Filter history for the selected list ---
+    const historyToExport = allHistory.filter(item => item.listId === selectedListId);
+    
+    if (historyToExport.length === 0) {
+      updateIOStatus(`The list "${selectedListName}" is empty. Nothing to export.`, "error");
       return;
     }
 
-    const headers = ['timestamp', 'word', 'definition'];
+    // --- REVISED HEADERS: Use 'listName' instead of 'listId' ---
+    const headers = ['timestamp', 'word', 'definition', 'listName'];
     const csvRows = [
       headers.join(','), 
-      ...history.map(item => [
+      ...historyToExport.map(item => [
         escapeCSV(item.timestamp),
         escapeCSV(item.word),
-        escapeCSV(item.definition)
+        escapeCSV(item.definition),
+        // --- REVISED: Get list name from map, default to 'Unlisted' if not found ---
+        // This handles cases where an item's listId might no longer correspond to an existing list
+        escapeCSV(listIdToNameMap[item.listId] || 'Unlisted') 
       ].join(','))
     ];
 
     const csvString = csvRows.join('\n');
-    const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+    // --- FIX: Add UTF-8 BOM for Excel compatibility ---
+    const blob = new Blob(['\uFEFF' + csvString], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
-    
+    const safeFilename = selectedListName.replace(/[^a-z0-9]/gi, '_').toLowerCase();
     const link = document.createElement('a');
     link.href = url;
-    link.download = 'ai_infopedia_history.csv';
+    link.download = `ai_infopedia_${safeFilename}.csv`; // --- REVISED: Dynamic filename ---
     link.style.display = 'none';
     
     document.body.appendChild(link);
@@ -324,9 +821,59 @@ function exportHistory() {
     document.body.removeChild(link);
     
     URL.revokeObjectURL(url); 
-    updateIOStatus("History exported successfully!", "success");
+    updateIOStatus(`List "${selectedListName}" exported successfully!`, "success");
   });
 }
+
+// --- NEW: Export All History Function ---
+function exportAllHistory() {
+  // Fetch both history and wordLists to map listId to listName
+  chrome.storage.local.get(['history', 'wordLists'], (result) => {
+    const allHistory = result.history || [];
+    const wordLists = result.wordLists || [];
+    
+    if (allHistory.length === 0) {
+      updateIOStatus("History is empty. Nothing to export.", "error");
+      return;
+    }
+
+    // Create a map for quick lookup of list names by ID
+    const listIdToNameMap = {};
+    wordLists.forEach(list => {
+      listIdToNameMap[list.id] = list.name;
+    });
+    
+    const headers = ['timestamp', 'word', 'definition', 'listName'];
+    const csvRows = [
+      headers.join(','), 
+      ...allHistory.map(item => [
+        escapeCSV(item.timestamp),
+        escapeCSV(item.word),
+        escapeCSV(item.definition),
+        // Get list name from map, default to 'Unlisted' if not found
+        escapeCSV(listIdToNameMap[item.listId] || 'Unlisted') 
+      ].join(','))
+    ];
+
+    const csvString = csvRows.join('\n');
+    // --- FIX: Add UTF-8 BOM for Excel compatibility ---
+    const blob = new Blob(['\uFEFF' + csvString], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `ai_infopedia_all_history.csv`; // Static filename for global export
+    link.style.display = 'none';
+    
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    URL.revokeObjectURL(url); 
+    updateIOStatus(`All history exported successfully!`, "success");
+  });
+}
+
 
 // --- Robust CSV Parser ---
 function parseCSV(text) {
@@ -389,10 +936,9 @@ function importHistory(event) {
     const arrayBuffer = e.target.result;
     
     // Use TextDecoder to specify the encoding. 
-    // 'windows-1252' is the most common encoding for CSVs created by Excel on Windows.
-    const decoder = new TextDecoder('windows-1252'); 
+    // --- FIX: Use UTF-8 which matches the export format. The 'fatal: false' allows it to handle other encodings gracefully. ---
+    const decoder = new TextDecoder('utf-8', { fatal: false }); 
     const text = decoder.decode(arrayBuffer);
-    // --- END NEW ---
 
     const rows = parseCSV(text);
 
@@ -408,6 +954,8 @@ function importHistory(event) {
     const tsIndex = headers.indexOf('timestamp');
     const wordIndex = headers.indexOf('word');
     const defIndex = headers.indexOf('definition');
+    // --- NEW: Get listName index ---
+    const listNameIndex = headers.indexOf('listName'); 
 
     if (tsIndex === -1 || wordIndex === -1 || defIndex === -1) {
         updateIOStatus("File is missing required headers: timestamp, word, or definition.", "error");
@@ -420,12 +968,18 @@ function importHistory(event) {
         continue;
       }
 
-      if (fields.length === headers.length) {
-        newItems.push({
+      // Check if fields length matches headers length, or if listName is optional
+      if (fields.length >= headers.length - (listNameIndex === -1 ? 1 : 0)) {
+        const newItem = {
           timestamp: fields[tsIndex],
           word: fields[wordIndex],
           definition: fields[defIndex]
-        });
+        };
+        // --- NEW: Add listName to newItem if present in CSV ---
+        if (listNameIndex !== -1 && fields[listNameIndex]) {
+            newItem.listName = fields[listNameIndex];
+        }
+        newItems.push(newItem);
       } else {
         console.warn(`Skipping malformed CSV line (line ${i+1}): Expected ${headers.length} fields, found ${fields.length}`);
         parseErrors++;
@@ -449,7 +1003,11 @@ function importHistory(event) {
 
 // --- Helper to merge imported items ---
 function mergeHistory(newItems, parseErrors) {
-  chrome.storage.local.get(['history'], (result) => {
+  // Get the currently selected list ID for items without a listName in CSV
+  const listSelect = document.getElementById('list-select');
+  const currentSelectedListId = listSelect.value;
+
+  chrome.storage.local.get(['history', 'wordLists'], (result) => {
     const oldHistory = result.history || [];
     
     const historyMap = new Map();
@@ -457,6 +1015,19 @@ function mergeHistory(newItems, parseErrors) {
     
     let added = 0;
     let duplicates = 0;
+
+    // --- NEW: Handle wordLists for import ---
+    let wordLists = result.wordLists || [];
+    
+    // Create a map for quick lookup of list IDs by name
+    const listNameToIdMap = {};
+    wordLists.forEach(list => {
+      listNameToIdMap[list.name] = list.id;
+    });
+
+    // Track if wordLists were modified to save them later
+    let wordListsModified = false;
+    // --- END NEW ---
 
     newItems.forEach(item => {
       if (!item.word || !item.definition) {
@@ -473,6 +1044,33 @@ function mergeHistory(newItems, parseErrors) {
         item.timestamp = timestamp;
         isNew = true;
       }
+      
+      // --- NEW: Determine listId for the imported item ---
+      let targetListId;
+      if (item.listName) {
+          // If listName is provided in CSV
+          if (listNameToIdMap[item.listName]) {
+              // List already exists, use its ID
+              targetListId = listNameToIdMap[item.listName];
+          } else {
+              // List does not exist, create a new one
+              const newListId = `list_${new Date().getTime()}_${Math.random().toString(36).substring(2, 9)}`;
+              const newList = { id: newListId, name: item.listName };
+              wordLists.push(newList);
+              listNameToIdMap[item.listName] = newListId; // Update map
+              targetListId = newListId;
+              wordListsModified = true; // Mark for saving
+          }
+      } else {
+          // If listName is NOT provided in CSV (e.g., old format), assign to currently selected list
+          targetListId = currentSelectedListId;
+      }
+      item.listId = targetListId;
+
+      // If there are no lists at all, the item will be unassigned, which is fine.
+      if (!targetListId) {
+          item.listId = null;
+      }
 
       if (isNew || !historyMap.has(timestamp)) {
         historyMap.set(timestamp, item);
@@ -485,8 +1083,13 @@ function mergeHistory(newItems, parseErrors) {
     const mergedHistory = Array.from(historyMap.values());
     mergedHistory.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
-    chrome.storage.local.set({ history: mergedHistory }, () => {
-      loadHistory(); // Refresh the UI
+    // Prepare storage update
+    const storageUpdates = { history: mergedHistory };
+    if (wordListsModified) {
+        storageUpdates.wordLists = wordLists;
+    }
+    chrome.storage.local.set(storageUpdates, () => {
+      loadLists(); // Refresh the UI, which will also reload history
       updateIOStatus(
         `Import complete: ${added} new items added, ${duplicates} duplicates skipped, ${parseErrors} invalid rows.`,
         "success"
