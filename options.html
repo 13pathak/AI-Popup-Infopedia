@@ -3,31 +3,92 @@
 <head>
     <title>AI Helper Settings</title>
     <style>
-        body { font-family: sans-serif; padding: 10px; width: 420px; }
-        div { margin-bottom: 15px; }
-        label { display: block; margin-bottom: 5px; font-weight: bold; }
-        input[type="text"], input[type="password"], textarea { width: 400px; padding: 5px; box-sizing: border-box; }
-        textarea { resize: vertical; min-height: 80px; }
-        small { color: #888; }
-        button { padding: 8px 12px; cursor: pointer; }
+        :root {
+            --bg-color: #282c34; /* Dark background */
+            --text-color: #abb2bf; /* Light grey text */
+            --primary-color: #61afef; /* Blue accent */
+            --secondary-color: #98c379; /* Green for success */
+            --danger-color: #e06c75; /* Red for danger */
+            --border-color: #3e4451; /* Slightly lighter dark border */
+            --input-bg: #353b45; /* Input background */
+            --button-bg: #4a505c; /* Default button background */
+            --button-hover-bg: #5c6370; /* Default button hover */
+            --spacing-unit: 10px;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding: var(--spacing-unit);
+            width: 450px; /* Slightly wider to accommodate larger fonts */
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            font-size: 15px; /* Increased base font size */
+        }
+        h2 {
+            color: var(--primary-color);
+            margin-top: 0;
+            margin-bottom: var(--spacing-unit);
+            font-size: 1.4em; /* Slightly larger heading */
+        }
+        div { margin-bottom: var(--spacing-unit) * 1.5; }
+        label { display: block; margin-bottom: var(--spacing-unit) / 2; font-weight: bold; color: var(--text-color); }
+        input[type="text"], input[type="password"], textarea, select {
+            width: 100%;
+            padding: 8px; /* Increased padding */
+            box-sizing: border-box;
+            background-color: var(--input-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            color: var(--text-color);
+            font-size: 1em; /* Larger font inside inputs */
+        }
+        input[type="text"]:focus, input[type="password"]:focus, textarea:focus, select:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 2px rgba(97, 175, 239, 0.3);
+        }
+        textarea { resize: vertical; min-height: 100px; } /* Taller text area */
+        small { color: #888; font-size: 0.9em; } /* Slightly larger small text */
+        button {
+            padding: 8px 12px;
+            cursor: pointer;
+            border: none;
+            border-radius: 4px;
+            background-color: var(--button-bg);
+            color: white;
+            transition: background-color 0.2s ease;
+        }
+        button:hover { background-color: var(--button-hover-bg); }
+        #status {
+            margin-top: 10px;
+            font-weight: bold;
+            min-height: 1em;
+        }
 
         /* --- TAB STYLES --- */
         .tab-nav {
             display: flex;
-            border-bottom: 1px solid #555;
-            margin-bottom: 20px;
+            border-bottom: 1px solid var(--border-color);
+            margin-bottom: var(--spacing-unit) * 2;
         }
         .tab-button {
             padding: 10px 15px;
             cursor: pointer;
             border: none;
             background-color: transparent;
-            font-size: 16px;
+            font-size: 1em;
             border-bottom: 3px solid transparent;
+            color: var(--text-color);
+            transition: border-color 0.2s ease, color 0.2s ease;
         }
         .tab-button.active {
-            border-bottom: 3px solid #337ab7;
+            border-bottom: 3px solid var(--primary-color);
             font-weight: bold;
+            color: var(--primary-color);
+        }
+        .tab-button:hover:not(.active) {
+            color: var(--primary-color);
         }
         .tab-content {
             display: none; /* Hidden by default */
@@ -39,13 +100,13 @@
         /* --- HISTORY STYLES --- */
         #history-list {
             max-height: 400px;
-            overflow-y: auto;
-            border: 1px solid #ccc;
-            padding: 10px;
+            overflow-y: auto; /* Changed to scroll */
+            border: 1px solid var(--border-color);
+            padding: var(--spacing-unit);
             border-radius: 4px;
         }
         .history-item {
-            border-bottom: 1px solid #444;
+            border-bottom: 1px solid var(--border-color);
             padding: 10px 5px;
             padding-right: 65px; 
             position: relative; 
@@ -72,7 +133,7 @@
             font-size: 1.1em; 
             cursor: pointer;
             color: #aaa; 
-            padding: 2px 5px;
+            padding: 2px 8px;
             border-radius: 4px;
             line-height: 1;
         }
@@ -90,7 +151,7 @@
             font-size: 1.1em;
             cursor: pointer;
             color: #aaa;
-            padding: 2px 5px;
+            padding: 2px 8px;
             border-radius: 4px;
             line-height: 1;
         }
@@ -110,6 +171,11 @@
             font-weight: bold;
             margin-bottom: 8px;
         }
+        .edit-list-selector {
+            width: 100%;
+            margin-bottom: 8px;
+            font-size: 0.9em;
+        }
         .edit-definition-textarea {
             width: 100%;
             min-height: 100px;
@@ -120,45 +186,125 @@
             line-height: 1.4;
         }
         .edit-actions {
-            margin-top: 10px;
+            margin-top: var(--spacing-unit);
         }
         .edit-actions button {
-            margin-right: 8px;
+            margin-right: var(--spacing-unit) / 2;
             padding: 5px 10px;
         }
         .save-edit-btn {
-            background-color: #5cb85c;
+            background-color: var(--secondary-color);
             color: white;
             border: none;
         }
+        .save-edit-btn:hover { background-color: color-mix(in srgb, var(--secondary-color) 80%, black); }
         .cancel-edit-btn {
-            background-color: #777;
+            background-color: var(--button-bg);
             color: white;
             border: none;
         }
+        .cancel-edit-btn:hover { background-color: var(--button-hover-bg); }
 
+        /* --- NEW: Model List Styles --- */
+        #models-list {
+            margin-top: var(--spacing-unit) * 1.5;
+        }
+        .model-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            margin-bottom: 8px;
+        }
+        .model-item.default-model {
+            border-left: 4px solid #5cb85c;
+            padding-left: 7px;
+        }
+        .model-name {
+            font-weight: bold;
+        }
+        .model-name .default-indicator { /* This class is not used in options.js, but good to have */
+            font-weight: normal;
+            color: #5cb85c;
+            margin-left: 8px;
+            font-size: 0.9em;
+        }
+        .model-actions button {
+            font-size: 0.85em;
+            padding: 4px 8px;
+            margin-left: 5px;
+        }
+        #model-selection-container {
+            gap: var(--spacing-unit); /* Spacing between select and buttons */
+        }
+        #model-selection-container button {
+            flex-shrink: 0; /* Prevent buttons from shrinking */
+        }
+        #model-form-container {
+            padding: var(--spacing-unit) * 1.5;
+            border: 1px solid var(--border-color);
+            border-radius: 5px;
+            margin-top: var(--spacing-unit) * 1.5;
+        }
+        #model-form-container h3 {
+            margin-top: 0;
+            color: var(--primary-color);
+        }
+        #model-form-actions {
+            margin-top: var(--spacing-unit) * 1.5;
+        }
+        #add-model-btn {
+            background-color: var(--secondary-color);
+            color: white;
+            border: none;
+        }
+        #add-model-btn:hover { background-color: color-mix(in srgb, var(--secondary-color) 80%, black); }
         /* --- NEW: Import/Export Styles --- */
         #history-io {
-            margin-top: 20px;
-            padding: 10px;
-            border: 1px solid #555;
+            margin-top: var(--spacing-unit) * 2;
+            padding: var(--spacing-unit);
+            border: 1px solid var(--border-color);
             border-radius: 4px;
         }
-        #history-io button {
-            background-color: #337ab7;
-            color: white;
-            border: none;
+        #history-io button, #history-io-all button {
+            background-color: var(--primary-color);
             margin-right: 10px;
+            margin-bottom: 5px; /* Add margin for wrapping */
         }
-        #io-status {
+        #history-io-all button {
+            background-color: var(--button-bg);
+        }
+
+        #io-status, #io-status-all {
             margin-top: 10px;
             font-size: 0.9em;
         }
         #clear-history {
-            background-color: #d9534f;
+            background-color: var(--danger-color);
             color: white;
             border: none;
-            margin-top: 20px;
+        }
+        #clear-list-history {
+            background-color: var(--danger-color);
+        }
+        /* --- NEW: List Management Styles --- */
+        #list-management {
+            margin-top: var(--spacing-unit) * 2;
+            padding: var(--spacing-unit);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background-color: var(--input-bg);
+        }
+        #list-management h4 {
+            margin-top: 0;
+            color: var(--primary-color);
+        }
+        #list-controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
         }
         /* --- END NEW --- */
     </style>
@@ -172,40 +318,93 @@
 
     <div id="settings-content" class="tab-content active">
         <h2>AI Chatbot Settings</h2>
-        <div>
-            <label for="endpoint">Endpoint URL</label>
-            <input type="text" id="endpoint" placeholder="https://generativelanguage.googleapis.com/v1beta/openai/chat/completions">
-        </div>
-        <div>
-            <label for="modelName">Model Name</label>
-            <input type="text" id="modelName" placeholder="gemini-2.0-flash">
-        </div>
-        <div>
-            <label for="apiKey">API Key</label>
-            <input type="password" id="apiKey">
-        </div>
+        <p style="margin-bottom: var(--spacing-unit) * 2;">Manage your AI model configurations. The "Default" model will be used for pop-up definitions.</p>
         
-        <div>
-            <label for="customPrompt">Custom Prompt</label>
-            <textarea id="customPrompt"></textarea>
-            <small>Use <strong>{word}</strong> as the placeholder for the selected text.
-            <br>Example: Explain {word} to a 5-year-old.</small>
+        <div id="model-selection-container" style="display: flex; align-items: center; gap: 10px;">
+            <label for="model-select" style="margin-bottom: 0;">Default Model:</label>
+            <select id="model-select" style="flex-grow: 1;"></select>
+            <button id="add-model-btn" title="Add New Model" style="background-color: var(--secondary-color);">&#43;</button>
+            <button id="edit-model-btn" title="Edit Selected Model" style="background-color: var(--primary-color);">&#9998;</button>
+            <button id="delete-model-btn" title="Delete Selected Model">&#128465;</button>
         </div>
-        <button id="save">Save Settings</button>
+        <p id="no-models-message" style="display: none; margin-top: 10px;">No models configured. Click '+' to add one.</p>
+        
+        <div id="model-form-container" style="display: none;">
+            <h3 id="form-title">Add New Model</h3>
+            <input type="hidden" id="model-id">
+            <div>
+                <label for="configName">Configuration Name (e.g., "Local Llama")</label>
+                <input type="text" id="configName" placeholder="My Gemini Pro">
+            </div>
+            <div>
+                <label for="endpoint">Endpoint URL</label>
+                <input type="text" id="endpoint" placeholder="https://generativelanguage.googleapis.com/v1beta/openai/chat/completions">
+            </div>
+            <div>
+                <label for="modelName">Model Name (e.g., "gemini-1.5-flash")</label>
+                <input type="text" id="modelName" placeholder="gemini-1.5-flash-latest">
+            </div>
+            <div>
+                <label for="apiKey">API Key (optional)</label>
+                <input type="password" id="apiKey">
+            </div>
+            <div id="model-form-actions">
+                <button id="save-model-btn" style="background-color: var(--primary-color);">Save Model</button>
+                <button id="cancel-model-btn">Cancel</button>
+            </div>
+        </div>
+
+        <div id="global-prompt-container" style="margin-top: 20px;">
+            <label for="customPrompt">Global Custom Prompt</label>
+            <textarea id="customPrompt" rows="4"></textarea>
+            <small style="display: block; margin-top: 5px;">Use <strong>{word}</strong> as the placeholder for the selected text. This prompt will be used by the default model.</small>
+            <br><button id="save-prompt-btn" style="margin-top: 10px;">Save Prompt</button>
+        </div>
+
+        <div id="global-io-container" style="margin-top: 30px; padding-top: 20px; border-top: 1px solid var(--border-color);">
+            <h3 style="color: var(--primary-color); margin-top: 0;">Models & Prompts Import/Export</h3>
+            <p style="margin-bottom: 15px;">Export or import all your configured models and the global prompt. This does not include your word history or lists.</p>
+            <button id="export-all-settings-btn" style="background-color: var(--primary-color);">Export Models & Prompt (.json)</button>
+            <button id="import-all-settings-btn" style="background-color: var(--primary-color);">Import Models & Prompt (.json)</button>
+            <input type="file" id="import-settings-file-input" accept=".json" style="display: none;">
+            <div id="global-io-status" style="margin-top: 10px; font-weight: bold; min-height: 1em;"></div>
+        </div>
+
         <div id="status"></div>
     </div>
 
-    <div id="history-content" class="tab-content">
-        <h2>Search History</h2>
+    <div id="history-content" class="tab-content"><h2>Search History</h2>
+        
+        <div id="list-management">
+            <h4>Manage & View Lists</h4>
+            <div id="list-controls">
+                <select id="list-select" style="flex-grow: 1;"></select>
+                <button id="add-list-btn" title="Add New List" style="background-color: var(--secondary-color);">&#43;</button>
+                <button id="rename-list-btn" title="Rename Selected List" style="background-color: var(--primary-color);">&#9998;</button>
+                <button id="delete-list-btn" title="Delete Selected List">&#128465;</button>
+                <button id="move-list-up-btn" title="Move List Up" style="background-color: var(--button-bg);">&#9650;</button>
+                <button id="move-list-down-btn" title="Move List Down" style="background-color: var(--button-bg);">&#9660;</button>
+            </div>
+        </div>
 
         <div id="history-io">
-            <h4>Import / Export</h4>
-            <button id="export-history">Export History (.csv)</button>
-            <button id="import-history">Import History (.csv)</button>
+            <h4>Import / Export (Selected List)</h4>
+            <button id="export-history" style="background-color: var(--primary-color);">Export Selected List (.csv)</button>
+            <button id="import-history" style="background-color: var(--primary-color);">Import to Selected List (.csv)</button>
+            <button id="clear-list-history" style="display: none;"></button>
             <input type="file" id="import-file-input" accept=".csv" style="display: none;">
             <div id="io-status"></div>
         </div>
-        <button id="clear-history">Clear All History</button>
+
+        <div id="history-io-all">
+            <h4>Global Actions (All Lists)</h4>
+            <button id="export-all-history" style="background-color: var(--button-bg);">Export All History (.csv)</button>
+            <button id="import-all-history" style="background-color: var(--button-bg);">Import All History (.csv)</button>
+            <button id="clear-history">Clear All History</button>
+            <!-- This can use the same file input as the other import button -->
+            <div id="io-status-all"></div>
+        </div>
+
         
         <div id="history-list-container">
             <p id="no-history-message" style="display: none;">No history yet.</p>
