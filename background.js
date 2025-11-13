@@ -3,27 +3,34 @@ chrome.action.onClicked.addListener((tab) => {
   chrome.runtime.openOptionsPage();
 });
 
-// --- UPDATED: This listener now handles TWO types of messages ---
+// --- This listener now handles multiple message types ---
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   
   // --- Case 1: Get a definition ---
   if (request.type === "getAiDefinition") {
     
-    // Get all our saved settings, including the new customPrompt
-    chrome.storage.sync.get(['endpointUrl', 'modelName', 'apiKey', 'customPrompt'], async (items) => {
-      
-      const defaultPrompt = "Explain the following word or concept in a concise paragraph: {word}";
-      const promptTemplate = items.customPrompt || defaultPrompt;
-      const apiKey = items.apiKey;
-      const url = items.endpointUrl;
-      const modelName = items.modelName;
+    // Get all saved models and the ID of the default one
+    chrome.storage.sync.get(['models', 'defaultModelId', 'globalCustomPrompt'], async (data) => {
+      const { models, defaultModelId, globalCustomPrompt } = data;
 
-      if (!url || !modelName || !apiKey) {
-        sendResponse({ error: "API settings are incomplete. Please check options." });
+      if (!models || models.length === 0 || !defaultModelId) {
+        sendResponse({ error: "No default AI model configured. Please set one in the options page.", models: [], defaultModelId: null });
         return;
       }
 
-      const prompt = promptTemplate.replace('{word}', request.word);
+      const modelToUse = request.modelId ? models.find(m => m.id === request.modelId) : models.find(m => m.id === defaultModelId);
+
+      if (!modelToUse) {
+        sendResponse({ error: "Model not found. Please check your settings.", models: models, defaultModelId: defaultModelId });
+        return;
+      }
+      
+      const { endpointUrl, modelName, apiKey } = modelToUse;
+      
+      // --- REVISED: Simplified prompt logic ---
+      const { word } = request;
+      const promptTemplate = globalCustomPrompt || "Explain the following word or concept in a concise paragraph: {word}";
+      const prompt = promptTemplate.replace('{word}', word);
 
       // Create the OpenAI-style payload
       const payload = {
@@ -33,33 +40,57 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             "role": "user",
             "content": prompt 
           }
-        ]
+        ],
+        "stream": false
       };
 
       try {
-        const response = await fetch(url, {
+        // --- THIS IS THE OPTIONAL FIX (HEADERS) ---
+        // Create headers object
+        const headers = {
+          'Content-Type': 'application/json'
+        };
+        
+        // Only add Authorization header if an API key is provided
+        if (apiKey) {
+          headers['Authorization'] = `Bearer ${apiKey}`;
+        }
+        // --- END OPTIONAL FIX ---
+
+        const response = await fetch(endpointUrl, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`
-          },
+          headers: headers, // Use the new headers object
           body: JSON.stringify(payload)
         });
 
         if (!response.ok) {
-          const errorData = await response.json();
-          console.error("API Error Details:", errorData);
-          throw new Error(`API Error: ${response.statusText}`);
+          // --- NEW: ROBUST ERROR HANDLING ---
+          // Handle errors that might be plain text OR json
+          let errorMsg = response.statusText;
+          const contentType = response.headers.get("content-type");
+
+          if (contentType && contentType.includes("application/json")) {
+            const errorData = await response.json();
+            console.error("API Error Details (JSON):", errorData);
+            errorMsg = errorData.error || errorMsg;
+          } else {
+            const errorText = await response.text();
+            console.error("API Error Details (Text):", errorText);
+            errorMsg = errorText || errorMsg;
+          }
+          throw new Error(`${errorMsg}`);
+          // --- END ROBUST ERROR HANDLING ---
         }
 
         const data = await response.json();
         const aiText = data.choices[0].message.content;
         
-        sendResponse({ definition: aiText });
+        sendResponse({ definition: aiText, models: models, defaultModelId: defaultModelId });
 
       } catch (error) {
         console.error("AI API call failed:", error);
-        sendResponse({ error: `Failed to fetch definition: ${error.message}` });
+        // The error message is now cleaner
+        sendResponse({ error: `Failed to fetch definition: ${error.message}`, models: models, defaultModelId: defaultModelId });
       }
     });
 
@@ -70,18 +101,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // --- Case 2: Save an item to history ---
   if (request.type === "saveToHistory") {
     // We pass sendResponse as a callback to run *after* saving
-    saveToHistory(request.word, request.definition, () => {
+    saveToHistory(request.word, request.definition, request.listId, () => {
       sendResponse({ status: "saved" });
     });
-    // --- THIS IS THE FIX ---
     // Return true to tell Chrome this is an async operation
     return true; 
+  }
+
+  // --- Case 3: Get all word lists ---
+  if (request.type === "getWordLists") {
+    chrome.storage.local.get({ wordLists: [] }, (data) => {
+      // Simply return the lists, even if empty.
+      sendResponse({ lists: data.wordLists });
+    });
+    return true; // Async response
   }
 
 });
 
 // --- UPDATED to accept a callback ---
-function saveToHistory(word, definition, callback) {
+function saveToHistory(word, definition, listId, callback) {
   chrome.storage.local.get(['history'], (result) => {
     let history = result.history || [];
     
@@ -89,7 +128,8 @@ function saveToHistory(word, definition, callback) {
     const newItem = {
       word: word,
       definition: definition,
-      timestamp: new Date().toISOString() // Store timestamp
+      timestamp: new Date().toISOString(), // Store timestamp
+      listId: listId // --- NEW: Store the list ID ---
     };
 
     // Add new item to the beginning of the array
