@@ -110,16 +110,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   // --- Case 3: Get all word lists ---
   if (request.type === "getWordLists") {
-    chrome.storage.local.get({ wordLists: [] }, (data) => {
-      // Simply return the lists, even if empty.
-      sendResponse({ lists: data.wordLists });
+    // --- UPDATED: Now also get the lastUsedListId ---
+    chrome.storage.local.get({ wordLists: [], lastUsedListId: null }, (data) => {
+      // Send back both the lists and the last used ID
+      sendResponse({ lists: data.wordLists, lastUsedListId: data.lastUsedListId });
     });
     return true; // Async response
   }
 
 });
 
-// --- UPDATED to accept a callback ---
+// --- UPDATED to accept a callback and save last listId ---
 function saveToHistory(word, definition, listId, callback) {
   chrome.storage.local.get(['history'], (result) => {
     let history = result.history || [];
@@ -140,8 +141,8 @@ function saveToHistory(word, definition, listId, callback) {
       history = history.slice(0, 100);
     }
 
-    // Save back to storage and *then* run the callback
-    chrome.storage.local.set({ history: history }, () => {
+    // --- NEW: Save back history AND the lastUsedListId ---
+    chrome.storage.local.set({ history: history, lastUsedListId: listId }, () => {
       if (callback) {
         callback();
       }
