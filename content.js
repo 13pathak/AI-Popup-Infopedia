@@ -316,6 +316,7 @@ function createActionButtons(word, definition) {
   // --- REVISED: Immediately show list dropdown and save button ---
   // 1. Get the lists from the background
   chrome.runtime.sendMessage({ type: "getWordLists" }, (response) => {
+    // --- UPDATED: Handle new response format ---
     if (!response || !response.lists || response.lists.length === 0) {
       // --- Handle case where NO lists exist ---
       actionsContainer.innerHTML = ''; // Clear any previous content
@@ -334,6 +335,7 @@ function createActionButtons(word, definition) {
     }
 
     const lists = response.lists;
+    const lastUsedListId = response.lastUsedListId; // --- NEW ---
 
     // 2. Create list selector
     const listSelector = document.createElement('select');
@@ -351,6 +353,13 @@ function createActionButtons(word, definition) {
       const option = document.createElement('option');
       option.value = list.id;
       option.textContent = list.name;
+      
+      // --- NEW: Check if this list was the last one used ---
+      if (list.id === lastUsedListId) {
+          option.selected = true;
+      }
+      // --- END NEW ---
+      
       listSelector.appendChild(option);
     });
 
