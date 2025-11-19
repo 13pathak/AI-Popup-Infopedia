@@ -17,12 +17,18 @@ document.addEventListener('DOMContentLoaded', () => {
       if (tab.dataset.tab === "history-content") {
         loadLists(); // This will in turn load history for the selected list
       }
+      
+      // --- NEW: Load Anki data when tab is clicked ---
+      if (tab.dataset.tab === "anki-content") {
+          loadAnkiDecksAndModels();
+      }
     });
   });
 
   loadModels();
   loadLists(); // Load lists on initial page load
   loadGlobalPrompt();
+  loadAnkiSettings(); // Load saved Anki settings on page load
 
   // --- REVISED: Model Management Event Listeners ---
   document.getElementById('add-model-btn').addEventListener('click', showModelForm);
@@ -67,6 +73,11 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('import-settings-file-input').click();
   });
   document.getElementById('import-settings-file-input').addEventListener('change', importAllSettings);
+  
+  // --- NEW: ANKI EVENT LISTENERS ---
+  document.getElementById('anki-refresh-btn').addEventListener('click', loadAnkiDecksAndModels);
+  document.getElementById('anki-save-settings-btn').addEventListener('click', saveAnkiSettings);
+  document.getElementById('anki-model-select').addEventListener('change', (e) => loadAnkiFields(e.target.value));
 });
 
 
@@ -249,6 +260,9 @@ async function exportAllSettings() {
   try {
     // 1. Get all data from sync storage (models, prompts)
     const syncData = await new Promise(resolve => chrome.storage.sync.get(null, resolve));
+    
+    // --- NEW: Exclude Anki settings from this export ---
+    delete syncData.ankiSettings;
 
     // 2. Create the settings object
     const allSettings = {
@@ -296,12 +310,20 @@ function importAllSettings(event) {
         updateGlobalIOStatus('Import cancelled.', 'info');
         return;
       }
+      
+      // --- NEW: Get Anki settings to preserve them ---
+      const ankiSettings = await new Promise(resolve => chrome.storage.sync.get('ankiSettings', resolve));
 
       // Clear existing sync storage before importing
       await new Promise(resolve => chrome.storage.sync.clear(resolve));
-
+      
       // Import new data into sync storage
       await new Promise(resolve => chrome.storage.sync.set(settings.syncData, resolve));
+      
+      // --- NEW: Restore Anki settings ---
+      if (ankiSettings.ankiSettings) {
+          await new Promise(resolve => chrome.storage.sync.set(ankiSettings, resolve));
+      }
 
       updateGlobalIOStatus('Settings imported successfully! Reloading...', 'success');
 
@@ -526,6 +548,16 @@ function loadHistory(listId) {
         `;
         itemElement.appendChild(displayView);
         
+        // --- NEW: Add Anki Button ---
+        const ankiButton = document.createElement('button');
+        ankiButton.className = 'anki-item-btn';
+        ankiButton.innerHTML = '<strong>A</strong>'; // 'A' for Anki
+        ankiButton.title = 'Send to Anki';
+        ankiButton.dataset.timestamp = item.timestamp;
+        ankiButton.addEventListener('click', handleSendToAnkiClick);
+        itemElement.appendChild(ankiButton);
+        // --- END NEW ---
+
         const editButton = document.createElement('button');
         editButton.className = 'edit-item-btn';
         editButton.innerHTML = '&#9998;'; 
@@ -568,6 +600,7 @@ function handleEditClick(event) {
     .replace(/<strong>(.*?)<\/strong>/gi, '**$1**'); 
 
   itemElement.querySelector('.display-view').style.display = 'none';
+  itemElement.querySelector('.anki-item-btn').style.display = 'none'; // --- NEW: Hide Anki button ---
   itemElement.querySelector('.edit-item-btn').style.display = 'none';
   itemElement.querySelector('.delete-item-btn').style.display = 'none';
 
@@ -1096,4 +1129,266 @@ function mergeHistory(newItems, parseErrors) {
       );
     });
   });
+}
+
+// ---
+// --- NEW: ANKI CONNECT FUNCTIONS
+// ---
+
+/**
+ * Sends a request to the Anki Connect API.
+ * @param {string} action - The AnKi Connect action (e.g., 'deckNames', 'addNote').
+ * @param {object} params - The parameters for the action.
+ * @param {number} version - The Anki Connect API version.
+ * @returns {Promise<any>} - The 'result' field from the Anki Connect response.
+ * @throws {Error} - If the Anki Connect call returns an error.
+ */
+async function ankiConnectRequest(action, params = {}, version = 6) {
+    try {
+        const response = await fetch('http://localhost:8765', {
+            method: 'POST',
+            body: JSON.stringify({ action, version, params })
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        
+        if (data.error) {
+            throw new Error(data.error);
+        }
+        
+        return data.result;
+
+    } catch (e) {
+        console.error("Anki Connect request failed:", action, e);
+        // Re-throw the error so it can be caught by the calling function
+        throw e;
+    }
+}
+
+/**
+ * Updates the status message on the Anki settings tab.
+ * @param {string} message - The message to display.
+ * @param {'info' | 'success' | 'error'} type - The type of message.
+ */
+function updateAnkiStatus(message, type = 'info') {
+    const statusEl = document.getElementById('anki-status');
+    if (!statusEl) return;
+    statusEl.textContent = message;
+    statusEl.style.color = type === 'error' ? '#d9534f' : (type === 'success' ? '#5cb85c' : '#eee');
+    
+    // Do not auto-clear error messages
+    if (type !== 'error') {
+        setTimeout(() => {
+            if (statusEl.textContent === message) {
+                statusEl.textContent = '';
+            }
+        }, 4000);
+    }
+}
+
+/**
+ * Fetches deck names and model names from Anki Connect and populates the dropdowns.
+ */
+async function loadAnkiDecksAndModels() {
+    updateAnkiStatus('Connecting to Anki...', 'info');
+    
+    try {
+        // Fetch decks and models in parallel
+        const [deckNames, modelNames] = await Promise.all([
+            ankiConnectRequest('deckNames'),
+            ankiConnectRequest('modelNames')
+        ]);
+
+        // Populate Decks
+        const deckSelect = document.getElementById('anki-deck-select');
+        deckSelect.innerHTML = '<option value="">-- Select Deck --</option>'; // Clear old options
+        deckNames.forEach(name => {
+            const option = document.createElement('option');
+            option.value = name;
+            option.textContent = name;
+            deckSelect.appendChild(option);
+        });
+
+        // Populate Models
+        const modelSelect = document.getElementById('anki-model-select');
+        modelSelect.innerHTML = '<option value="">-- Select Note Type --</option>'; // Clear old options
+        modelNames.forEach(name => {
+            const option = document.createElement('option');
+            option.value = name;
+            option.textContent = name;
+            modelSelect.appendChild(option);
+        });
+        
+        updateAnkiStatus('Connected! Please configure your settings.', 'success');
+        
+        // After loading, re-apply any saved settings
+        await loadAnkiSettings();
+
+    } catch (e) {
+        updateAnkiStatus(`Error: ${e.message}. Is Anki running with Anki Connect?`, 'error');
+    }
+}
+
+/**
+ * Fetches the field names for a selected Anki model and populates the field mapping dropdowns.
+ * @param {string} modelName - The name of the Anki model to get fields for.
+ */
+async function loadAnkiFields(modelName) {
+    const fieldsContainer = document.getElementById('anki-fields-mapping');
+    const wordFieldSelect = document.getElementById('anki-word-field-select');
+    const defFieldSelect = document.getElementById('anki-definition-field-select');
+    
+    // Clear old fields
+    wordFieldSelect.innerHTML = '<option value="">-- Select Field --</option>';
+    defFieldSelect.innerHTML = '<option value="">-- Select Field --</option>';
+
+    if (!modelName) {
+        fieldsContainer.style.display = 'none';
+        return;
+    }
+
+    fieldsContainer.style.display = 'block';
+    updateAnkiStatus('Fetching fields...', 'info');
+
+    try {
+        const fieldNames = await ankiConnectRequest('modelFieldNames', { modelName: modelName });
+        
+        fieldNames.forEach(name => {
+            const option1 = document.createElement('option');
+            option1.value = name;
+            option1.textContent = name;
+            wordFieldSelect.appendChild(option1);
+
+            const option2 = document.createElement('option');
+            option2.value = name;
+            option2.textContent = name;
+            defFieldSelect.appendChild(option2);
+        });
+
+        updateAnkiStatus('Fields loaded.', 'success');
+        
+        // Re-apply saved settings for fields
+        await loadAnkiSettings();
+
+    } catch (e) {
+        updateAnkiStatus(`Error fetching fields: ${e.message}`, 'error');
+    }
+}
+
+/**
+ * Saves the selected Anki configuration to chrome.storage.sync.
+ */
+function saveAnkiSettings() {
+    const settings = {
+        deckName: document.getElementById('anki-deck-select').value,
+        modelName: document.getElementById('anki-model-select').value,
+        wordField: document.getElementById('anki-word-field-select').value,
+        definitionField: document.getElementById('anki-definition-field-select').value
+    };
+
+    if (!settings.deckName || !settings.modelName || !settings.wordField || !settings.definitionField) {
+        updateAnkiStatus("Please select all options before saving.", "error");
+        return;
+    }
+
+    chrome.storage.sync.set({ ankiSettings: settings }, () => {
+        updateAnkiStatus('Anki settings saved!', 'success');
+    });
+}
+
+/**
+ * Loads saved Anki settings from chrome.storage.sync and applies them to the dropdowns.
+ */
+async function loadAnkiSettings() {
+    const data = await new Promise(resolve => chrome.storage.sync.get('ankiSettings', resolve));
+    
+    if (data.ankiSettings) {
+        const { deckName, modelName, wordField, definitionField } = data.ankiSettings;
+        
+        document.getElementById('anki-deck-select').value = deckName || "";
+        
+        // Set model and trigger field loading if needed
+        const modelSelect = document.getElementById('anki-model-select');
+        if (modelSelect.value !== modelName) {
+            modelSelect.value = modelName || "";
+            if (modelName) {
+                // This will load fields, and *then* we need to set the field values
+                await loadAnkiFields(modelName);
+            }
+        }
+        
+        // Set field values
+        document.getElementById('anki-word-field-select').value = wordField || "";
+        document.getElementById('anki-definition-field-select').value = definitionField || "";
+    }
+}
+
+/**
+ * Handles the click event for the 'Send to Anki' button on a history item.
+ * @param {Event} event - The click event.
+ */
+async function handleSendToAnkiClick(event) {
+    const btn = event.currentTarget;
+    const timestamp = btn.dataset.timestamp;
+
+    btn.disabled = true;
+    btn.innerHTML = '<strong>...</strong>'; // <-- UPDATED
+
+    try {
+        // 1. Get Anki Settings
+        const settingsData = await new Promise(resolve => chrome.storage.sync.get('ankiSettings', resolve));
+        const settings = settingsData.ankiSettings;
+        
+        if (!settings || !settings.deckName || !settings.modelName || !settings.wordField || !settings.definitionField) {
+            throw new Error('Anki settings are not complete. Please configure them in the Anki tab.');
+        }
+
+        // 2. Get History Item
+        const historyData = await new Promise(resolve => chrome.storage.local.get('history', resolve));
+        const item = (historyData.history || []).find(i => i.timestamp === timestamp);
+
+        if (!item) {
+            throw new Error('History item not found.');
+        }
+
+        // 3. Prepare Note
+        const fields = {};
+        fields[settings.wordField] = item.word;
+        // Format definition: replace <br> with newlines for Anki
+        const ankiDefinition = item.definition
+            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') // Keep bold
+            .replace(/\n/g, '<br>'); // Convert markdown newlines to HTML <br>
+            
+        fields[settings.definitionField] = ankiDefinition;
+
+        const note = {
+            deckName: settings.deckName,
+            modelName: settings.modelName,
+            fields: fields,
+            options: {
+                "allowDuplicate": false
+            }
+        };
+
+        // 4. Send to Anki
+        const result = await ankiConnectRequest('addNote', { note: note });
+        
+        if (result === null) {
+            // This often means a duplicate was found and not added
+            throw new Error('Note was not added. It might be a duplicate.');
+        }
+        
+        // Success!
+        btn.innerHTML = '<strong>✔</strong>'; // <-- UPDATED
+        // Keep it disabled to show success
+
+    } catch (e) {
+        btn.disabled = false;
+        btn.innerHTML = '<strong>A</strong>'; // <-- UPDATED
+        alert(`Anki Error: ${e.message}`); // alert() is fine in the options page
+    }
 }
