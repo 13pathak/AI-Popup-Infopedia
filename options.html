@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
+    <meta charset="UTF-8">
     <title>AI Helper Settings</title>
     <style>
         :root {
@@ -60,7 +61,12 @@
             transition: background-color 0.2s ease;
         }
         button:hover { background-color: var(--button-hover-bg); }
-        #status {
+        #status, #anki-status-global {
+            margin-top: 10px;
+            font-weight: bold;
+            min-height: 1em;
+        }
+        #anki-status {
             margin-top: 10px;
             font-weight: bold;
             min-height: 1em;
@@ -108,7 +114,7 @@
         .history-item {
             border-bottom: 1px solid var(--border-color);
             padding: 10px 5px;
-            padding-right: 65px; 
+            padding-right: 95px;  /* --- Increased padding for new button --- */
             position: relative; 
         }
         .history-item:last-child {
@@ -159,6 +165,32 @@
             color: #337ab7; 
             background-color: #444;
         }
+
+        /* --- NEW ANKI BUTTON STYLE --- */
+        .anki-item-btn {
+            position: absolute;
+            top: 10px;
+            right: 68px; /* Positioned to the left of the edit button */
+            background: none;
+            border: none;
+            font-size: 1.1em;
+            font-weight: bold;
+            cursor: pointer;
+            color: #aaa;
+            padding: 2px 8px;
+            border-radius: 4px;
+            line-height: 1;
+        }
+        .anki-item-btn:hover {
+            color: #61afef; /* Anki blue */
+            background-color: #444;
+        }
+        .anki-item-btn:disabled {
+            cursor: default;
+            color: #5cb85c; /* Green for success */
+        }
+        /* --- END ANKI STYLE --- */
+
 
         .history-item-editing {
             padding-right: 5px;
@@ -314,7 +346,10 @@
     <div class="tab-nav">
         <button class="tab-button active" data-tab="settings-content">Settings</button>
         <button class="tab-button" data-tab="history-content">History</button>
+        <button class="tab-button" data-tab="anki-content">Anki</button>
     </div>
+    
+    <div id="status-global"></div>
 
     <div id="settings-content" class="tab-content active">
         <h2>AI Chatbot Settings</h2>
@@ -410,6 +445,48 @@
             <p id="no-history-message" style="display: none;">No history yet.</p>
             <div id="history-list"></div>
         </div>
+    </div>
+    
+    <!-- --- NEW ANKI TAB CONTENT --- -->
+    <div id="anki-content" class="tab-content">
+        <h2>Anki Connect Settings</h2>
+        <p>Configure your connection to Anki. Make sure Anki is running with the Anki Connect add-on installed.</p>
+        
+        <button id="anki-refresh-btn" style="background-color: var(--primary-color); margin-bottom: 20px;">Test Connection / Refresh Lists</button>
+        <div id="anki-status"></div>
+        
+        <div>
+            <label for="anki-deck-select">Default Deck</label>
+            <select id="anki-deck-select">
+                <option value="">-- Select Deck --</option>
+            </select>
+        </div>
+        
+        <div>
+            <label for="anki-model-select">Default Note Type (Model)</label>
+            <select id="anki-model-select">
+                <option value="">-- Select Note Type --</option>
+            </select>
+        </div>
+        
+        <div id="anki-fields-mapping" style="display: none; margin-top: 20px; padding: 15px; border: 1px solid var(--border-color); border-radius: 4px;">
+            <h4>Map Fields</h4>
+            <p style="font-size: 0.9em; margin-top: -10px;">Select which fields in your Anki note type should receive the Word and Definition.</p>
+            <div>
+                <label for="anki-word-field-select">Word Field</label>
+                <select id="anki-word-field-select">
+                    <option value="">-- Select Field --</option>
+                </select>
+            </div>
+            <div>
+                <label for="anki-definition-field-select">Definition Field</label>
+                <select id="anki-definition-field-select">
+                    <option value="">-- Select Field --</option>
+                </select>
+            </div>
+        </div>
+
+        <button id="anki-save-settings-btn" style="margin-top: 20px; background-color: var(--secondary-color);">Save Anki Settings</button>
     </div>
 
     <script src="options.js"></script>
