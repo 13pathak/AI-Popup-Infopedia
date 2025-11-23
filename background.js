@@ -5,10 +5,10 @@ chrome.action.onClicked.addListener((tab) => {
 
 // --- This listener now handles multiple message types ---
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  
+
   // --- Case 1: Get a definition ---
   if (request.type === "getAiDefinition") {
-    
+
     // Get all saved models and the ID of the default one
     chrome.storage.sync.get(['models', 'defaultModelId', 'globalCustomPrompt'], async (data) => {
       const { models, defaultModelId, globalCustomPrompt } = data;
@@ -24,9 +24,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         sendResponse({ error: "Model not found. Please check your settings.", models: models, defaultModelId: defaultModelId });
         return;
       }
-      
+
       const { endpointUrl, modelName, apiKey } = modelToUse;
-      
+
       // --- REVISED: Simplified prompt logic ---
       const { word } = request;
       const promptTemplate = globalCustomPrompt || "Explain the following word or concept in a concise paragraph: {word}";
@@ -38,7 +38,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         "messages": [
           {
             "role": "user",
-            "content": prompt 
+            "content": prompt
           }
         ],
         "stream": false
@@ -50,7 +50,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         const headers = {
           'Content-Type': 'application/json'
         };
-        
+
         // Only add Authorization header if an API key is provided
         if (apiKey) {
           headers['Authorization'] = `Bearer ${apiKey}`;
@@ -84,7 +84,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         const data = await response.json();
         const aiText = data.choices[0].message.content;
-        
+
         sendResponse({ definition: aiText, models: models, defaultModelId: defaultModelId });
 
       } catch (error) {
@@ -101,11 +101,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // --- Case 2: Save an item to history ---
   if (request.type === "saveToHistory") {
     // We pass sendResponse as a callback to run *after* saving
-    saveToHistory(request.word, request.definition, request.listId, () => {
+    saveToHistory(request.word, request.definition, request.listId, request.modelName, () => {
       sendResponse({ status: "saved" });
     });
     // Return true to tell Chrome this is an async operation
-    return true; 
+    return true;
   }
 
   // --- Case 3: Get all word lists ---
@@ -121,16 +121,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 });
 
 // --- UPDATED to accept a callback and save last listId ---
-function saveToHistory(word, definition, listId, callback) {
+function saveToHistory(word, definition, listId, modelName, callback) {
   chrome.storage.local.get(['history'], (result) => {
     let history = result.history || [];
-    
+
     // Create new history item
     const newItem = {
       word: word,
       definition: definition,
       timestamp: new Date().toISOString(), // Store timestamp
-      listId: listId // --- NEW: Store the list ID ---
+      listId: listId, // --- NEW: Store the list ID ---
+      modelName: modelName // --- NEW: Store the model name ---
     };
 
     // Add new item to the beginning of the array
@@ -145,6 +146,62 @@ function saveToHistory(word, definition, listId, callback) {
     chrome.storage.local.set({ history: history, lastUsedListId: listId }, () => {
       if (callback) {
         callback();
+      }
+    });
+  });
+}
+
+// --- NEW: Backup Reminder Logic ---
+
+// Check every 60 minutes
+chrome.alarms.create("checkBackupReminder", { periodInMinutes: 60 });
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === "checkBackupReminder") {
+    checkBackupReminder();
+  }
+});
+
+// Also check on startup
+chrome.runtime.onStartup.addListener(() => {
+  checkBackupReminder();
+});
+
+// And on installed
+chrome.runtime.onInstalled.addListener(() => {
+  checkBackupReminder();
+});
+
+// Listen for changes in settings to update immediately
+chrome.storage.onChanged.addListener((changes, namespace) => {
+  if (namespace === 'sync' && changes.backupReminderFrequency) {
+    checkBackupReminder();
+  }
+  if (namespace === 'local' && changes.lastBackupTime) {
+    checkBackupReminder();
+  }
+});
+
+function checkBackupReminder() {
+  chrome.storage.sync.get({ backupReminderFrequency: 0 }, (syncData) => {
+    const frequencyDays = syncData.backupReminderFrequency;
+
+    if (frequencyDays === 0) {
+      chrome.action.setBadgeText({ text: '' });
+      return;
+    }
+
+    chrome.storage.local.get({ lastBackupTime: 0 }, (localData) => {
+      const lastBackup = localData.lastBackupTime;
+      const now = Date.now();
+      const msPerDay = 24 * 60 * 60 * 1000;
+      const daysSinceBackup = (now - lastBackup) / msPerDay;
+
+      if (daysSinceBackup >= frequencyDays) {
+        chrome.action.setBadgeText({ text: '!' });
+        chrome.action.setBadgeBackgroundColor({ color: '#FF0000' });
+      } else {
+        chrome.action.setBadgeText({ text: '' });
       }
     });
   });

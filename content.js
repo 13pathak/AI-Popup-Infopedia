@@ -113,7 +113,10 @@ document.addEventListener('mouseup', (event) => {
         updatePopup(definitionText); // Show the definition
         
         if (!response.error) {
-          createActionButtons(selectedText, definitionText);
+          // --- UPDATED: Pass modelName ---
+          // We need to find the model name from the ID or response
+          const modelName = response.models.find(m => m.id === response.defaultModelId)?.name || 'Unknown Model';
+          createActionButtons(selectedText, definitionText, modelName);
         }
         adjustPopupPosition();
         
@@ -289,7 +292,9 @@ function redefineWithModel(word, modelId) {
 
       // --- NEW: Re-create the save button after model change ---
       if (!response.error) {
-        createActionButtons(word, definitionText);
+        // --- UPDATED: Pass modelName ---
+        const modelName = response.models.find(m => m.id === modelId)?.name || 'Unknown Model';
+        createActionButtons(word, definitionText, modelName);
       }
 
       adjustPopupPosition();
@@ -301,7 +306,7 @@ function redefineWithModel(word, modelId) {
 }
 
 // --- UPDATED function to only add Save button ---
-function createActionButtons(word, definition) {
+function createActionButtons(word, definition, modelName) {
   if (!popup) return;
 
   const actionsContainer = document.createElement('div');
@@ -381,7 +386,8 @@ function createActionButtons(word, definition) {
         type: "saveToHistory",
         word: word,
         definition: definition,
-        listId: selectedListId
+        listId: selectedListId,
+        modelName: modelName // --- NEW: Pass modelName ---
       }, (saveResponse) => {
         if (saveResponse && saveResponse.status === 'saved') {
           console.log('Definition saved to list.');

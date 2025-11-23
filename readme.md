@@ -18,6 +18,8 @@ A simple browser extension to get instant AI explanations for any word or phrase
         * Newline characters inside definitions.
         * Non-UTF-8 character encodings (like `windows-1252` from Excel).
         * Missing timestamps (it generates new ones).
+* ⏰ **Backup Reminder:** Set a daily or weekly reminder to backup your history so you never lose your saved words.
+
 
 ---
 

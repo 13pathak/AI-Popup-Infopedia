@@ -5,30 +5,31 @@
   "description": "Select a word to get an AI-powered explanation.",
   "permissions": [
     "storage",
-    "scripting"
+    "scripting",
+    "alarms"
   ],
   "host_permissions": [
     "https://generativelanguage.googleapis.com/",
     "http://localhost:11434/",
     "http://localhost:8765/"
   ],
-
   "background": {
     "service_worker": "background.js"
   },
-  
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["content.js"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content.js"
+      ],
       "all_frames": true,
       "match_about_blank": true,
       "run_at": "document_idle"
     }
   ],
-  
   "options_page": "options.html",
-
   "action": {
     "default_icon": {
       "16": "icons/icon16.png",
@@ -36,7 +37,6 @@
     },
     "default_title": "AI Popup Infopedia Settings"
   },
-
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",

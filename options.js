@@ -17,10 +17,15 @@ document.addEventListener('DOMContentLoaded', () => {
       if (tab.dataset.tab === "history-content") {
         loadLists(); // This will in turn load history for the selected list
       }
-      
+
       // --- NEW: Load Anki data when tab is clicked ---
       if (tab.dataset.tab === "anki-content") {
-          loadAnkiDecksAndModels();
+        loadAnkiDecksAndModels();
+      }
+
+      // --- NEW: Load Reminder settings when tab is clicked ---
+      if (tab.dataset.tab === "reminder-content") {
+        loadReminderSettings();
       }
     });
   });
@@ -29,6 +34,7 @@ document.addEventListener('DOMContentLoaded', () => {
   loadLists(); // Load lists on initial page load
   loadGlobalPrompt();
   loadAnkiSettings(); // Load saved Anki settings on page load
+  loadReminderSettings(); // Load saved Reminder settings on page load
 
   // --- REVISED: Model Management Event Listeners ---
   document.getElementById('add-model-btn').addEventListener('click', showModelForm);
@@ -73,183 +79,185 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('import-settings-file-input').click();
   });
   document.getElementById('import-settings-file-input').addEventListener('change', importAllSettings);
-  
+
   // --- NEW: ANKI EVENT LISTENERS ---
-  document.getElementById('anki-refresh-btn').addEventListener('click', loadAnkiDecksAndModels);
   document.getElementById('anki-save-settings-btn').addEventListener('click', saveAnkiSettings);
   document.getElementById('anki-model-select').addEventListener('change', (e) => loadAnkiFields(e.target.value));
+
+  // --- NEW: Reminder Event Listeners ---
+  document.getElementById('save-reminder-settings-btn').addEventListener('click', saveReminderSettings);
 });
 
 
 // --- NEW: MODEL MANAGEMENT ---
 
 function showModelForm(isEdit = false, model = {}) {
-    document.getElementById('form-title').textContent = isEdit ? 'Edit Model' : 'Add New Model';
-    document.getElementById('model-id').value = model.id || '';
-    document.getElementById('configName').value = model.name || '';
-    document.getElementById('endpoint').value = model.endpointUrl || 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
-    document.getElementById('modelName').value = model.modelName || 'gemini-1.5-flash-latest';
-    document.getElementById('apiKey').value = model.apiKey || '';
+  document.getElementById('form-title').textContent = isEdit ? 'Edit Model' : 'Add New Model';
+  document.getElementById('model-id').value = model.id || '';
+  document.getElementById('configName').value = model.name || '';
+  document.getElementById('endpoint').value = model.endpointUrl || 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
+  document.getElementById('modelName').value = model.modelName || 'gemini-1.5-flash-latest';
+  document.getElementById('apiKey').value = model.apiKey || '';
 
-    document.getElementById('model-form-container').style.display = 'block';
-    document.getElementById('model-selection-container').style.display = 'none';
-    document.getElementById('global-prompt-container').style.display = 'none';
+  document.getElementById('model-form-container').style.display = 'block';
+  document.getElementById('model-selection-container').style.display = 'none';
+  document.getElementById('global-prompt-container').style.display = 'none';
 }
 
 function hideModelForm() {
-    document.getElementById('model-form-container').style.display = 'none';
-    document.getElementById('model-selection-container').style.display = 'flex';
-    document.getElementById('global-prompt-container').style.display = 'block';
-    // Clear form fields
-    document.getElementById('model-id').value = '';
-    document.getElementById('configName').value = '';
-    document.getElementById('endpoint').value = '';
-    document.getElementById('modelName').value = '';
-    document.getElementById('apiKey').value = '';
+  document.getElementById('model-form-container').style.display = 'none';
+  document.getElementById('model-selection-container').style.display = 'flex';
+  document.getElementById('global-prompt-container').style.display = 'block';
+  // Clear form fields
+  document.getElementById('model-id').value = '';
+  document.getElementById('configName').value = '';
+  document.getElementById('endpoint').value = '';
+  document.getElementById('modelName').value = '';
+  document.getElementById('apiKey').value = '';
 }
 
 function saveModel() {
-    const modelId = document.getElementById('model-id').value;
-    const newModelConfig = {
-        id: modelId || `model_${new Date().getTime()}`,
-        name: document.getElementById('configName').value.trim(),
-        endpointUrl: document.getElementById('endpoint').value.trim(),
-        modelName: document.getElementById('modelName').value.trim(),
-        apiKey: document.getElementById('apiKey').value.trim()
-    };
+  const modelId = document.getElementById('model-id').value;
+  const newModelConfig = {
+    id: modelId || `model_${new Date().getTime()}`,
+    name: document.getElementById('configName').value.trim(),
+    endpointUrl: document.getElementById('endpoint').value.trim(),
+    modelName: document.getElementById('modelName').value.trim(),
+    apiKey: document.getElementById('apiKey').value.trim()
+  };
 
-    if (!newModelConfig.name || !newModelConfig.endpointUrl || !newModelConfig.modelName) {
-        updateStatus('Configuration Name, Endpoint URL, and Model Name are required.', 'error');
-        return;
+  if (!newModelConfig.name || !newModelConfig.endpointUrl || !newModelConfig.modelName) {
+    updateStatus('Configuration Name, Endpoint URL, and Model Name are required.', 'error');
+    return;
+  }
+
+  chrome.storage.sync.get(['models', 'defaultModelId'], (data) => {
+    let models = data.models || [];
+    if (modelId) { // Editing existing
+      models = models.map(m => m.id === modelId ? newModelConfig : m);
+    } else { // Adding new
+      models.push(newModelConfig);
     }
 
-    chrome.storage.sync.get(['models', 'defaultModelId'], (data) => {
-        let models = data.models || [];
-        if (modelId) { // Editing existing
-            models = models.map(m => m.id === modelId ? newModelConfig : m);
-        } else { // Adding new
-            models.push(newModelConfig);
-        }
+    // If this is the very first model, make it the default
+    let defaultModelId = data.defaultModelId;
+    if (!defaultModelId && models.length > 0) {
+      defaultModelId = models[0].id;
+    }
 
-        // If this is the very first model, make it the default
-        let defaultModelId = data.defaultModelId;
-        if (!defaultModelId && models.length > 0) {
-            defaultModelId = models[0].id;
-        }
-
-        chrome.storage.sync.set({ models, defaultModelId }, () => {
-            updateStatus('Model saved successfully!', 'success');
-            hideModelForm();
-            loadModels();
-        });
+    chrome.storage.sync.set({ models, defaultModelId }, () => {
+      updateStatus('Model saved successfully!', 'success');
+      hideModelForm();
+      loadModels();
     });
+  });
 }
 
 function loadModels() {
-    chrome.storage.sync.get(['models', 'defaultModelId'], (data) => {
-        const models = data.models || [];
-        const defaultModelId = data.defaultModelId;
-        const selectEl = document.getElementById('model-select');
-        const noModelsMsg = document.getElementById('no-models-message');
-        const editModelBtn = document.getElementById('edit-model-btn');
-        const deleteModelBtn = document.getElementById('delete-model-btn');
-        selectEl.innerHTML = '';
+  chrome.storage.sync.get(['models', 'defaultModelId'], (data) => {
+    const models = data.models || [];
+    const defaultModelId = data.defaultModelId;
+    const selectEl = document.getElementById('model-select');
+    const noModelsMsg = document.getElementById('no-models-message');
+    const editModelBtn = document.getElementById('edit-model-btn');
+    const deleteModelBtn = document.getElementById('delete-model-btn');
+    selectEl.innerHTML = '';
 
-        if (models.length === 0) {
-            noModelsMsg.style.display = 'block';
-            selectEl.style.display = 'none'; // Hide the select dropdown
-            editModelBtn.style.display = 'none'; // Hide edit button
-            deleteModelBtn.style.display = 'none'; // Hide delete button
-        } else {
-            noModelsMsg.style.display = 'none';
-            selectEl.style.display = 'block'; // Show the select dropdown
-            editModelBtn.style.display = 'inline-block'; // Show edit button
-            deleteModelBtn.style.display = 'inline-block'; // Show delete button
+    if (models.length === 0) {
+      noModelsMsg.style.display = 'block';
+      selectEl.style.display = 'none'; // Hide the select dropdown
+      editModelBtn.style.display = 'none'; // Hide edit button
+      deleteModelBtn.style.display = 'none'; // Hide delete button
+    } else {
+      noModelsMsg.style.display = 'none';
+      selectEl.style.display = 'block'; // Show the select dropdown
+      editModelBtn.style.display = 'inline-block'; // Show edit button
+      deleteModelBtn.style.display = 'inline-block'; // Show delete button
 
-            models.forEach(model => {
-                const option = document.createElement('option');
-                option.value = model.id;
-                option.textContent = model.name;
-                if (model.id === defaultModelId) {
-                    option.selected = true;
-                }
-                selectEl.appendChild(option);
-            });
+      models.forEach(model => {
+        const option = document.createElement('option');
+        option.value = model.id;
+        option.textContent = model.name;
+        if (model.id === defaultModelId) {
+          option.selected = true;
         }
-    });
+        selectEl.appendChild(option);
+      });
+    }
+  });
 }
 
 function editSelectedModel() {
-    const selectedId = document.getElementById('model-select').value;
-    if (!selectedId) {
-        alert("No model selected to edit.");
-        return;
+  const selectedId = document.getElementById('model-select').value;
+  if (!selectedId) {
+    alert("No model selected to edit.");
+    return;
+  }
+  chrome.storage.sync.get(['models'], (data) => {
+    const modelToEdit = (data.models || []).find(m => m.id === selectedId);
+    if (modelToEdit) {
+      showModelForm(true, modelToEdit);
     }
-    chrome.storage.sync.get(['models'], (data) => {
-        const modelToEdit = (data.models || []).find(m => m.id === selectedId);
-        if (modelToEdit) {
-            showModelForm(true, modelToEdit);
-        }
-    });
+  });
 }
 
 function deleteSelectedModel() {
-    const modelIdToDelete = document.getElementById('model-select').value;
-    if (!modelIdToDelete) {
-        alert("No model selected to delete.");
-        return;
+  const modelIdToDelete = document.getElementById('model-select').value;
+  if (!modelIdToDelete) {
+    alert("No model selected to delete.");
+    return;
+  }
+
+  if (!confirm('Are you sure you want to delete the selected model configuration?')) return;
+
+  chrome.storage.sync.get(['models', 'defaultModelId'], (data) => {
+    let models = data.models || [];
+    let defaultModelId = data.defaultModelId;
+
+    models = models.filter(m => m.id !== modelIdToDelete);
+
+    // If the deleted model was the default, pick a new default
+    if (defaultModelId === modelIdToDelete) {
+      defaultModelId = models.length > 0 ? models[0].id : null;
     }
 
-    if (!confirm('Are you sure you want to delete the selected model configuration?')) return;
-
-    chrome.storage.sync.get(['models', 'defaultModelId'], (data) => {
-        let models = data.models || [];
-        let defaultModelId = data.defaultModelId;
-
-        models = models.filter(m => m.id !== modelIdToDelete);
-
-        // If the deleted model was the default, pick a new default
-        if (defaultModelId === modelIdToDelete) {
-            defaultModelId = models.length > 0 ? models[0].id : null;
-        }
-
-        chrome.storage.sync.set({ models, defaultModelId }, () => {
-            updateStatus('Model deleted.', 'success');
-            loadModels();
-        });
+    chrome.storage.sync.set({ models, defaultModelId }, () => {
+      updateStatus('Model deleted.', 'success');
+      loadModels();
     });
+  });
 }
 
 function setDefaultModel(modelId) {
-    chrome.storage.sync.set({ defaultModelId: modelId }, () => {
-        updateStatus('Default model updated.', 'success');
-        loadModels();
-    });
+  chrome.storage.sync.set({ defaultModelId: modelId }, () => {
+    updateStatus('Default model updated.', 'success');
+    loadModels();
+  });
 }
 
 function saveGlobalPrompt() {
-    const customPrompt = document.getElementById('customPrompt').value;
-    chrome.storage.sync.set({ globalCustomPrompt: customPrompt }, () => {
-        updateStatus('Global prompt saved!', 'success');
-    });
+  const customPrompt = document.getElementById('customPrompt').value;
+  chrome.storage.sync.set({ globalCustomPrompt: customPrompt }, () => {
+    updateStatus('Global prompt saved!', 'success');
+  });
 }
 
 function loadGlobalPrompt() {
-    const defaultPrompt = "Explain {word} to a high schooler in 500 characters or less.";
-    chrome.storage.sync.get({
-        globalCustomPrompt: defaultPrompt
-    }, (items) => {
-        document.getElementById('customPrompt').value = items.globalCustomPrompt;
-    });
+  const defaultPrompt = "Explain {word} to a high schooler in 500 characters or less.";
+  chrome.storage.sync.get({
+    globalCustomPrompt: defaultPrompt
+  }, (items) => {
+    document.getElementById('customPrompt').value = items.globalCustomPrompt;
+  });
 }
 
 function updateStatus(message, type = 'info') {
-    const statusEl = document.getElementById('status');
-    statusEl.textContent = message;
-    statusEl.style.color = type === 'error' ? '#d9534f' : (type === 'success' ? '#5cb85c' : '#eee');
-    setTimeout(() => {
-        statusEl.textContent = '';
-    }, 3000);
+  const statusEl = document.getElementById('status');
+  statusEl.textContent = message;
+  statusEl.style.color = type === 'error' ? '#d9534f' : (type === 'success' ? '#5cb85c' : '#eee');
+  setTimeout(() => {
+    statusEl.textContent = '';
+  }, 3000);
 }
 
 // ---
@@ -260,7 +268,7 @@ async function exportAllSettings() {
   try {
     // 1. Get all data from sync storage (models, prompts)
     const syncData = await new Promise(resolve => chrome.storage.sync.get(null, resolve));
-    
+
     // --- NEW: Exclude Anki settings from this export ---
     delete syncData.ankiSettings;
 
@@ -310,19 +318,19 @@ function importAllSettings(event) {
         updateGlobalIOStatus('Import cancelled.', 'info');
         return;
       }
-      
+
       // --- NEW: Get Anki settings to preserve them ---
       const ankiSettings = await new Promise(resolve => chrome.storage.sync.get('ankiSettings', resolve));
 
       // Clear existing sync storage before importing
       await new Promise(resolve => chrome.storage.sync.clear(resolve));
-      
+
       // Import new data into sync storage
       await new Promise(resolve => chrome.storage.sync.set(settings.syncData, resolve));
-      
+
       // --- NEW: Restore Anki settings ---
       if (ankiSettings.ankiSettings) {
-          await new Promise(resolve => chrome.storage.sync.set(ankiSettings, resolve));
+        await new Promise(resolve => chrome.storage.sync.set(ankiSettings, resolve));
       }
 
       updateGlobalIOStatus('Settings imported successfully! Reloading...', 'success');
@@ -350,15 +358,15 @@ function importAllSettings(event) {
 }
 
 function updateGlobalIOStatus(message, type = 'info') {
-    const statusEl = document.getElementById('global-io-status');
-    if (!statusEl) return;
+  const statusEl = document.getElementById('global-io-status');
+  if (!statusEl) return;
 
-    statusEl.textContent = message;
-    statusEl.style.color = type === 'error' ? '#d9534f' : (type === 'success' ? '#5cb85c' : '#eee');
-    
-    setTimeout(() => {
-        statusEl.textContent = '';
-    }, 5000);
+  statusEl.textContent = message;
+  statusEl.style.color = type === 'error' ? '#d9534f' : (type === 'success' ? '#5cb85c' : '#eee');
+
+  setTimeout(() => {
+    statusEl.textContent = '';
+  }, 5000);
 }
 
 
@@ -367,146 +375,146 @@ function updateGlobalIOStatus(message, type = 'info') {
 // ---
 
 function loadLists() {
-    chrome.storage.local.get({ wordLists: [] }, (data) => {
-        let lists = data.wordLists;
-        const listSelect = document.getElementById('list-select');
-        const renameBtn = document.getElementById('rename-list-btn');
-        const deleteBtn = document.getElementById('delete-list-btn');
-        const moveUpBtn = document.getElementById('move-list-up-btn');
-        const moveDownBtn = document.getElementById('move-list-down-btn');
-        const clearListBtn = document.getElementById('clear-list-history');
-        const currentVal = listSelect.value;
-        listSelect.innerHTML = '';
+  chrome.storage.local.get({ wordLists: [] }, (data) => {
+    let lists = data.wordLists;
+    const listSelect = document.getElementById('list-select');
+    const renameBtn = document.getElementById('rename-list-btn');
+    const deleteBtn = document.getElementById('delete-list-btn');
+    const moveUpBtn = document.getElementById('move-list-up-btn');
+    const moveDownBtn = document.getElementById('move-list-down-btn');
+    const clearListBtn = document.getElementById('clear-list-history');
+    const currentVal = listSelect.value;
+    listSelect.innerHTML = '';
 
-        if (lists.length === 0) {
-            // --- NEW: Handle empty state ---
-            renameBtn.disabled = true;
-            deleteBtn.disabled = true;
-            moveUpBtn.disabled = true;
-            moveDownBtn.disabled = true;
-            clearListBtn.style.display = 'none'; // Hide button
-            loadHistory(null); // Load history with no list ID
-        } else {
-            renameBtn.disabled = false;
-            deleteBtn.disabled = false;
-            
-            // --- NEW: Show and update clear list button ---
-            const selectedListName = listSelect.options[listSelect.selectedIndex]?.text || lists[0].name;
-            clearListBtn.textContent = `Clear Selected List`;
-            clearListBtn.style.display = 'inline-block';
-            // Buttons will be enabled/disabled later based on selection
-        }
+    if (lists.length === 0) {
+      // --- NEW: Handle empty state ---
+      renameBtn.disabled = true;
+      deleteBtn.disabled = true;
+      moveUpBtn.disabled = true;
+      moveDownBtn.disabled = true;
+      clearListBtn.style.display = 'none'; // Hide button
+      loadHistory(null); // Load history with no list ID
+    } else {
+      renameBtn.disabled = false;
+      deleteBtn.disabled = false;
 
-        lists.forEach(list => {
-            const option = document.createElement('option');
-            option.value = list.id;
-            option.textContent = list.name;
-            listSelect.appendChild(option);
-        });
+      // --- NEW: Show and update clear list button ---
+      const selectedListName = listSelect.options[listSelect.selectedIndex]?.text || lists[0].name;
+      clearListBtn.textContent = `Clear Selected List`;
+      clearListBtn.style.display = 'inline-block';
+      // Buttons will be enabled/disabled later based on selection
+    }
 
-        // Try to re-select the previously selected list
-        if (currentVal && listSelect.querySelector(`option[value="${currentVal}"]`)) {
-            listSelect.value = currentVal;
-        }
-
-        // --- NEW: Disable/Enable move buttons based on selection ---
-        const selectedIndex = listSelect.selectedIndex;
-        const listCount = lists.length;
-        moveUpBtn.disabled = selectedIndex <= 0;
-        moveDownBtn.disabled = selectedIndex >= listCount - 1 || listCount <= 1;
-
-        // --- NEW: Update clear list button text on change ---
-        if (lists.length > 0) {
-            clearListBtn.textContent = `Clear Selected List`;
-        }
-
-        // Load history for the currently selected list
-        loadHistory(listSelect.value);
+    lists.forEach(list => {
+      const option = document.createElement('option');
+      option.value = list.id;
+      option.textContent = list.name;
+      listSelect.appendChild(option);
     });
+
+    // Try to re-select the previously selected list
+    if (currentVal && listSelect.querySelector(`option[value="${currentVal}"]`)) {
+      listSelect.value = currentVal;
+    }
+
+    // --- NEW: Disable/Enable move buttons based on selection ---
+    const selectedIndex = listSelect.selectedIndex;
+    const listCount = lists.length;
+    moveUpBtn.disabled = selectedIndex <= 0;
+    moveDownBtn.disabled = selectedIndex >= listCount - 1 || listCount <= 1;
+
+    // --- NEW: Update clear list button text on change ---
+    if (lists.length > 0) {
+      clearListBtn.textContent = `Clear Selected List`;
+    }
+
+    // Load history for the currently selected list
+    loadHistory(listSelect.value);
+  });
 }
 
 function addList() {
-    const listName = prompt("Enter the name for the new list:");
-    if (listName && listName.trim()) {
-        chrome.storage.local.get({ wordLists: [] }, (data) => {
-            const lists = data.wordLists;
-            const newList = { id: `list_${new Date().getTime()}`, name: listName.trim() };
-            lists.push(newList);
-            chrome.storage.local.set({ wordLists: lists }, () => {
-                updateStatus('List created!', 'success');
-                loadLists();
-            });
-        });
-    }
+  const listName = prompt("Enter the name for the new list:");
+  if (listName && listName.trim()) {
+    chrome.storage.local.get({ wordLists: [] }, (data) => {
+      const lists = data.wordLists;
+      const newList = { id: `list_${new Date().getTime()}`, name: listName.trim() };
+      lists.push(newList);
+      chrome.storage.local.set({ wordLists: lists }, () => {
+        updateStatus('List created!', 'success');
+        loadLists();
+      });
+    });
+  }
 }
 
 function renameList() {
-    const listSelect = document.getElementById('list-select');
-    const listId = listSelect.value;
-    if (!listId) return;
+  const listSelect = document.getElementById('list-select');
+  const listId = listSelect.value;
+  if (!listId) return;
 
-    const currentName = listSelect.options[listSelect.selectedIndex].text;
-    const newName = prompt("Enter the new name for the list:", currentName);
+  const currentName = listSelect.options[listSelect.selectedIndex].text;
+  const newName = prompt("Enter the new name for the list:", currentName);
 
-    if (newName && newName.trim() && newName.trim() !== currentName) {
-        chrome.storage.local.get({ wordLists: [] }, (data) => {
-            const lists = data.wordLists.map(list => 
-                list.id === listId ? { ...list, name: newName.trim() } : list
-            );
-            chrome.storage.local.set({ wordLists: lists }, () => {
-                updateStatus('List renamed!', 'success');
-                loadLists();
-            });
-        });
-    }
+  if (newName && newName.trim() && newName.trim() !== currentName) {
+    chrome.storage.local.get({ wordLists: [] }, (data) => {
+      const lists = data.wordLists.map(list =>
+        list.id === listId ? { ...list, name: newName.trim() } : list
+      );
+      chrome.storage.local.set({ wordLists: lists }, () => {
+        updateStatus('List renamed!', 'success');
+        loadLists();
+      });
+    });
+  }
 }
 
 function deleteList() {
-    const listSelect = document.getElementById('list-select');
-    const listId = listSelect.value;
-    if (!listId || listSelect.options.length <= 1) {
-        alert("You cannot delete the last remaining list.");
-        return;
-    }
+  const listSelect = document.getElementById('list-select');
+  const listId = listSelect.value;
+  if (!listId || listSelect.options.length <= 1) {
+    alert("You cannot delete the last remaining list.");
+    return;
+  }
 
-    if (confirm("Are you sure you want to delete this list? Words in it will NOT be deleted but will become unlisted.")) {
-        chrome.storage.local.get({ wordLists: [] }, (data) => {
-            const lists = data.wordLists.filter(list => list.id !== listId);
-            chrome.storage.local.set({ wordLists: lists }, () => {
-                updateStatus('List deleted.', 'success');
-                loadLists();
-            });
-        });
-    }
+  if (confirm("Are you sure you want to delete this list? Words in it will NOT be deleted but will become unlisted.")) {
+    chrome.storage.local.get({ wordLists: [] }, (data) => {
+      const lists = data.wordLists.filter(list => list.id !== listId);
+      chrome.storage.local.set({ wordLists: lists }, () => {
+        updateStatus('List deleted.', 'success');
+        loadLists();
+      });
+    });
+  }
 }
 
 // --- NEW: Function to move a list up or down ---
 function moveList(direction) {
-    const listSelect = document.getElementById('list-select');
-    const selectedId = listSelect.value;
-    if (!selectedId) return;
+  const listSelect = document.getElementById('list-select');
+  const selectedId = listSelect.value;
+  if (!selectedId) return;
 
-    chrome.storage.local.get({ wordLists: [] }, (data) => {
-        let lists = data.wordLists;
-        const index = lists.findIndex(list => list.id === selectedId);
+  chrome.storage.local.get({ wordLists: [] }, (data) => {
+    let lists = data.wordLists;
+    const index = lists.findIndex(list => list.id === selectedId);
 
-        if (direction === 'up' && index > 0) {
-            // Swap with the element before it
-            [lists[index - 1], lists[index]] = [lists[index], lists[index - 1]];
-        } else if (direction === 'down' && index < lists.length - 1) {
-            // Swap with the element after it
-            [lists[index + 1], lists[index]] = [lists[index], lists[index + 1]];
-        } else {
-            return; // Can't move further
-        }
+    if (direction === 'up' && index > 0) {
+      // Swap with the element before it
+      [lists[index - 1], lists[index]] = [lists[index], lists[index - 1]];
+    } else if (direction === 'down' && index < lists.length - 1) {
+      // Swap with the element after it
+      [lists[index + 1], lists[index]] = [lists[index], lists[index + 1]];
+    } else {
+      return; // Can't move further
+    }
 
-        // Save the reordered list and reload the UI
-        chrome.storage.local.set({ wordLists: lists }, () => {
-            // We don't need to show a status message for this, the change is visual
-            // The `loadLists` function will preserve the selection and update the UI
-            loadLists();
-        });
+    // Save the reordered list and reload the UI
+    chrome.storage.local.set({ wordLists: lists }, () => {
+      // We don't need to show a status message for this, the change is visual
+      // The `loadLists` function will preserve the selection and update the UI
+      loadLists();
     });
+  });
 }
 
 
@@ -514,12 +522,12 @@ function moveList(direction) {
 function loadHistory(listId) {
   const historyList = document.getElementById('history-list');
   const noHistoryMessage = document.getElementById('no-history-message');
-  historyList.innerHTML = ''; 
+  historyList.innerHTML = '';
 
   chrome.storage.local.get(['history'], (result) => {
     // If no listId is provided (e.g., no lists exist), show no items.
     // Otherwise, filter for the selected list.
-    const history = listId 
+    const history = listId
       ? (result.history || []).filter(item => item.listId === listId)
       : [];
 
@@ -529,7 +537,7 @@ function loadHistory(listId) {
     } else {
       noHistoryMessage.style.display = 'none';
       historyList.style.display = 'block';
-      
+
       history.forEach(item => {
         const itemElement = document.createElement('div');
         itemElement.className = 'history-item';
@@ -545,9 +553,10 @@ function loadHistory(listId) {
         displayView.innerHTML = `
           <div class="history-word">${escapeHTML(item.word)}</div>
           <div class="history-definition">${formattedDefinition}</div>
+          <div class="history-model" style="font-size: 0.8em; color: #888; margin-top: 4px;">Model: ${escapeHTML(item.modelName || 'Unknown')}</div>
         `;
         itemElement.appendChild(displayView);
-        
+
         // --- NEW: Add Anki Button ---
         const ankiButton = document.createElement('button');
         ankiButton.className = 'anki-item-btn';
@@ -560,19 +569,19 @@ function loadHistory(listId) {
 
         const editButton = document.createElement('button');
         editButton.className = 'edit-item-btn';
-        editButton.innerHTML = '&#9998;'; 
+        editButton.innerHTML = '&#9998;';
         editButton.title = 'Edit this item';
-        editButton.dataset.timestamp = item.timestamp; 
+        editButton.dataset.timestamp = item.timestamp;
         editButton.addEventListener('click', handleEditClick);
         itemElement.appendChild(editButton);
 
         const deleteButton = document.createElement('button');
         deleteButton.className = 'delete-item-btn';
-        deleteButton.innerHTML = '&#128465;'; 
+        deleteButton.innerHTML = '&#128465;';
         deleteButton.title = 'Delete this item';
-        deleteButton.dataset.timestamp = item.timestamp; 
+        deleteButton.dataset.timestamp = item.timestamp;
         deleteButton.addEventListener('click', handleDeleteClick);
-        
+
         itemElement.appendChild(deleteButton);
         historyList.appendChild(itemElement);
       });
@@ -593,11 +602,11 @@ function handleEditClick(event) {
 
   const wordDiv = itemElement.querySelector('.history-word');
   const definitionDiv = itemElement.querySelector('.history-definition');
-  
+
   const currentWord = wordDiv.textContent;
   const currentDefinitionText = definitionDiv.innerHTML
-    .replace(/<br\s*\/?>/gi, '\n') 
-    .replace(/<strong>(.*?)<\/strong>/gi, '**$1**'); 
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<strong>(.*?)<\/strong>/gi, '**$1**');
 
   itemElement.querySelector('.display-view').style.display = 'none';
   itemElement.querySelector('.anki-item-btn').style.display = 'none'; // --- NEW: Hide Anki button ---
@@ -648,7 +657,7 @@ function handleEditClick(event) {
   cancelBtn.addEventListener('click', handleCancelClick);
 
   actionsDiv.append(saveBtn, cancelBtn);
-  
+
   // Add the controls to the item element
   editControlsContainer.prepend(editWordInput); // Word input at the top
   itemElement.append(editControlsContainer, editDefinitionTextarea, actionsDiv);
@@ -677,7 +686,7 @@ function handleCancelClick(event) {
 function updateHistoryItem(timestamp, newWord, newDefinition, newListId) {
   chrome.storage.local.get(['history'], (result) => {
     let history = result.history || [];
-    
+
     const newHistory = history.map(item => {
       if (item.timestamp === timestamp) {
         return {
@@ -701,7 +710,7 @@ function updateHistoryItem(timestamp, newWord, newDefinition, newListId) {
 function handleDeleteClick(event) {
   const btn = event.currentTarget;
   const timestamp = btn.dataset.timestamp;
-  
+
   if (timestamp) {
     deleteHistoryItem(timestamp);
   }
@@ -731,29 +740,29 @@ function clearAllHistory() {
 
 // --- NEW: Function to clear history for a specific list ---
 function clearListHistory() {
-    const listSelect = document.getElementById('list-select');
-    const listId = listSelect.value;
-    const listName = listSelect.options[listSelect.selectedIndex]?.text;
+  const listSelect = document.getElementById('list-select');
+  const listId = listSelect.value;
+  const listName = listSelect.options[listSelect.selectedIndex]?.text;
 
-    if (!listId) return;
+  if (!listId) return;
 
-    if (confirm(`Are you sure you want to clear all words from the "${listName}" list? This cannot be undone.`)) {
-        chrome.storage.local.get(['history'], (result) => {
-            let history = result.history || [];
-            // Keep all items that DO NOT belong to the selected list
-            const newHistory = history.filter(item => item.listId !== listId);
+  if (confirm(`Are you sure you want to clear all words from the "${listName}" list? This cannot be undone.`)) {
+    chrome.storage.local.get(['history'], (result) => {
+      let history = result.history || [];
+      // Keep all items that DO NOT belong to the selected list
+      const newHistory = history.filter(item => item.listId !== listId);
 
-            chrome.storage.local.set({ history: newHistory }, () => {
-                updateIOStatus(`History for "${listName}" cleared.`, 'success');
-                loadHistory(listId); // Reload the view for the current list
-            });
-        });
-    }
+      chrome.storage.local.set({ history: newHistory }, () => {
+        updateIOStatus(`History for "${listName}" cleared.`, 'success');
+        loadHistory(listId); // Reload the view for the current list
+      });
+    });
+  }
 }
 
 // --- escapeHTML ---
 function escapeHTML(str) {
-  return str.replace(/[&<>"']/g, function(m) {
+  return str.replace(/[&<>"']/g, function (m) {
     return {
       '&': '&amp;',
       '<': '&lt;',
@@ -773,12 +782,12 @@ function escapeHTML(str) {
 function updateIOStatus(message, type = 'info') {
   const statusEl1 = document.getElementById('io-status');
   const statusEl2 = document.getElementById('io-status-all');
-  
+
   [statusEl1, statusEl2].forEach(el => {
     el.textContent = message;
     el.style.color = type === 'error' ? '#d9534f' : (type === 'success' ? '#5cb85c' : '#eee');
   });
-  
+
   // Clear message after 5 seconds
   setTimeout(() => {
     statusEl1.textContent = '';
@@ -810,32 +819,33 @@ function exportHistory() {
   chrome.storage.local.get(['history', 'wordLists'], (result) => {
     const allHistory = result.history || [];
     const wordLists = result.wordLists || [];
-    
+
     // Create a map for quick lookup of list names by ID
     const listIdToNameMap = {};
     wordLists.forEach(list => {
       listIdToNameMap[list.id] = list.name;
     });
-    
+
     // --- REVISED: Filter history for the selected list ---
     const historyToExport = allHistory.filter(item => item.listId === selectedListId);
-    
+
     if (historyToExport.length === 0) {
       updateIOStatus(`The list "${selectedListName}" is empty. Nothing to export.`, "error");
       return;
     }
 
     // --- REVISED HEADERS: Use 'listName' instead of 'listId' ---
-    const headers = ['timestamp', 'word', 'definition', 'listName'];
+    const headers = ['timestamp', 'word', 'definition', 'listName', 'modelName'];
     const csvRows = [
-      headers.join(','), 
+      headers.join(','),
       ...historyToExport.map(item => [
         escapeCSV(item.timestamp),
         escapeCSV(item.word),
         escapeCSV(item.definition),
         // --- REVISED: Get list name from map, default to 'Unlisted' if not found ---
         // This handles cases where an item's listId might no longer correspond to an existing list
-        escapeCSV(listIdToNameMap[item.listId] || 'Unlisted') 
+        escapeCSV(listIdToNameMap[item.listId] || 'Unlisted'),
+        escapeCSV(item.modelName || '')
       ].join(','))
     ];
 
@@ -848,13 +858,16 @@ function exportHistory() {
     link.href = url;
     link.download = `ai_infopedia_${safeFilename}.csv`; // --- REVISED: Dynamic filename ---
     link.style.display = 'none';
-    
+
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    
-    URL.revokeObjectURL(url); 
+
+    URL.revokeObjectURL(url);
     updateIOStatus(`List "${selectedListName}" exported successfully!`, "success");
+
+    // --- NEW: Reset backup reminder ---
+    resetBackupReminder();
   });
 }
 
@@ -864,7 +877,7 @@ function exportAllHistory() {
   chrome.storage.local.get(['history', 'wordLists'], (result) => {
     const allHistory = result.history || [];
     const wordLists = result.wordLists || [];
-    
+
     if (allHistory.length === 0) {
       updateIOStatus("History is empty. Nothing to export.", "error");
       return;
@@ -875,16 +888,17 @@ function exportAllHistory() {
     wordLists.forEach(list => {
       listIdToNameMap[list.id] = list.name;
     });
-    
-    const headers = ['timestamp', 'word', 'definition', 'listName'];
+
+    const headers = ['timestamp', 'word', 'definition', 'listName', 'modelName'];
     const csvRows = [
-      headers.join(','), 
+      headers.join(','),
       ...allHistory.map(item => [
         escapeCSV(item.timestamp),
         escapeCSV(item.word),
         escapeCSV(item.definition),
         // Get list name from map, default to 'Unlisted' if not found
-        escapeCSV(listIdToNameMap[item.listId] || 'Unlisted') 
+        escapeCSV(listIdToNameMap[item.listId] || 'Unlisted'),
+        escapeCSV(item.modelName || '')
       ].join(','))
     ];
 
@@ -892,18 +906,22 @@ function exportAllHistory() {
     // --- FIX: Add UTF-8 BOM for Excel compatibility ---
     const blob = new Blob(['\uFEFF' + csvString], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
-    
+
     const link = document.createElement('a');
     link.href = url;
     link.download = `ai_infopedia_all_history.csv`; // Static filename for global export
     link.style.display = 'none';
-    
+
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    
-    URL.revokeObjectURL(url); 
+
+    URL.revokeObjectURL(url);
+    URL.revokeObjectURL(url);
     updateIOStatus(`All history exported successfully!`, "success");
+
+    // --- NEW: Reset backup reminder ---
+    resetBackupReminder();
   });
 }
 
@@ -926,7 +944,7 @@ function parseCSV(text) {
       if (char === '"') {
         if (nextChar === '"') {
           currentField += '"';
-          i++; 
+          i++;
         } else {
           inQuotes = false;
         }
@@ -949,7 +967,7 @@ function parseCSV(text) {
       }
     }
   }
-  
+
   return rows.filter(row => row.length > 1 || (row.length === 1 && row[0] !== ''));
 }
 
@@ -967,10 +985,10 @@ function importHistory(event) {
   reader.onload = (e) => {
     // --- NEW: Handle character encoding ---
     const arrayBuffer = e.target.result;
-    
+
     // Use TextDecoder to specify the encoding. 
     // --- FIX: Use UTF-8 which matches the export format. The 'fatal: false' allows it to handle other encodings gracefully. ---
-    const decoder = new TextDecoder('utf-8', { fatal: false }); 
+    const decoder = new TextDecoder('utf-8', { fatal: false });
     const text = decoder.decode(arrayBuffer);
 
     const rows = parseCSV(text);
@@ -982,17 +1000,19 @@ function importHistory(event) {
 
     const newItems = [];
     let parseErrors = 0;
-    
+
     const headers = rows[0].map(h => h.trim());
     const tsIndex = headers.indexOf('timestamp');
     const wordIndex = headers.indexOf('word');
     const defIndex = headers.indexOf('definition');
     // --- NEW: Get listName index ---
-    const listNameIndex = headers.indexOf('listName'); 
+    const listNameIndex = headers.indexOf('listName');
+    // --- NEW: Get modelName index ---
+    const modelNameIndex = headers.indexOf('modelName');
 
     if (tsIndex === -1 || wordIndex === -1 || defIndex === -1) {
-        updateIOStatus("File is missing required headers: timestamp, word, or definition.", "error");
-        return;
+      updateIOStatus("File is missing required headers: timestamp, word, or definition.", "error");
+      return;
     }
 
     for (let i = 1; i < rows.length; i++) {
@@ -1002,7 +1022,7 @@ function importHistory(event) {
       }
 
       // Check if fields length matches headers length, or if listName is optional
-      if (fields.length >= headers.length - (listNameIndex === -1 ? 1 : 0)) {
+      if (fields.length >= headers.length - (listNameIndex === -1 ? 1 : 0) - (modelNameIndex === -1 ? 1 : 0)) {
         const newItem = {
           timestamp: fields[tsIndex],
           word: fields[wordIndex],
@@ -1010,15 +1030,19 @@ function importHistory(event) {
         };
         // --- NEW: Add listName to newItem if present in CSV ---
         if (listNameIndex !== -1 && fields[listNameIndex]) {
-            newItem.listName = fields[listNameIndex];
+          newItem.listName = fields[listNameIndex];
+        }
+        // --- NEW: Add modelName to newItem if present in CSV ---
+        if (modelNameIndex !== -1 && fields[modelNameIndex]) {
+          newItem.modelName = fields[modelNameIndex];
         }
         newItems.push(newItem);
       } else {
-        console.warn(`Skipping malformed CSV line (line ${i+1}): Expected ${headers.length} fields, found ${fields.length}`);
+        console.warn(`Skipping malformed CSV line (line ${i + 1}): Expected ${headers.length} fields, found ${fields.length}`);
         parseErrors++;
       }
     }
-    
+
     mergeHistory(newItems, parseErrors);
   };
 
@@ -1028,7 +1052,7 @@ function importHistory(event) {
 
   // --- CHANGED: Read as ArrayBuffer instead of Text ---
   reader.readAsArrayBuffer(file);
-  
+
   event.target.value = null;
 }
 // --- END UPDATED FUNCTION ---
@@ -1042,16 +1066,16 @@ function mergeHistory(newItems, parseErrors) {
 
   chrome.storage.local.get(['history', 'wordLists'], (result) => {
     const oldHistory = result.history || [];
-    
+
     const historyMap = new Map();
     oldHistory.forEach(item => historyMap.set(item.timestamp, item));
-    
+
     let added = 0;
     let duplicates = 0;
 
     // --- NEW: Handle wordLists for import ---
     let wordLists = result.wordLists || [];
-    
+
     // Create a map for quick lookup of list IDs by name
     const listNameToIdMap = {};
     wordLists.forEach(list => {
@@ -1066,7 +1090,7 @@ function mergeHistory(newItems, parseErrors) {
       if (!item.word || !item.definition) {
         console.warn("Skipping item with missing data (word or definition):", item);
         parseErrors++;
-        return; 
+        return;
       }
 
       let timestamp = item.timestamp;
@@ -1077,32 +1101,32 @@ function mergeHistory(newItems, parseErrors) {
         item.timestamp = timestamp;
         isNew = true;
       }
-      
+
       // --- NEW: Determine listId for the imported item ---
       let targetListId;
       if (item.listName) {
-          // If listName is provided in CSV
-          if (listNameToIdMap[item.listName]) {
-              // List already exists, use its ID
-              targetListId = listNameToIdMap[item.listName];
-          } else {
-              // List does not exist, create a new one
-              const newListId = `list_${new Date().getTime()}_${Math.random().toString(36).substring(2, 9)}`;
-              const newList = { id: newListId, name: item.listName };
-              wordLists.push(newList);
-              listNameToIdMap[item.listName] = newListId; // Update map
-              targetListId = newListId;
-              wordListsModified = true; // Mark for saving
-          }
+        // If listName is provided in CSV
+        if (listNameToIdMap[item.listName]) {
+          // List already exists, use its ID
+          targetListId = listNameToIdMap[item.listName];
+        } else {
+          // List does not exist, create a new one
+          const newListId = `list_${new Date().getTime()}_${Math.random().toString(36).substring(2, 9)}`;
+          const newList = { id: newListId, name: item.listName };
+          wordLists.push(newList);
+          listNameToIdMap[item.listName] = newListId; // Update map
+          targetListId = newListId;
+          wordListsModified = true; // Mark for saving
+        }
       } else {
-          // If listName is NOT provided in CSV (e.g., old format), assign to currently selected list
-          targetListId = currentSelectedListId;
+        // If listName is NOT provided in CSV (e.g., old format), assign to currently selected list
+        targetListId = currentSelectedListId;
       }
       item.listId = targetListId;
 
       // If there are no lists at all, the item will be unassigned, which is fine.
       if (!targetListId) {
-          item.listId = null;
+        item.listId = null;
       }
 
       if (isNew || !historyMap.has(timestamp)) {
@@ -1119,7 +1143,7 @@ function mergeHistory(newItems, parseErrors) {
     // Prepare storage update
     const storageUpdates = { history: mergedHistory };
     if (wordListsModified) {
-        storageUpdates.wordLists = wordLists;
+      storageUpdates.wordLists = wordLists;
     }
     chrome.storage.local.set(storageUpdates, () => {
       loadLists(); // Refresh the UI, which will also reload history
@@ -1144,29 +1168,29 @@ function mergeHistory(newItems, parseErrors) {
  * @throws {Error} - If the Anki Connect call returns an error.
  */
 async function ankiConnectRequest(action, params = {}, version = 6) {
-    try {
-        const response = await fetch('http://localhost:8765', {
-            method: 'POST',
-            body: JSON.stringify({ action, version, params })
-        });
-        
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
+  try {
+    const response = await fetch('http://localhost:8765', {
+      method: 'POST',
+      body: JSON.stringify({ action, version, params })
+    });
 
-        const data = await response.json();
-        
-        if (data.error) {
-            throw new Error(data.error);
-        }
-        
-        return data.result;
-
-    } catch (e) {
-        console.error("Anki Connect request failed:", action, e);
-        // Re-throw the error so it can be caught by the calling function
-        throw e;
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
     }
+
+    const data = await response.json();
+
+    if (data.error) {
+      throw new Error(data.error);
+    }
+
+    return data.result;
+
+  } catch (e) {
+    console.error("Anki Connect request failed:", action, e);
+    // Re-throw the error so it can be caught by the calling function
+    throw e;
+  }
 }
 
 /**
@@ -1175,62 +1199,62 @@ async function ankiConnectRequest(action, params = {}, version = 6) {
  * @param {'info' | 'success' | 'error'} type - The type of message.
  */
 function updateAnkiStatus(message, type = 'info') {
-    const statusEl = document.getElementById('anki-status');
-    if (!statusEl) return;
-    statusEl.textContent = message;
-    statusEl.style.color = type === 'error' ? '#d9534f' : (type === 'success' ? '#5cb85c' : '#eee');
-    
-    // Do not auto-clear error messages
-    if (type !== 'error') {
-        setTimeout(() => {
-            if (statusEl.textContent === message) {
-                statusEl.textContent = '';
-            }
-        }, 4000);
-    }
+  const statusEl = document.getElementById('anki-status');
+  if (!statusEl) return;
+  statusEl.textContent = message;
+  statusEl.style.color = type === 'error' ? '#d9534f' : (type === 'success' ? '#5cb85c' : '#eee');
+
+  // Do not auto-clear error messages
+  if (type !== 'error') {
+    setTimeout(() => {
+      if (statusEl.textContent === message) {
+        statusEl.textContent = '';
+      }
+    }, 4000);
+  }
 }
 
 /**
  * Fetches deck names and model names from Anki Connect and populates the dropdowns.
  */
 async function loadAnkiDecksAndModels() {
-    updateAnkiStatus('Connecting to Anki...', 'info');
-    
-    try {
-        // Fetch decks and models in parallel
-        const [deckNames, modelNames] = await Promise.all([
-            ankiConnectRequest('deckNames'),
-            ankiConnectRequest('modelNames')
-        ]);
+  updateAnkiStatus('Connecting to Anki...', 'info');
 
-        // Populate Decks
-        const deckSelect = document.getElementById('anki-deck-select');
-        deckSelect.innerHTML = '<option value="">-- Select Deck --</option>'; // Clear old options
-        deckNames.forEach(name => {
-            const option = document.createElement('option');
-            option.value = name;
-            option.textContent = name;
-            deckSelect.appendChild(option);
-        });
+  try {
+    // Fetch decks and models in parallel
+    const [deckNames, modelNames] = await Promise.all([
+      ankiConnectRequest('deckNames'),
+      ankiConnectRequest('modelNames')
+    ]);
 
-        // Populate Models
-        const modelSelect = document.getElementById('anki-model-select');
-        modelSelect.innerHTML = '<option value="">-- Select Note Type --</option>'; // Clear old options
-        modelNames.forEach(name => {
-            const option = document.createElement('option');
-            option.value = name;
-            option.textContent = name;
-            modelSelect.appendChild(option);
-        });
-        
-        updateAnkiStatus('Connected! Please configure your settings.', 'success');
-        
-        // After loading, re-apply any saved settings
-        await loadAnkiSettings();
+    // Populate Decks
+    const deckSelect = document.getElementById('anki-deck-select');
+    deckSelect.innerHTML = '<option value="">-- Select Deck --</option>'; // Clear old options
+    deckNames.forEach(name => {
+      const option = document.createElement('option');
+      option.value = name;
+      option.textContent = name;
+      deckSelect.appendChild(option);
+    });
 
-    } catch (e) {
-        updateAnkiStatus(`Error: ${e.message}. Is Anki running with Anki Connect?`, 'error');
-    }
+    // Populate Models
+    const modelSelect = document.getElementById('anki-model-select');
+    modelSelect.innerHTML = '<option value="">-- Select Note Type --</option>'; // Clear old options
+    modelNames.forEach(name => {
+      const option = document.createElement('option');
+      option.value = name;
+      option.textContent = name;
+      modelSelect.appendChild(option);
+    });
+
+    updateAnkiStatus('Connected! Please configure your settings.', 'success');
+
+    // After loading, re-apply any saved settings
+    await loadAnkiSettings();
+
+  } catch (e) {
+    updateAnkiStatus(`Error: ${e.message}. Is Anki running with Anki Connect?`, 'error');
+  }
 }
 
 /**
@@ -1238,93 +1262,93 @@ async function loadAnkiDecksAndModels() {
  * @param {string} modelName - The name of the Anki model to get fields for.
  */
 async function loadAnkiFields(modelName) {
-    const fieldsContainer = document.getElementById('anki-fields-mapping');
-    const wordFieldSelect = document.getElementById('anki-word-field-select');
-    const defFieldSelect = document.getElementById('anki-definition-field-select');
-    
-    // Clear old fields
-    wordFieldSelect.innerHTML = '<option value="">-- Select Field --</option>';
-    defFieldSelect.innerHTML = '<option value="">-- Select Field --</option>';
+  const fieldsContainer = document.getElementById('anki-fields-mapping');
+  const wordFieldSelect = document.getElementById('anki-word-field-select');
+  const defFieldSelect = document.getElementById('anki-definition-field-select');
 
-    if (!modelName) {
-        fieldsContainer.style.display = 'none';
-        return;
-    }
+  // Clear old fields
+  wordFieldSelect.innerHTML = '<option value="">-- Select Field --</option>';
+  defFieldSelect.innerHTML = '<option value="">-- Select Field --</option>';
 
-    fieldsContainer.style.display = 'block';
-    updateAnkiStatus('Fetching fields...', 'info');
+  if (!modelName) {
+    fieldsContainer.style.display = 'none';
+    return;
+  }
 
-    try {
-        const fieldNames = await ankiConnectRequest('modelFieldNames', { modelName: modelName });
-        
-        fieldNames.forEach(name => {
-            const option1 = document.createElement('option');
-            option1.value = name;
-            option1.textContent = name;
-            wordFieldSelect.appendChild(option1);
+  fieldsContainer.style.display = 'block';
+  updateAnkiStatus('Fetching fields...', 'info');
 
-            const option2 = document.createElement('option');
-            option2.value = name;
-            option2.textContent = name;
-            defFieldSelect.appendChild(option2);
-        });
+  try {
+    const fieldNames = await ankiConnectRequest('modelFieldNames', { modelName: modelName });
 
-        updateAnkiStatus('Fields loaded.', 'success');
-        
-        // Re-apply saved settings for fields
-        await loadAnkiSettings();
+    fieldNames.forEach(name => {
+      const option1 = document.createElement('option');
+      option1.value = name;
+      option1.textContent = name;
+      wordFieldSelect.appendChild(option1);
 
-    } catch (e) {
-        updateAnkiStatus(`Error fetching fields: ${e.message}`, 'error');
-    }
+      const option2 = document.createElement('option');
+      option2.value = name;
+      option2.textContent = name;
+      defFieldSelect.appendChild(option2);
+    });
+
+    updateAnkiStatus('Fields loaded.', 'success');
+
+    // Re-apply saved settings for fields
+    await loadAnkiSettings();
+
+  } catch (e) {
+    updateAnkiStatus(`Error fetching fields: ${e.message}`, 'error');
+  }
 }
 
 /**
  * Saves the selected Anki configuration to chrome.storage.sync.
  */
 function saveAnkiSettings() {
-    const settings = {
-        deckName: document.getElementById('anki-deck-select').value,
-        modelName: document.getElementById('anki-model-select').value,
-        wordField: document.getElementById('anki-word-field-select').value,
-        definitionField: document.getElementById('anki-definition-field-select').value
-    };
+  const settings = {
+    deckName: document.getElementById('anki-deck-select').value,
+    modelName: document.getElementById('anki-model-select').value,
+    wordField: document.getElementById('anki-word-field-select').value,
+    definitionField: document.getElementById('anki-definition-field-select').value
+  };
 
-    if (!settings.deckName || !settings.modelName || !settings.wordField || !settings.definitionField) {
-        updateAnkiStatus("Please select all options before saving.", "error");
-        return;
-    }
+  if (!settings.deckName || !settings.modelName || !settings.wordField || !settings.definitionField) {
+    updateAnkiStatus("Please select all options before saving.", "error");
+    return;
+  }
 
-    chrome.storage.sync.set({ ankiSettings: settings }, () => {
-        updateAnkiStatus('Anki settings saved!', 'success');
-    });
+  chrome.storage.sync.set({ ankiSettings: settings }, () => {
+    updateAnkiStatus('Anki settings saved!', 'success');
+  });
 }
 
 /**
  * Loads saved Anki settings from chrome.storage.sync and applies them to the dropdowns.
  */
 async function loadAnkiSettings() {
-    const data = await new Promise(resolve => chrome.storage.sync.get('ankiSettings', resolve));
-    
-    if (data.ankiSettings) {
-        const { deckName, modelName, wordField, definitionField } = data.ankiSettings;
-        
-        document.getElementById('anki-deck-select').value = deckName || "";
-        
-        // Set model and trigger field loading if needed
-        const modelSelect = document.getElementById('anki-model-select');
-        if (modelSelect.value !== modelName) {
-            modelSelect.value = modelName || "";
-            if (modelName) {
-                // This will load fields, and *then* we need to set the field values
-                await loadAnkiFields(modelName);
-            }
-        }
-        
-        // Set field values
-        document.getElementById('anki-word-field-select').value = wordField || "";
-        document.getElementById('anki-definition-field-select').value = definitionField || "";
+  const data = await new Promise(resolve => chrome.storage.sync.get('ankiSettings', resolve));
+
+  if (data.ankiSettings) {
+    const { deckName, modelName, wordField, definitionField } = data.ankiSettings;
+
+    document.getElementById('anki-deck-select').value = deckName || "";
+
+    // Set model and trigger field loading if needed
+    const modelSelect = document.getElementById('anki-model-select');
+    if (modelSelect.value !== modelName) {
+      modelSelect.value = modelName || "";
+      if (modelName) {
+        // This will load fields, and *then* we need to set the field values
+        await loadAnkiFields(modelName);
+      }
     }
+
+    // Set field values
+    document.getElementById('anki-word-field-select').value = wordField || "";
+    document.getElementById('anki-definition-field-select').value = definitionField || "";
+  }
 }
 
 /**
@@ -1332,63 +1356,107 @@ async function loadAnkiSettings() {
  * @param {Event} event - The click event.
  */
 async function handleSendToAnkiClick(event) {
-    const btn = event.currentTarget;
-    const timestamp = btn.dataset.timestamp;
+  const btn = event.currentTarget;
+  const timestamp = btn.dataset.timestamp;
 
-    btn.disabled = true;
-    btn.innerHTML = '<strong>...</strong>'; // <-- UPDATED
+  btn.disabled = true;
+  btn.innerHTML = '<strong>...</strong>'; // <-- UPDATED
 
-    try {
-        // 1. Get Anki Settings
-        const settingsData = await new Promise(resolve => chrome.storage.sync.get('ankiSettings', resolve));
-        const settings = settingsData.ankiSettings;
-        
-        if (!settings || !settings.deckName || !settings.modelName || !settings.wordField || !settings.definitionField) {
-            throw new Error('Anki settings are not complete. Please configure them in the Anki tab.');
-        }
+  try {
+    // 1. Get Anki Settings
+    const settingsData = await new Promise(resolve => chrome.storage.sync.get('ankiSettings', resolve));
+    const settings = settingsData.ankiSettings;
 
-        // 2. Get History Item
-        const historyData = await new Promise(resolve => chrome.storage.local.get('history', resolve));
-        const item = (historyData.history || []).find(i => i.timestamp === timestamp);
-
-        if (!item) {
-            throw new Error('History item not found.');
-        }
-
-        // 3. Prepare Note
-        const fields = {};
-        fields[settings.wordField] = item.word;
-        // Format definition: replace <br> with newlines for Anki
-        const ankiDefinition = item.definition
-            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') // Keep bold
-            .replace(/\n/g, '<br>'); // Convert markdown newlines to HTML <br>
-            
-        fields[settings.definitionField] = ankiDefinition;
-
-        const note = {
-            deckName: settings.deckName,
-            modelName: settings.modelName,
-            fields: fields,
-            options: {
-                "allowDuplicate": false
-            }
-        };
-
-        // 4. Send to Anki
-        const result = await ankiConnectRequest('addNote', { note: note });
-        
-        if (result === null) {
-            // This often means a duplicate was found and not added
-            throw new Error('Note was not added. It might be a duplicate.');
-        }
-        
-        // Success!
-        btn.innerHTML = '<strong>✔</strong>'; // <-- UPDATED
-        // Keep it disabled to show success
-
-    } catch (e) {
-        btn.disabled = false;
-        btn.innerHTML = '<strong>A</strong>'; // <-- UPDATED
-        alert(`Anki Error: ${e.message}`); // alert() is fine in the options page
+    if (!settings || !settings.deckName || !settings.modelName || !settings.wordField || !settings.definitionField) {
+      throw new Error('Anki settings are not complete. Please configure them in the Anki tab.');
     }
+
+    // 2. Get History Item
+    const historyData = await new Promise(resolve => chrome.storage.local.get('history', resolve));
+    const item = (historyData.history || []).find(i => i.timestamp === timestamp);
+
+    if (!item) {
+      throw new Error('History item not found.');
+    }
+
+    // 3. Prepare Note
+    const fields = {};
+    fields[settings.wordField] = item.word;
+    // Format definition: replace <br> with newlines for Anki
+    const ankiDefinition = item.definition
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') // Keep bold
+      .replace(/\n/g, '<br>'); // Convert markdown newlines to HTML <br>
+
+    fields[settings.definitionField] = ankiDefinition;
+
+    const note = {
+      deckName: settings.deckName,
+      modelName: settings.modelName,
+      fields: fields,
+      options: {
+        "allowDuplicate": false
+      }
+    };
+
+    // 4. Send to Anki
+    const result = await ankiConnectRequest('addNote', { note: note });
+
+    if (result === null) {
+      // This often means a duplicate was found and not added
+      throw new Error('Note was not added. It might be a duplicate.');
+    }
+
+    // Success!
+    btn.innerHTML = '<strong>✔</strong>'; // <-- UPDATED
+    // Keep it disabled to show success
+
+  } catch (e) {
+    btn.disabled = false;
+    btn.innerHTML = '<strong>A</strong>'; // <-- UPDATED
+    alert(`Anki Error: ${e.message}`); // alert() is fine in the options page
+  }
+}
+
+// ---
+// --- NEW: REMINDER SETTINGS FUNCTIONS
+// ---
+
+function saveReminderSettings() {
+  const frequency = document.getElementById('reminder-frequency-select').value;
+
+  chrome.storage.sync.set({ backupReminderFrequency: parseInt(frequency, 10) }, () => {
+    updateReminderStatus('Reminder settings saved!', 'success');
+
+    // Also check if we need to update the badge immediately
+    // If user turned it off (0), we should clear the badge
+    if (parseInt(frequency, 10) === 0) {
+      chrome.action.setBadgeText({ text: '' });
+    }
+  });
+}
+
+function loadReminderSettings() {
+  chrome.storage.sync.get({ backupReminderFrequency: 0 }, (data) => {
+    document.getElementById('reminder-frequency-select').value = data.backupReminderFrequency;
+  });
+}
+
+function updateReminderStatus(message, type = 'info') {
+  const statusEl = document.getElementById('reminder-status');
+  if (!statusEl) return;
+  statusEl.textContent = message;
+  statusEl.style.color = type === 'error' ? '#d9534f' : (type === 'success' ? '#5cb85c' : '#eee');
+
+  setTimeout(() => {
+    statusEl.textContent = '';
+  }, 3000);
+}
+
+function resetBackupReminder() {
+  // Update the last backup time to now
+  chrome.storage.local.set({ lastBackupTime: Date.now() }, () => {
+    console.log("Backup time updated.");
+    // Clear the badge
+    chrome.action.setBadgeText({ text: '' });
+  });
 }
