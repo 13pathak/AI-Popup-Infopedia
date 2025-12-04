@@ -10,8 +10,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.type === "getAiDefinition") {
 
     // Get all saved models and the ID of the default one
-    chrome.storage.sync.get(['models', 'defaultModelId', 'globalCustomPrompt'], async (data) => {
-      const { models, defaultModelId, globalCustomPrompt } = data;
+    chrome.storage.sync.get(['models', 'defaultModelId', 'customPrompts', 'defaultPromptId'], async (data) => {
+      const { models, defaultModelId, customPrompts, defaultPromptId } = data;
 
       if (!models || models.length === 0 || !defaultModelId) {
         sendResponse({ error: "No default AI model configured. Please set one in the options page.", models: [], defaultModelId: null });
@@ -29,7 +29,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
       // --- REVISED: Simplified prompt logic ---
       const { word } = request;
-      const promptTemplate = globalCustomPrompt || "Explain the following word or concept in a concise paragraph: {word}";
+
+      // Determine the prompt template to use
+      let promptTemplate = "Explain the following word or concept in a concise paragraph: {word}"; // System default
+      let promptName = "System Default"; // Default name
+
+      if (request.customPrompt) {
+        // 1. Use specific prompt requested by popup
+        promptTemplate = request.customPrompt;
+        // Find the name if possible, or use "Custom Prompt"
+        const foundPrompt = customPrompts ? customPrompts.find(p => p.content === request.customPrompt) : null;
+        promptName = foundPrompt ? foundPrompt.name : "Custom Prompt";
+      } else if (defaultPromptId && customPrompts) {
+        // 2. Use user-configured default prompt
+        const defaultPrompt = customPrompts.find(p => p.id === defaultPromptId);
+        if (defaultPrompt) {
+          promptTemplate = defaultPrompt.content;
+          promptName = defaultPrompt.name;
+        }
+      }
+
       const prompt = promptTemplate.replace('{word}', word);
 
       // Create the OpenAI-style payload
@@ -85,12 +104,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         const data = await response.json();
         const aiText = data.choices[0].message.content;
 
-        sendResponse({ definition: aiText, models: models, defaultModelId: defaultModelId });
+        sendResponse({ definition: aiText, models: models, defaultModelId: defaultModelId, customPrompts: customPrompts || [], defaultPromptId: defaultPromptId, promptName: promptName });
 
       } catch (error) {
         console.error("AI API call failed:", error);
         // The error message is now cleaner
-        sendResponse({ error: `Failed to fetch definition: ${error.message}`, models: models, defaultModelId: defaultModelId });
+        sendResponse({ error: `Failed to fetch definition: ${error.message}`, models: models, defaultModelId: defaultModelId, customPrompts: customPrompts || [], defaultPromptId: defaultPromptId });
       }
     });
 
@@ -101,7 +120,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // --- Case 2: Save an item to history ---
   if (request.type === "saveToHistory") {
     // We pass sendResponse as a callback to run *after* saving
-    saveToHistory(request.word, request.definition, request.listId, request.modelName, () => {
+    saveToHistory(request.word, request.definition, request.listId, request.modelName, request.promptName, () => {
       sendResponse({ status: "saved" });
     });
     // Return true to tell Chrome this is an async operation
@@ -121,7 +140,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 });
 
 // --- UPDATED to accept a callback and save last listId ---
-function saveToHistory(word, definition, listId, modelName, callback) {
+function saveToHistory(word, definition, listId, modelName, promptName, callback) {
   chrome.storage.local.get(['history'], (result) => {
     let history = result.history || [];
 
@@ -131,7 +150,8 @@ function saveToHistory(word, definition, listId, modelName, callback) {
       definition: definition,
       timestamp: new Date().toISOString(), // Store timestamp
       listId: listId, // --- NEW: Store the list ID ---
-      modelName: modelName // --- NEW: Store the model name ---
+      modelName: modelName, // --- NEW: Store the model name ---
+      promptName: promptName // --- NEW: Store the prompt name ---
     };
 
     // Add new item to the beginning of the array

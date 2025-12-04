@@ -27,12 +27,19 @@ document.addEventListener('DOMContentLoaded', () => {
       if (tab.dataset.tab === "reminder-content") {
         loadReminderSettings();
       }
+
+      // --- NEW: Load Prompts when tab is clicked ---
+      if (tab.dataset.tab === "prompts-content") {
+        loadPrompts();
+      }
     });
   });
 
   loadModels();
   loadLists(); // Load lists on initial page load
-  loadGlobalPrompt();
+  loadModels();
+  loadLists(); // Load lists on initial page load
+  loadDefaultPromptSelect(); // Load default prompt selector
   loadAnkiSettings(); // Load saved Anki settings on page load
   loadReminderSettings(); // Load saved Reminder settings on page load
 
@@ -42,7 +49,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('delete-model-btn').addEventListener('click', deleteSelectedModel);
   document.getElementById('model-select').addEventListener('change', (e) => setDefaultModel(e.target.value));
   document.getElementById('save-model-btn').addEventListener('click', saveModel);
-  document.getElementById('save-prompt-btn').addEventListener('click', saveGlobalPrompt);
+  document.getElementById('default-prompt-select').addEventListener('change', (e) => saveDefaultPromptId(e.target.value));
   document.getElementById('cancel-model-btn').addEventListener('click', hideModelForm);
   // --- Event Listeners for Import/Export ---
   document.getElementById('export-history').addEventListener('click', exportHistory);
@@ -86,6 +93,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // --- NEW: Reminder Event Listeners ---
   document.getElementById('save-reminder-settings-btn').addEventListener('click', saveReminderSettings);
+
+  // --- NEW: Prompts Event Listeners ---
+  document.getElementById('save-custom-prompt-btn').addEventListener('click', savePrompt);
+  document.getElementById('cancel-custom-prompt-btn').addEventListener('click', cancelPromptEdit);
 });
 
 
@@ -235,21 +246,49 @@ function setDefaultModel(modelId) {
   });
 }
 
-function saveGlobalPrompt() {
-  const customPrompt = document.getElementById('customPrompt').value;
-  chrome.storage.sync.set({ globalCustomPrompt: customPrompt }, () => {
-    updateStatus('Global prompt saved!', 'success');
+function saveDefaultPromptId(promptId) {
+  chrome.storage.sync.set({ defaultPromptId: promptId }, () => {
+    updateStatus('Default prompt updated.', 'success');
   });
 }
 
-function loadGlobalPrompt() {
-  const defaultPrompt = "Explain {word} to a high schooler in 500 characters or less.";
-  chrome.storage.sync.get({
-    globalCustomPrompt: defaultPrompt
-  }, (items) => {
-    document.getElementById('customPrompt').value = items.globalCustomPrompt;
+function loadDefaultPromptSelect() {
+  chrome.storage.sync.get(['customPrompts', 'defaultPromptId'], (data) => {
+    const prompts = data.customPrompts || [];
+    const defaultPromptId = data.defaultPromptId;
+    const select = document.getElementById('default-prompt-select');
+
+    select.innerHTML = '';
+
+    if (prompts.length === 0) {
+      const option = document.createElement('option');
+      option.value = "";
+      option.textContent = "-- No custom prompts created --";
+      option.disabled = true;
+      option.selected = true;
+      select.appendChild(option);
+      return;
+    }
+
+    let isAnySelected = false;
+
+    prompts.forEach(prompt => {
+      const option = document.createElement('option');
+      option.value = prompt.id;
+      option.textContent = prompt.name;
+      if (prompt.id === defaultPromptId) {
+        option.selected = true;
+        isAnySelected = true;
+      }
+      select.appendChild(option);
+    });
+
+    if (!isAnySelected && prompts.length > 0) {
+      select.value = prompts[0].id;
+    }
   });
 }
+
 
 function updateStatus(message, type = 'info') {
   const statusEl = document.getElementById('status');
@@ -553,7 +592,11 @@ function loadHistory(listId) {
         displayView.innerHTML = `
           <div class="history-word">${escapeHTML(item.word)}</div>
           <div class="history-definition">${formattedDefinition}</div>
-          <div class="history-model" style="font-size: 0.8em; color: #888; margin-top: 4px;">Model: ${escapeHTML(item.modelName || 'Unknown')}</div>
+          <div class="history-model" style="font-size: 0.8em; color: #888; margin-top: 4px;">
+            Model: ${escapeHTML(item.modelName || 'Unknown')} | 
+            Prompt: ${escapeHTML(item.promptName || 'Unknown')} | 
+            Date: ${new Date(item.timestamp).toLocaleDateString()}
+          </div>
         `;
         itemElement.appendChild(displayView);
 
@@ -1459,4 +1502,133 @@ function resetBackupReminder() {
     // Clear the badge
     chrome.action.setBadgeText({ text: '' });
   });
+}
+
+// ---
+// --- NEW: PROMPTS MANAGEMENT FUNCTIONS
+// ---
+
+function loadPrompts() {
+  chrome.storage.sync.get({ customPrompts: [] }, (data) => {
+    const prompts = data.customPrompts;
+    const listContainer = document.getElementById('prompts-list');
+    const noPromptsMsg = document.getElementById('no-prompts-message');
+
+    // Clear current list (except the "no prompts" message)
+    listContainer.innerHTML = '';
+    listContainer.appendChild(noPromptsMsg);
+
+    if (prompts.length === 0) {
+      noPromptsMsg.style.display = 'block';
+    } else {
+      noPromptsMsg.style.display = 'none';
+
+      prompts.forEach(prompt => {
+        const promptEl = document.createElement('div');
+        promptEl.style.borderBottom = '1px solid var(--border-color)';
+        promptEl.style.padding = '10px 0';
+        promptEl.style.display = 'flex';
+        promptEl.style.justifyContent = 'space-between';
+        promptEl.style.alignItems = 'center';
+
+        const infoDiv = document.createElement('div');
+        infoDiv.innerHTML = `<strong>${escapeHTML(prompt.name)}</strong><br><small style="color: #888;">${escapeHTML(prompt.content.substring(0, 50))}${prompt.content.length > 50 ? '...' : ''}</small>`;
+
+        const actionsDiv = document.createElement('div');
+
+        const editBtn = document.createElement('button');
+        editBtn.innerHTML = '&#9998;';
+        editBtn.title = 'Edit';
+        editBtn.style.marginRight = '5px';
+        editBtn.style.backgroundColor = 'var(--primary-color)';
+        editBtn.onclick = () => editPrompt(prompt.id);
+
+        const deleteBtn = document.createElement('button');
+        deleteBtn.innerHTML = '&#128465;';
+        deleteBtn.title = 'Delete';
+        deleteBtn.onclick = () => deletePrompt(prompt.id);
+
+        actionsDiv.appendChild(editBtn);
+        actionsDiv.appendChild(deleteBtn);
+
+        promptEl.appendChild(infoDiv);
+        promptEl.appendChild(actionsDiv);
+
+        listContainer.appendChild(promptEl);
+      });
+    }
+  });
+}
+
+function savePrompt() {
+  const id = document.getElementById('prompt-id').value;
+  const name = document.getElementById('prompt-name').value.trim();
+  const content = document.getElementById('prompt-content').value.trim();
+
+  if (!name || !content) {
+    alert("Please provide both a name and content for the prompt.");
+    return;
+  }
+
+  chrome.storage.sync.get({ customPrompts: [] }, (data) => {
+    let prompts = data.customPrompts;
+
+    if (id) {
+      // Edit existing
+      prompts = prompts.map(p => p.id === id ? { ...p, name, content } : p);
+    } else {
+      // Add new
+      const newPrompt = {
+        id: `prompt_${Date.now()}`,
+        name,
+        content
+      };
+      prompts.push(newPrompt);
+    }
+
+    chrome.storage.sync.set({ customPrompts: prompts }, () => {
+      // Reset form
+      cancelPromptEdit();
+      loadPrompts();
+      loadDefaultPromptSelect(); // Refresh the default selector
+    });
+  });
+}
+
+function editPrompt(id) {
+  chrome.storage.sync.get({ customPrompts: [] }, (data) => {
+    const prompt = data.customPrompts.find(p => p.id === id);
+    if (prompt) {
+      document.getElementById('prompt-id').value = prompt.id;
+      document.getElementById('prompt-name').value = prompt.name;
+      document.getElementById('prompt-content').value = prompt.content;
+
+      document.getElementById('save-custom-prompt-btn').textContent = 'Update Prompt';
+      document.getElementById('cancel-custom-prompt-btn').style.display = 'inline-block';
+
+      // Scroll to top of form
+      document.getElementById('prompt-form-container').scrollIntoView({ behavior: 'smooth' });
+    }
+  });
+}
+
+function deletePrompt(id) {
+  if (confirm("Are you sure you want to delete this prompt?")) {
+    chrome.storage.sync.get({ customPrompts: [] }, (data) => {
+      const prompts = data.customPrompts.filter(p => p.id !== id);
+      chrome.storage.sync.set({ customPrompts: prompts }, () => {
+        loadPrompts();
+        loadDefaultPromptSelect(); // Refresh the default selector
+      });
+    });
+  }
+}
+
+function cancelPromptEdit() {
+  document.getElementById('prompt-id').value = '';
+  document.getElementById('prompt-name').value = '';
+  document.getElementById('prompt-content').value = '';
+
+  document.getElementById('save-custom-prompt-btn').textContent = 'Save Prompt';
+  document.getElementById('cancel-custom-prompt-btn').style.display = 'none';
 }

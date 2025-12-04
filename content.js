@@ -22,16 +22,24 @@ const popupStyles = `
   }
 
   /* --- NEW: Styles for the model selector --- */
-  #ai-popup-model-selector {
-    width: 100%;
+  /* --- NEW: Container for selectors --- */
+  #ai-popup-selectors-container {
+    display: flex;
+    gap: 5px;
+    margin-bottom: 10px;
+  }
+
+  #ai-popup-model-selector,
+  #ai-popup-prompt-selector {
+    width: 50%; /* 50:50 split */
     background-color: #444;
     color: #eee;
     border: 1px solid #666;
     border-radius: 4px;
     padding: 5px;
-    margin-bottom: 10px;
     font-family: sans-serif;
     font-size: 13px;
+    box-sizing: border-box;
   }
 
   /* Wrapper for the AI-generated text */
@@ -89,8 +97,8 @@ document.addEventListener('mouseup', (event) => {
   // --- THIS IS THE CHANGE ---
   // Only proceed if 1 to 6 words are selected
   if (wordCount > 0 && wordCount <= 6) {
-  // --- END OF CHANGE ---
-    
+    // --- END OF CHANGE ---
+
     const range = selection.getRangeAt(0);
     const rect = range.getBoundingClientRect(); // This is already viewport-relative!
 
@@ -101,32 +109,32 @@ document.addEventListener('mouseup', (event) => {
     // Send the selected word to the background script
     // --- REVISED: Removed context from message ---
     chrome.runtime.sendMessage({ type: "getAiDefinition", word: selectedText }, (response) => {
-        if (!popup) return; // Popup might have been closed while loading
-        
-        // --- NEW: Create model selector if models are available ---
-        if (response.models && response.models.length > 1) {
-          createModelSelector(response.models, response.defaultModelId, selectedText, response.defaultModelId);
-        }
+      if (!popup) return; // Popup might have been closed while loading
 
-        const definitionText = response.error ? response.error : response.definition;
-        
-        updatePopup(definitionText); // Show the definition
-        
-        if (!response.error) {
-          // --- UPDATED: Pass modelName ---
-          // We need to find the model name from the ID or response
-          const modelName = response.models.find(m => m.id === response.defaultModelId)?.name || 'Unknown Model';
-          createActionButtons(selectedText, definitionText, modelName);
-        }
-        adjustPopupPosition();
-        
-        setTimeout(() => {
-          if (popupContainer && document.documentElement.contains(popupContainer)) {
-            popupContainer.remove();
-            document.documentElement.appendChild(popupContainer);
-          }
-        }, 150); // 150ms delay
+      // --- NEW: Create selectors if models are available ---
+      if (response.models && response.models.length > 0) {
+        createSelectors(response.models, response.customPrompts, response.defaultModelId, null, selectedText);
       }
+
+      const definitionText = response.error ? response.error : response.definition;
+
+      updatePopup(definitionText); // Show the definition
+
+      if (!response.error) {
+        // --- UPDATED: Pass modelName ---
+        // We need to find the model name from the ID or response
+        const modelName = response.models.find(m => m.id === response.defaultModelId)?.name || 'Unknown Model';
+        createActionButtons(selectedText, definitionText, modelName);
+      }
+      adjustPopupPosition();
+
+      setTimeout(() => {
+        if (popupContainer && document.documentElement.contains(popupContainer)) {
+          popupContainer.remove();
+          document.documentElement.appendChild(popupContainer);
+        }
+      }, 150); // 150ms delay
+    }
     );
   } else {
     // If more than 6 words are selected, ensure the popup is closed
@@ -152,7 +160,7 @@ document.addEventListener('mousedown', (event) => {
       // Click was outside, so check if we should close
       const selection = window.getSelection();
       if (selection.isCollapsed) {
-          removePopup();
+        removePopup();
       }
       isInteractingWithPopup = false; // Reset on outside click
     }
@@ -164,9 +172,9 @@ document.addEventListener('mousedown', (event) => {
 });
 
 document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && popup) {
-        removePopup();
-    }
+  if (event.key === 'Escape' && popup) {
+    removePopup();
+  }
 });
 
 // --- UPDATED showPopup ---
@@ -180,8 +188,8 @@ function showPopup(x, y, content) {
   popupContainer.style.position = 'fixed';
   popupContainer.style.top = '0';
   popupContainer.style.left = '0';
-  popupContainer.style.width = '0'; 
-  popupContainer.style.height = '0'; 
+  popupContainer.style.width = '0';
+  popupContainer.style.height = '0';
   popupContainer.style.zIndex = '2147483647'; // This wins the z-index war
   popupContainer.style.pointerEvents = 'none'; // Click-through
 
@@ -196,19 +204,19 @@ function showPopup(x, y, content) {
   // Create the popup element
   popup = document.createElement('div');
   popup.id = 'ai-definition-popup';
-  
+
   const contentWrapper = document.createElement('div');
   contentWrapper.id = 'ai-popup-content';
   contentWrapper.innerHTML = content; // "Loading..."
   popup.appendChild(contentWrapper);
-  
+
   // Set initial position (viewport-relative)
   popup.style.left = `${x}px`;
-  popup.style.top = `${y}px`; 
+  popup.style.top = `${y}px`;
 
   // Add the popup to the shadow DOM
   shadow.appendChild(popup);
-  
+
   // Add our container to the main page
   document.documentElement.appendChild(popupContainer);
 }
@@ -222,7 +230,7 @@ function updatePopup(content) {
       let formattedContent = content.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
       // Convert newlines to <br>
       formattedContent = formattedContent.replace(/\n/g, '<br>');
-      
+
       // Set the formatted HTML
       contentWrapper.innerHTML = formattedContent;
     }
@@ -230,17 +238,22 @@ function updatePopup(content) {
 }
 
 // --- NEW: Function to create the model selector dropdown ---
-function createModelSelector(models, defaultModelId, selectedText, currentModelId) {
+// --- NEW: Function to create the model and prompt selectors ---
+function createSelectors(models, prompts, currentModelId, currentPromptContent, selectedText) {
   if (!popup) return;
 
-  // Remove existing selector if present
-  const existingSelector = popup.querySelector('#ai-popup-model-selector');
-  if (existingSelector) {
-    existingSelector.remove();
+  // Remove existing container if present
+  const existingContainer = popup.querySelector('#ai-popup-selectors-container');
+  if (existingContainer) {
+    existingContainer.remove();
   }
 
-  const selector = document.createElement('select');
-  selector.id = 'ai-popup-model-selector';
+  const container = document.createElement('div');
+  container.id = 'ai-popup-selectors-container';
+
+  // --- Model Selector ---
+  const modelSelector = document.createElement('select');
+  modelSelector.id = 'ai-popup-model-selector';
 
   models.forEach(model => {
     const option = document.createElement('option');
@@ -249,20 +262,56 @@ function createModelSelector(models, defaultModelId, selectedText, currentModelI
     if (model.id === currentModelId) {
       option.selected = true;
     }
-    selector.appendChild(option);
+    modelSelector.appendChild(option);
   });
 
-  selector.addEventListener('change', (event) => {
-    const newModelId = event.target.value;
-    redefineWithModel(selectedText, newModelId);
+  modelSelector.addEventListener('change', () => {
+    triggerRedefine();
   });
 
-  // Prepend the selector to the popup so it appears at the top
-  popup.prepend(selector);
+  // --- Prompt Selector ---
+  const promptSelector = document.createElement('select');
+  promptSelector.id = 'ai-popup-prompt-selector';
+
+  // Default option
+  const defaultOption = document.createElement('option');
+  defaultOption.value = "";
+  defaultOption.textContent = "Default Prompt";
+  promptSelector.appendChild(defaultOption);
+
+  if (prompts && prompts.length > 0) {
+    prompts.forEach(prompt => {
+      const option = document.createElement('option');
+      option.value = prompt.content; // Use content as value for simplicity
+      option.textContent = prompt.name;
+      if (prompt.content === currentPromptContent) {
+        option.selected = true;
+      }
+      promptSelector.appendChild(option);
+    });
+  }
+
+  promptSelector.addEventListener('change', () => {
+    triggerRedefine();
+  });
+
+  container.appendChild(modelSelector);
+  container.appendChild(promptSelector);
+
+  // Prepend the container to the popup
+  popup.prepend(container);
+
+  // Helper to trigger redefine
+  function triggerRedefine() {
+    const newModelId = modelSelector.value;
+    const newPromptContent = promptSelector.value;
+    redefineWithModelAndPrompt(selectedText, newModelId, newPromptContent);
+  }
 }
 
 // --- NEW: Function to get a new definition with a specific model ---
-function redefineWithModel(word, modelId) {
+// --- NEW: Function to get a new definition with a specific model and prompt ---
+function redefineWithModelAndPrompt(word, modelId, promptContent) {
   if (!popup) return;
 
   // --- NEW: Set the interaction flag ---
@@ -274,16 +323,15 @@ function redefineWithModel(word, modelId) {
   const actions = popup.querySelector('.ai-popup-actions');
   if (actions) actions.remove();
 
-  // Send message to background with the specific model ID
+  // Send message to background
   chrome.runtime.sendMessage(
-    { type: "getAiDefinition", word: word, modelId: modelId },
+    { type: "getAiDefinition", word: word, modelId: modelId, customPrompt: promptContent },
     (response) => {
       if (!popup) return;
 
-      // --- REVISED LOGIC ---
-      // 1. Re-create the model selector, ensuring the correct model is selected
-      if (response.models && response.models.length > 1) {
-        createModelSelector(response.models, response.defaultModelId, word, modelId);
+      // 1. Re-create selectors
+      if (response.models && response.models.length > 0) {
+        createSelectors(response.models, response.customPrompts, modelId, promptContent, word);
       }
 
       // Update the definition
@@ -292,9 +340,8 @@ function redefineWithModel(word, modelId) {
 
       // --- NEW: Re-create the save button after model change ---
       if (!response.error) {
-        // --- UPDATED: Pass modelName ---
         const modelName = response.models.find(m => m.id === modelId)?.name || 'Unknown Model';
-        createActionButtons(word, definitionText, modelName);
+        createActionButtons(word, definitionText, modelName, response.promptName);
       }
 
       adjustPopupPosition();
@@ -306,7 +353,7 @@ function redefineWithModel(word, modelId) {
 }
 
 // --- UPDATED function to only add Save button ---
-function createActionButtons(word, definition, modelName) {
+function createActionButtons(word, definition, modelName, promptName) {
   if (!popup) return;
 
   const actionsContainer = document.createElement('div');
@@ -317,7 +364,7 @@ function createActionButtons(word, definition, modelName) {
   if (existingActions) {
     existingActions.remove();
   }
-  
+
   // --- REVISED: Immediately show list dropdown and save button ---
   // 1. Get the lists from the background
   chrome.runtime.sendMessage({ type: "getWordLists" }, (response) => {
@@ -333,8 +380,8 @@ function createActionButtons(word, definition, modelName) {
 
       // Keep the popup open for a bit longer so the user can read the message
       setTimeout(() => {
-          isInteractingWithPopup = false; // Allow closure again
-          removePopup();
+        isInteractingWithPopup = false; // Allow closure again
+        removePopup();
       }, 2500);
       return; // Stop execution
     }
@@ -358,13 +405,13 @@ function createActionButtons(word, definition, modelName) {
       const option = document.createElement('option');
       option.value = list.id;
       option.textContent = list.name;
-      
+
       // --- NEW: Check if this list was the last one used ---
       if (list.id === lastUsedListId) {
-          option.selected = true;
+        option.selected = true;
       }
       // --- END NEW ---
-      
+
       listSelector.appendChild(option);
     });
 
@@ -387,7 +434,8 @@ function createActionButtons(word, definition, modelName) {
         word: word,
         definition: definition,
         listId: selectedListId,
-        modelName: modelName // --- NEW: Pass modelName ---
+        modelName: modelName, // --- NEW: Pass modelName ---
+        promptName: promptName // --- NEW: Pass promptName ---
       }, (saveResponse) => {
         if (saveResponse && saveResponse.status === 'saved') {
           console.log('Definition saved to list.');
@@ -409,7 +457,7 @@ function createActionButtons(word, definition, modelName) {
     actionsContainer.appendChild(listSelector);
     actionsContainer.appendChild(finalSaveButton);
   });
-  
+
   // Add the container to the popup
   popup.appendChild(actionsContainer);
 }
@@ -426,51 +474,51 @@ function removePopup() {
 
 // --- UPDATED adjustPopupPosition ---
 function adjustPopupPosition() {
-    if (!popup) return;
+  if (!popup) return;
 
-    // --- THE DEFINITIVE FIX ---
-    // If we are interacting with the popup (e.g., changing a model), do NOT close it, even if text is deselected.
-    if (isInteractingWithPopup) {
-        return;
+  // --- THE DEFINITIVE FIX ---
+  // If we are interacting with the popup (e.g., changing a model), do NOT close it, even if text is deselected.
+  if (isInteractingWithPopup) {
+    return;
+  }
+  const selection = window.getSelection();
+  // We check rangeCount *and* if the selection is collapsed (no text)
+  if (selection.rangeCount === 0 || selection.isCollapsed) {
+    // Don't remove popup if it's in the 'Saved!' state
+    if (popup.querySelector('.ai-popup-button:disabled')) {
+      return;
     }
-    const selection = window.getSelection();
-    // We check rangeCount *and* if the selection is collapsed (no text)
-    if (selection.rangeCount === 0 || selection.isCollapsed) {
-        // Don't remove popup if it's in the 'Saved!' state
-        if (popup.querySelector('.ai-popup-button:disabled')) {
-            return;
-        }
-        removePopup(); 
-        return;
-    }
-    
-    const selectionRect = selection.getRangeAt(0).getBoundingClientRect(); // Viewport-relative
-    const popupRect = popup.getBoundingClientRect(); // Viewport-relative
-    const viewportWidth = window.innerWidth;
-    const viewportHeight = window.innerHeight;
+    removePopup();
+    return;
+  }
 
-    let newLeft = selectionRect.left; // Start with selection's left
-    let newTop; 
+  const selectionRect = selection.getRangeAt(0).getBoundingClientRect(); // Viewport-relative
+  const popupRect = popup.getBoundingClientRect(); // Viewport-relative
+  const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
 
-    // --- DYNAMIC VERTICAL PLACEMENT (VIEWPORT-RELATIVE) ---
-    // Check if there's enough space *above* the selection
-    if (selectionRect.top > popupRect.height + 10) {
-        // Yes, place it ABOVE
-        newTop = selectionRect.top - popupRect.height - 10; // 10px padding
-    } else {
-        // No, place it BELOW
-        newTop = selectionRect.bottom + 10; // 10px padding
-    }
+  let newLeft = selectionRect.left; // Start with selection's left
+  let newTop;
 
-    // --- Horizontal Adjustment ---
-    if (newLeft + popupRect.width > viewportWidth - 10) {
-        newLeft = viewportWidth - popupRect.width - 10; 
-    }
-    if (newLeft < 10) {
-        newLeft = 10; 
-    }
-    
-    // Apply final positions (NO scrollX/scrollY needed!)
-    popup.style.left = `${newLeft}px`;
-    popup.style.top = `${newTop}px`;
+  // --- DYNAMIC VERTICAL PLACEMENT (VIEWPORT-RELATIVE) ---
+  // Check if there's enough space *above* the selection
+  if (selectionRect.top > popupRect.height + 10) {
+    // Yes, place it ABOVE
+    newTop = selectionRect.top - popupRect.height - 10; // 10px padding
+  } else {
+    // No, place it BELOW
+    newTop = selectionRect.bottom + 10; // 10px padding
+  }
+
+  // --- Horizontal Adjustment ---
+  if (newLeft + popupRect.width > viewportWidth - 10) {
+    newLeft = viewportWidth - popupRect.width - 10;
+  }
+  if (newLeft < 10) {
+    newLeft = 10;
+  }
+
+  // Apply final positions (NO scrollX/scrollY needed!)
+  popup.style.left = `${newLeft}px`;
+  popup.style.top = `${newTop}px`;
 }

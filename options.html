@@ -462,6 +462,7 @@
         <button class="tab-button" data-tab="history-content">History</button>
         <button class="tab-button" data-tab="anki-content">Anki</button>
         <button class="tab-button" data-tab="reminder-content">Reminder</button>
+        <button class="tab-button" data-tab="prompts-content">Prompts</button>
     </div>
 
     <div id="status-global"></div>
@@ -509,12 +510,12 @@
             </div>
         </div>
 
-        <div id="global-prompt-container" style="margin-top: 20px;">
-            <label for="customPrompt">Global Custom Prompt</label>
-            <textarea id="customPrompt" rows="4"></textarea>
-            <small style="display: block; margin-top: 5px;">Use <strong>{word}</strong> as the placeholder for the
-                selected text. This prompt will be used by the default model.</small>
-            <br><button id="save-prompt-btn" style="margin-top: 10px;">Save Prompt</button>
+        <div id="default-prompt-container" style="margin-top: 20px;">
+            <label for="default-prompt-select">Default Prompt</label>
+            <select id="default-prompt-select" style="width: 100%; margin-bottom: 5px;"></select>
+            <small style="display: block; margin-top: 5px;">Select which custom prompt should be used by default when
+                the
+                popup opens.</small>
         </div>
 
         <div id="global-io-container"
@@ -522,9 +523,9 @@
             <h3 style="color: var(--primary-color); margin-top: 0;">Models & Prompts Import/Export</h3>
             <p style="margin-bottom: 15px;">Export or import all your configured models and the global prompt. This does
                 not include your word history or lists.</p>
-            <button id="export-all-settings-btn" style="background-color: var(--primary-color);">Export Models & Prompt
+            <button id="export-all-settings-btn" style="background-color: var(--primary-color);">Export Models & Prompts
                 (.json)</button>
-            <button id="import-all-settings-btn" style="background-color: var(--primary-color);">Import Models & Prompt
+            <button id="import-all-settings-btn" style="background-color: var(--primary-color);">Import Models & Prompts
                 (.json)</button>
             <input type="file" id="import-settings-file-input" accept=".json" style="display: none;">
             <div id="global-io-status" style="margin-top: 10px; font-weight: bold; min-height: 1em;"></div>
@@ -647,6 +648,40 @@
             Reminder Settings</button>
 
         <div id="reminder-status" style="margin-top: 10px; font-weight: bold; min-height: 1em;"></div>
+    </div>
+
+    <!-- --- NEW PROMPTS TAB CONTENT --- -->
+    <div id="prompts-content" class="tab-content">
+        <h2>Custom Prompts</h2>
+        <p>Create and manage custom prompts to use in the popup.</p>
+
+        <div id="prompt-form-container"
+            style="border: 1px solid var(--border-color); padding: 15px; border-radius: 4px; margin-bottom: 20px;">
+            <h3 style="margin-top: 0; color: var(--primary-color);">Add New Prompt</h3>
+            <input type="hidden" id="prompt-id">
+            <div>
+                <label for="prompt-name">Prompt Name</label>
+                <input type="text" id="prompt-name" placeholder="e.g., Explain like I'm 5">
+            </div>
+            <div>
+                <label for="prompt-content">Prompt Content</label>
+                <textarea id="prompt-content" rows="3" placeholder="Explain {word} simply..."></textarea>
+                <small style="display: block; margin-top: 5px;">Use <strong>{word}</strong> as the placeholder for the
+                    selected text.</small>
+            </div>
+            <div style="margin-top: 10px;">
+                <button id="save-custom-prompt-btn" style="background-color: var(--secondary-color);">Save
+                    Prompt</button>
+                <button id="cancel-custom-prompt-btn" style="display: none;">Cancel Edit</button>
+            </div>
+        </div>
+
+        <h3>Saved Prompts</h3>
+        <div id="prompts-list"
+            style="border: 1px solid var(--border-color); border-radius: 4px; padding: 10px; min-height: 100px;">
+            <p id="no-prompts-message" style="color: #888;">No custom prompts added yet.</p>
+            <!-- Prompts will be added here dynamically -->
+        </div>
     </div>
 
     <script src="options.js"></script>
