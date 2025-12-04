@@ -113,7 +113,7 @@ document.addEventListener('mouseup', (event) => {
 
       // --- NEW: Create selectors if models are available ---
       if (response.models && response.models.length > 0) {
-        createSelectors(response.models, response.customPrompts, response.defaultModelId, null, selectedText);
+        createSelectors(response.models, response.customPrompts, response.defaultModelId, null, selectedText, response.defaultPromptId);
       }
 
       const definitionText = response.error ? response.error : response.definition;
@@ -239,7 +239,7 @@ function updatePopup(content) {
 
 // --- NEW: Function to create the model selector dropdown ---
 // --- NEW: Function to create the model and prompt selectors ---
-function createSelectors(models, prompts, currentModelId, currentPromptContent, selectedText) {
+function createSelectors(models, prompts, currentModelId, currentPromptContent, selectedText, defaultPromptId) {
   if (!popup) return;
 
   // Remove existing container if present
@@ -273,22 +273,34 @@ function createSelectors(models, prompts, currentModelId, currentPromptContent, 
   const promptSelector = document.createElement('select');
   promptSelector.id = 'ai-popup-prompt-selector';
 
-  // Default option
-  const defaultOption = document.createElement('option');
-  defaultOption.value = "";
-  defaultOption.textContent = "Default Prompt";
-  promptSelector.appendChild(defaultOption);
+// Default option REMOVED
 
   if (prompts && prompts.length > 0) {
     prompts.forEach(prompt => {
       const option = document.createElement('option');
       option.value = prompt.content; // Use content as value for simplicity
-      option.textContent = prompt.name;
+      
+      let displayName = prompt.name;
+      if (prompt.id === defaultPromptId) {
+        displayName += " (Default)";
+      }
+      option.textContent = displayName;
+
+      // Select if it matches current content OR if it's the default and no current content is specified
       if (prompt.content === currentPromptContent) {
         option.selected = true;
+      } else if (!currentPromptContent && prompt.id === defaultPromptId) {
+        option.selected = true;
       }
+      
       promptSelector.appendChild(option);
     });
+  } else {
+      // Handle case with no prompts
+      const option = document.createElement('option');
+      option.textContent = "No Custom Prompts";
+      option.disabled = true;
+      promptSelector.appendChild(option);
   }
 
   promptSelector.addEventListener('change', () => {
@@ -331,7 +343,7 @@ function redefineWithModelAndPrompt(word, modelId, promptContent) {
 
       // 1. Re-create selectors
       if (response.models && response.models.length > 0) {
-        createSelectors(response.models, response.customPrompts, modelId, promptContent, word);
+        createSelectors(response.models, response.customPrompts, modelId, promptContent, word, response.defaultPromptId);
       }
 
       // Update the definition
