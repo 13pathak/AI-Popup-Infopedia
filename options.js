@@ -37,14 +37,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
   loadModels();
   loadLists(); // Load lists on initial page load
-  loadModels();
-  loadLists(); // Load lists on initial page load
+
   loadDefaultPromptSelect(); // Load default prompt selector
   loadAnkiSettings(); // Load saved Anki settings on page load
   loadReminderSettings(); // Load saved Reminder settings on page load
 
   // --- REVISED: Model Management Event Listeners ---
-  document.getElementById('add-model-btn').addEventListener('click', showModelForm);
+  document.getElementById('add-model-btn').addEventListener('click', () => showModelForm(false));
   document.getElementById('edit-model-btn').addEventListener('click', editSelectedModel);
   document.getElementById('delete-model-btn').addEventListener('click', deleteSelectedModel);
   document.getElementById('model-select').addEventListener('change', (e) => setDefaultModel(e.target.value));
@@ -157,6 +156,11 @@ function saveModel() {
     }
 
     chrome.storage.sync.set({ models, defaultModelId }, () => {
+      if (chrome.runtime.lastError) {
+        console.error("Error saving model:", chrome.runtime.lastError);
+        updateStatus(`Error saving model: ${chrome.runtime.lastError.message}`, 'error');
+        return;
+      }
       updateStatus('Model saved successfully!', 'success');
       hideModelForm();
       loadModels();
