@@ -68,3 +68,13 @@ This extension requires you to provide your own AI endpoint.
 * **HTML5 & CSS3:** For the popup and options page.
 * **`chrome.storage` API:** Uses `storage.sync` for settings and `storage.local` for history.
 
+---
+
+## 📷 Screenshots 
+
+<img width="1921" height="935" alt="image" src="https://github.com/user-attachments/assets/64493c4b-5b86-444e-bb49-b98795c78514" />
+<img width="1921" height="938" alt="image" src="https://github.com/user-attachments/assets/ea8769cd-1932-469c-8b21-56cb6f97e017" />
+<img width="1921" height="942" alt="image" src="https://github.com/user-attachments/assets/2c828560-148e-48d1-8f67-8e293b88c3c8" />
+<img width="1921" height="942" alt="image" src="https://github.com/user-attachments/assets/18b8b5b2-601e-4c70-af68-8fc926f956d9" />
+<img width="1921" height="937" alt="image" src="https://github.com/user-attachments/assets/edafe386-bcef-4735-bd4a-c7d4a9fde18d" />
+<img width="1921" height="933" alt="image" src="https://github.com/user-attachments/assets/c4cd1379-3834-4909-9862-9e030c8e1d70" />
