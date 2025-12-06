@@ -932,8 +932,8 @@ function exportHistory() {
       return;
     }
 
-    // --- REVISED HEADERS: Include all fields ---
-    const headers = ['timestamp', 'word', 'definition', 'listName', 'modelName', 'sourceUrl', 'sourceTitle', 'favorite'];
+    // --- REVISED HEADERS: Include all fields including flashcard progress ---
+    const headers = ['timestamp', 'word', 'definition', 'listName', 'modelName', 'sourceUrl', 'sourceTitle', 'favorite', 'nextReview', 'interval', 'lastReviewed'];
     const csvRows = [
       headers.join(','),
       ...historyToExport.map(item => [
@@ -944,7 +944,10 @@ function exportHistory() {
         escapeCSV(item.modelName || ''),
         escapeCSV(item.sourceUrl || ''),
         escapeCSV(item.sourceTitle || ''),
-        escapeCSV(item.favorite ? 'true' : 'false')
+        escapeCSV(item.favorite ? 'true' : 'false'),
+        escapeCSV(item.nextReview || ''),
+        escapeCSV(item.interval || ''),
+        escapeCSV(item.lastReviewed || '')
       ].join(','))
     ];
 
@@ -988,7 +991,7 @@ function exportAllHistory() {
       listIdToNameMap[list.id] = list.name;
     });
 
-    const headers = ['timestamp', 'word', 'definition', 'listName', 'modelName', 'sourceUrl', 'sourceTitle', 'favorite'];
+    const headers = ['timestamp', 'word', 'definition', 'listName', 'modelName', 'sourceUrl', 'sourceTitle', 'favorite', 'nextReview', 'interval', 'lastReviewed'];
     const csvRows = [
       headers.join(','),
       ...allHistory.map(item => [
@@ -999,7 +1002,10 @@ function exportAllHistory() {
         escapeCSV(item.modelName || ''),
         escapeCSV(item.sourceUrl || ''),
         escapeCSV(item.sourceTitle || ''),
-        escapeCSV(item.favorite ? 'true' : 'false')
+        escapeCSV(item.favorite ? 'true' : 'false'),
+        escapeCSV(item.nextReview || ''),
+        escapeCSV(item.interval || ''),
+        escapeCSV(item.lastReviewed || '')
       ].join(','))
     ];
 
@@ -1105,10 +1111,14 @@ function importHistory(event) {
     const tsIndex = headers.indexOf('timestamp');
     const wordIndex = headers.indexOf('word');
     const defIndex = headers.indexOf('definition');
-    // --- NEW: Get listName index ---
     const listNameIndex = headers.indexOf('listName');
-    // --- NEW: Get modelName index ---
     const modelNameIndex = headers.indexOf('modelName');
+    const sourceUrlIndex = headers.indexOf('sourceUrl');
+    const sourceTitleIndex = headers.indexOf('sourceTitle');
+    const favoriteIndex = headers.indexOf('favorite');
+    const nextReviewIndex = headers.indexOf('nextReview');
+    const intervalIndex = headers.indexOf('interval');
+    const lastReviewedIndex = headers.indexOf('lastReviewed');
 
     if (tsIndex === -1 || wordIndex === -1 || defIndex === -1) {
       updateIOStatus("File is missing required headers: timestamp, word, or definition.", "error");
@@ -1121,24 +1131,44 @@ function importHistory(event) {
         continue;
       }
 
-      // Check if fields length matches headers length, or if listName is optional
-      if (fields.length >= headers.length - (listNameIndex === -1 ? 1 : 0) - (modelNameIndex === -1 ? 1 : 0)) {
+      // Relaxed check - only require the first 3 required fields
+      if (fields.length >= 3) {
         const newItem = {
           timestamp: fields[tsIndex],
           word: fields[wordIndex],
           definition: fields[defIndex]
         };
-        // --- NEW: Add listName to newItem if present in CSV ---
+
+        // Add optional fields if present
         if (listNameIndex !== -1 && fields[listNameIndex]) {
           newItem.listName = fields[listNameIndex];
         }
-        // --- NEW: Add modelName to newItem if present in CSV ---
         if (modelNameIndex !== -1 && fields[modelNameIndex]) {
           newItem.modelName = fields[modelNameIndex];
         }
+        if (sourceUrlIndex !== -1 && fields[sourceUrlIndex]) {
+          newItem.sourceUrl = fields[sourceUrlIndex];
+        }
+        if (sourceTitleIndex !== -1 && fields[sourceTitleIndex]) {
+          newItem.sourceTitle = fields[sourceTitleIndex];
+        }
+        if (favoriteIndex !== -1 && fields[favoriteIndex]) {
+          newItem.favorite = fields[favoriteIndex].toLowerCase() === 'true';
+        }
+        // Flashcard progress fields
+        if (nextReviewIndex !== -1 && fields[nextReviewIndex]) {
+          newItem.nextReview = parseInt(fields[nextReviewIndex]) || 0;
+        }
+        if (intervalIndex !== -1 && fields[intervalIndex]) {
+          newItem.interval = parseInt(fields[intervalIndex]) || 0;
+        }
+        if (lastReviewedIndex !== -1 && fields[lastReviewedIndex]) {
+          newItem.lastReviewed = parseInt(fields[lastReviewedIndex]) || 0;
+        }
+
         newItems.push(newItem);
       } else {
-        console.warn(`Skipping malformed CSV line (line ${i + 1}): Expected ${headers.length} fields, found ${fields.length}`);
+        console.warn(`Skipping malformed CSV line (line ${i + 1}): Expected at least 3 fields, found ${fields.length}`);
         parseErrors++;
       }
     }
