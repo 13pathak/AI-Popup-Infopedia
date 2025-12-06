@@ -64,7 +64,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('import-file-input').addEventListener('change', importHistory);
 
   // --- NEW: Event Listeners for List Management ---
-  document.getElementById('list-select').addEventListener('change', (e) => loadHistory(e.target.value));
+  document.getElementById('list-select').addEventListener('change', () => applyFilters());
   document.getElementById('add-list-btn').addEventListener('click', addList);
   document.getElementById('rename-list-btn').addEventListener('click', renameList);
   document.getElementById('delete-list-btn').addEventListener('click', deleteList);
@@ -497,8 +497,8 @@ function loadLists() {
       clearListBtn.textContent = `Clear Selected List`;
     }
 
-    // Load history for the currently selected list
-    loadHistory(listSelect.value);
+    // Load history for the currently selected list with filters
+    applyFilters();
   });
 }
 
