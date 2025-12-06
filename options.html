@@ -262,6 +262,57 @@
 
         /* --- END ANKI STYLE --- */
 
+        /* --- NEW: Star/Favorite Button --- */
+        .star-item-btn {
+            position: absolute;
+            top: 10px;
+            right: 98px;
+            background: none;
+            border: none;
+            font-size: 1.2em;
+            cursor: pointer;
+            color: #aaa;
+            padding: 2px 8px;
+            border-radius: 4px;
+            line-height: 1;
+        }
+
+        .star-item-btn:hover {
+            color: #f0ad4e;
+            background-color: #444;
+        }
+
+        .star-item-btn.favorited {
+            color: #f0ad4e;
+        }
+
+        /* --- NEW: Bulk Selection Checkbox --- */
+        .bulk-checkbox {
+            position: absolute;
+            top: 50%;
+            left: 10px;
+            transform: translateY(-50%);
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+            display: none;
+        }
+
+        .bulk-mode .bulk-checkbox {
+            display: block;
+        }
+
+        .bulk-mode .history-item {
+            padding-left: 40px;
+        }
+
+        .history-item.selected {
+            background-color: rgba(97, 175, 239, 0.15);
+            border-left: 3px solid var(--primary-color);
+        }
+
+        /* --- END NEW STYLES --- */
+
 
         .history-item-editing {
             padding-right: 5px;
@@ -461,6 +512,7 @@
         <button class="tab-button active" data-tab="settings-content">Settings</button>
         <button class="tab-button" data-tab="history-content">History</button>
         <button class="tab-button" data-tab="anki-content">Anki</button>
+        <button class="tab-button" data-tab="flashcards-content">Flashcards</button>
         <button class="tab-button" data-tab="reminder-content">Reminder</button>
         <button class="tab-button" data-tab="prompts-content">Prompts</button>
     </div>
@@ -537,6 +589,24 @@
     <div id="history-content" class="tab-content">
         <h2>Search History</h2>
 
+        <!-- --- NEW: Search and Filter Section --- -->
+        <div id="history-filters"
+            style="margin-bottom: 15px; padding: 10px; border: 1px solid var(--border-color); border-radius: 4px; background-color: var(--input-bg);">
+            <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+                <input type="text" id="history-search" placeholder="Search words or definitions..."
+                    style="flex-grow: 1; min-width: 150px;">
+                <select id="date-filter" style="width: auto;">
+                    <option value="all">All Time</option>
+                    <option value="today">Today</option>
+                    <option value="week">This Week</option>
+                    <option value="month">This Month</option>
+                </select>
+                <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; margin-bottom: 0;">
+                    <input type="checkbox" id="favorites-only"> ⭐ Favorites Only
+                </label>
+            </div>
+        </div>
+
         <div id="list-management">
             <h4>Manage & View Lists</h4>
             <div id="list-controls">
@@ -550,6 +620,23 @@
                     style="background-color: var(--button-bg);">&#9650;</button>
                 <button id="move-list-down-btn" title="Move List Down"
                     style="background-color: var(--button-bg);">&#9660;</button>
+            </div>
+        </div>
+
+        <!-- --- NEW: Bulk Actions Bar --- -->
+        <div id="bulk-actions-bar"
+            style="display: none; margin: 10px 0; padding: 10px; background-color: var(--primary-color); border-radius: 4px; color: white;">
+            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                <label
+                    style="display: flex; align-items: center; gap: 5px; cursor: pointer; margin-bottom: 0; font-weight: bold;">
+                    <input type="checkbox" id="select-all-checkbox"> Select All
+                </label>
+                <span id="selected-count" style="margin-left: 10px;">0 selected</span>
+                <div style="margin-left: auto; display: flex; gap: 10px;">
+                    <button id="bulk-delete-btn" style="background-color: var(--danger-color);">Delete Selected</button>
+                    <button id="bulk-move-btn" style="background-color: var(--button-bg);">Move Selected</button>
+                    <button id="bulk-anki-btn" style="background-color: var(--secondary-color);">Export to Anki</button>
+                </div>
             </div>
         </div>
 
@@ -571,6 +658,7 @@
             <button id="import-all-history" style="background-color: var(--button-bg);">Import All History
                 (.csv)</button>
             <button id="clear-history">Clear All History</button>
+            <button id="toggle-bulk-mode" style="background-color: var(--button-bg);">Bulk Select Mode</button>
             <!-- This can use the same file input as the other import button -->
             <div id="io-status-all"></div>
         </div>
@@ -626,6 +714,74 @@
 
         <button id="anki-save-settings-btn" style="margin-top: 20px; background-color: var(--secondary-color);">Save
             Anki Settings</button>
+    </div>
+
+    <!-- --- NEW FLASHCARDS TAB CONTENT --- -->
+    <div id="flashcards-content" class="tab-content">
+        <h2>Flashcard Review</h2>
+        <p>Review your saved words with spaced repetition. Cards due for review will appear here.</p>
+
+        <div id="flashcard-controls" style="margin-bottom: 20px; display: flex; gap: 10px; align-items: center;">
+            <select id="flashcard-list-select" style="flex-grow: 1;">
+                <option value="all">All Lists</option>
+            </select>
+            <button id="start-review-btn" style="background-color: var(--secondary-color);">Start Review</button>
+        </div>
+
+        <div id="flashcard-stats"
+            style="margin-bottom: 15px; padding: 10px; background-color: var(--input-bg); border-radius: 4px;">
+            <span id="cards-due">Cards due: 0</span> |
+            <span id="cards-reviewed">Reviewed: 0</span>
+        </div>
+
+        <div id="flashcard-container"
+            style="display: none; border: 2px solid var(--border-color); border-radius: 8px; min-height: 300px; padding: 20px; text-align: center;">
+            <div id="flashcard-progress" style="margin-bottom: 15px; font-size: 0.9em; color: #888;">
+                Card <span id="current-card-num">0</span> of <span id="total-cards-num">0</span>
+            </div>
+
+            <div id="flashcard-front" style="margin-bottom: 20px;">
+                <h3 id="flashcard-word" style="font-size: 1.8em; color: var(--primary-color); margin-bottom: 10px;">Word
+                </h3>
+                <p id="flashcard-source" style="font-size: 0.85em; color: #666;"></p>
+            </div>
+
+            <div id="flashcard-back"
+                style="display: none; margin-bottom: 20px; padding: 15px; background-color: var(--input-bg); border-radius: 4px; text-align: left;">
+                <div id="flashcard-definition" style="line-height: 1.6;"></div>
+            </div>
+
+            <button id="show-answer-btn"
+                style="background-color: var(--primary-color); padding: 12px 30px; font-size: 1.1em;">
+                Show Answer
+            </button>
+
+            <div id="rating-buttons" style="display: none; margin-top: 15px;">
+                <p style="margin-bottom: 10px; color: #888;">How well did you remember?</p>
+                <div style="display: flex; justify-content: center; gap: 10px;">
+                    <button class="rating-btn" data-rating="1"
+                        style="background-color: var(--danger-color); padding: 10px 20px;">Again</button>
+                    <button class="rating-btn" data-rating="2"
+                        style="background-color: #f0ad4e; padding: 10px 20px;">Hard</button>
+                    <button class="rating-btn" data-rating="3"
+                        style="background-color: var(--secondary-color); padding: 10px 20px;">Good</button>
+                    <button class="rating-btn" data-rating="4"
+                        style="background-color: var(--primary-color); padding: 10px 20px;">Easy</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="review-complete" style="display: none; text-align: center; padding: 40px;">
+            <h3 style="color: var(--secondary-color);">🎉 Review Complete!</h3>
+            <p>You've reviewed all cards due for today.</p>
+            <button id="review-again-btn" style="margin-top: 15px; background-color: var(--primary-color);">Review
+                Again</button>
+        </div>
+
+        <div id="no-cards-message" style="display: none; text-align: center; padding: 40px; color: #888;">
+            <p>No cards due for review. Great job!</p>
+            <p style="font-size: 0.9em;">Save some words to start building your flashcard deck.</p>
+        </div>
     </div>
 
     <!-- --- NEW REMINDER TAB CONTENT --- -->
