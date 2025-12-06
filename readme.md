@@ -1,80 +1,141 @@
 # AI Popup Infopedia
 
-A simple browser extension to get instant AI explanations for any word or phrase (1-6 words) you select. Save your favorite definitions, edit them, and even import or export your entire history.
+A powerful browser extension to get instant AI explanations for any word or phrase you select. Features include multiple AI models, custom prompts, organized word lists, Anki integration, and a built-in spaced repetition flashcard system.
 
 ---
 
 ## 🚀 Features
 
-* ⚡ **Instant Definitions:** Select 1-6 words on any webpage to get a concise, AI-powered explanation in a clean popup.
-* ⚙️ **Custom AI Backend:** Configure the extension to use any OpenAI-compatible endpoint. Perfect for local models via **Ollama**, **LM Studio**, or cloud services like **Google's Gemini**.
-* 📝 **Save for Later:** Click the "Save" button on any definition to add it to your personal history list.
-* 🎨 **Custom Prompts:** Tailor the AI's responses from the options page. (e.g., "Explain {word} like I'm five" or "Translate {word} to Hindi").
-* 📚 **Full-Featured History Page:**
-    * **View & Edit:** See your full history. Click any word or definition to edit it directly in-place.
-    * **Delete:** Remove individual items or clear the entire list with a single click.
-    * **Export:** Download your complete history (including your edits) as a `.csv` file for backup or use in other apps.
-    * **Import:** Upload a `.csv` file to merge with your existing history. The importer is robust and automatically handles:
-        * Newline characters inside definitions.
-        * Non-UTF-8 character encodings (like `windows-1252` from Excel).
-        * Missing timestamps (it generates new ones).
-* ⏰ **Backup Reminder:** Set a daily or weekly reminder to backup your history so you never lose your saved words.
+### ⚡ Core Features
+- **Instant Definitions:** Select 1-6 words on any webpage to get a concise, AI-powered explanation in a clean popup
+- **Multiple AI Models:** Configure and switch between multiple AI backends (Ollama, Gemini, OpenAI, etc.)
+- **Custom Prompts:** Create multiple prompts for different use cases (e.g., "Explain like I'm 5", "Translate to Hindi")
+- **Source Tracking:** Automatically saves the URL and page title where each word was looked up
 
+### 📚 History & Lists
+- **Organized Lists:** Create custom lists to categorize your saved words
+- **Full Editing:** Edit words, definitions, and move items between lists
+- **Search & Filter:** 
+  - Search by word or definition content
+  - Filter by date (Today, This Week, This Month)
+  - Favorites filter to show starred items only
+- **Favorites:** Star important definitions for quick access
+- **Bulk Actions:** Select multiple items to delete, move, or export at once
+
+### 📤 Import & Export
+- **CSV Export:** Export single lists or all history to CSV
+- **CSV Import:** Import CSV files with automatic list creation
+- **Settings Backup:** Export/import all models and prompts as JSON
+- **Backup Reminders:** Set daily/weekly reminders to backup your data
+
+### 🎴 Flashcards (Spaced Repetition)
+Built-in flashcard system with spaced repetition for effective learning:
+
+| Rating | Effect | Next Review |
+|--------|--------|-------------|
+| **Again** | Forgot the word | 1 minute |
+| **Hard** | Struggled to recall | Interval × 0.8 |
+| **Good** | Normal recall | Interval × 1.5 |
+| **Easy** | Instant recall | Interval × 2.5 |
+
+- Review all cards or filter by list
+- Progress tracking during sessions
+- Cards automatically scheduled based on your performance
+
+### 🔗 Anki Integration
+- Connect to Anki via Anki Connect add-on
+- Configure deck, note type, and field mapping
+- Export individual items or bulk export to Anki
 
 ---
 
 ## 🛠️ Installation & Configuration
 
-This extension requires you to provide your own AI endpoint.
-
 ### 1. Installation (from Source)
 
-1.  Download this project's folder.
-2.  Open your browser and navigate to `chrome://extensions`.
-3.  Enable **"Developer mode"** (usually a toggle in the top-right corner).
-4.  Click the **"Load unpacked"** button.
-5.  Select the folder containing this project (the one with `manifest.json` inside).
+1. Download this project's folder
+2. Open your browser and navigate to `chrome://extensions`
+3. Enable **"Developer mode"** (toggle in top-right corner)
+4. Click **"Load unpacked"**
+5. Select the folder containing this project
 
-### 2. Configuration (Required)
+### 2. Configure AI Model (Required)
 
-1.  Click the "AI Popup Infopedia" icon in your browser's toolbar. This will open the **Settings** page.
-2.  Fill in the "Settings" tab:
-    * **Endpoint URL:** The API URL for your AI service.
-        * *Ollama (local):* `http://localhost:11434/v1/chat/completions`
-        * *Google AI (Gemini):* `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions`
-    * **Model Name:** The exact model you want to use.
-        * *Ollama (local):* `llama3`, `mistral`, etc.
-        * *Google AI (Gemini):* `gemini-2.0-flash`
-    * **API Key (Optional):** Your API key, if required by your service (like Google AI).
-    * **Custom Prompt (Optional):** The default is `Explain the following word or concept in a concise paragraph: {word}`. You can change this, but **must** include `{word}`.
-3.  Click **"Save Settings"**. You are now ready to use the extension!
+1. Click the extension icon in your toolbar to open **Settings**
+2. Click the **+** button to add a new model:
+   - **Configuration Name:** A friendly name (e.g., "Gemini Flash")
+   - **Endpoint URL:**
+     - *Google Gemini:* `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions`
+     - *Ollama (local):* `http://localhost:11434/v1/chat/completions`
+   - **Model Name:** `gemini-2.0-flash`, `llama3`, `mistral`, etc.
+   - **API Key:** Your API key (if required)
+3. Click **Save Model**
+
+### 3. Create Custom Prompts (Optional)
+
+1. Go to the **Prompts** tab
+2. Add prompts like:
+   - `Explain {word} in simple terms for a beginner`
+   - `Give me the etymology and usage examples for {word}`
+   - `Translate {word} to Spanish with pronunciation`
+3. Set your default prompt in the **Settings** tab
 
 ---
 
 ## 💡 How to Use
 
-1.  **Highlight:** On any webpage, select a short piece of text (1-6 words).
-2.  **Read:** The AI popup will appear with the definition.
-3.  **Save:** Click "Save" to add the item to your history.
-4.  **Manage:** Click the extension icon in your toolbar to visit the "History" tab to view, edit, or manage your saved items.
+### Basic Usage
+1. **Select Text:** Highlight 1-6 words on any webpage
+2. **View Definition:** A popup appears with the AI explanation
+3. **Save:** Select a list and click "Save" to store the definition
+
+### Managing History
+1. Click the extension icon → **History** tab
+2. Use the **search box** to find specific words
+3. Use **date filters** to narrow down results
+4. Click ⭐ to **favorite** important items
+5. Click **Bulk Select Mode** to select multiple items for batch operations
+
+### Flashcard Review
+1. Click the extension icon → **Flashcards** tab
+2. Select a list or "All Lists"
+3. Click **Start Review**
+4. For each card:
+   - Read the word and try to recall the definition
+   - Click **Show Answer**
+   - Rate your recall (Again/Hard/Good/Easy)
+
+### Anki Integration
+1. Install **Anki Connect** add-on in Anki (code: 2055492159)
+2. Go to **Anki** tab in extension settings
+3. Click **Test Connection / Refresh Lists**
+4. Select your deck, note type, and map fields
+5. Use the **A** button on any history item to export to Anki
 
 ---
 
 ## 💻 Technology
 
-* **Manifest V3:** The modern standard for Chrome extensions.
-* **Vanilla JavaScript (ES6+):** No frameworks for a lightweight and fast experience.
-* **Shadow DOM:** The popup is injected into a Shadow DOM to prevent website styles from breaking it (and vice-versa).
-* **HTML5 & CSS3:** For the popup and options page.
-* **`chrome.storage` API:** Uses `storage.sync` for settings and `storage.local` for history.
+- **Manifest V3:** Modern Chrome extension standard
+- **Vanilla JavaScript (ES6+):** Lightweight, no frameworks
+- **Shadow DOM:** Popup isolated from page styles
+- **Chrome Storage API:** `sync` for settings, `local` for history
+- **Spaced Repetition:** SM-2 inspired algorithm for flashcards
 
 ---
 
-## 📷 Screenshots 
+## 📋 Permissions
 
-<img width="1921" height="935" alt="image" src="https://github.com/user-attachments/assets/64493c4b-5b86-444e-bb49-b98795c78514" />
-<img width="1921" height="938" alt="image" src="https://github.com/user-attachments/assets/ea8769cd-1932-469c-8b21-56cb6f97e017" />
-<img width="1921" height="942" alt="image" src="https://github.com/user-attachments/assets/2c828560-148e-48d1-8f67-8e293b88c3c8" />
-<img width="1921" height="942" alt="image" src="https://github.com/user-attachments/assets/18b8b5b2-601e-4c70-af68-8fc926f956d9" />
-<img width="1921" height="937" alt="image" src="https://github.com/user-attachments/assets/edafe386-bcef-4735-bd4a-c7d4a9fde18d" />
-<img width="1921" height="933" alt="image" src="https://github.com/user-attachments/assets/c4cd1379-3834-4909-9862-9e030c8e1d70" />
+- `storage` - Save settings and history
+- `scripting` - Inject popup on webpages
+- `alarms` - Backup reminder notifications
+
+---
+
+## 🤝 Contributing
+
+Feel free to open issues or submit pull requests for improvements!
+
+## 📄 License
+
+MIT License
