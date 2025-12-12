@@ -1,6 +1,8 @@
 # AI Popup Infopedia
 
 A powerful browser extension to get instant AI explanations for any word or phrase you select. Features include multiple AI models, custom prompts, organized word lists, Anki integration, and a built-in spaced repetition flashcard system.
+<img width="1913" height="941" alt="image" src="https://github.com/user-attachments/assets/4c38a842-cf08-412a-8abc-0a8fda526b19" />
+<img width="1921" height="935" alt="image" src="https://github.com/user-attachments/assets/29bc794d-2881-4d09-8a6e-134a6a786d08" />
 
 ---
 
@@ -139,3 +141,4 @@ Feel free to open issues or submit pull requests for improvements!
 ## 📄 License
 
 MIT License
+
