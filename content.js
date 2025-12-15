@@ -300,11 +300,14 @@ function createSelectors(models, prompts, currentModelId, currentPromptContent, 
       promptSelector.appendChild(option);
     });
   } else {
-    // Handle case with no prompts
+    // Handle case with no prompts - use empty value and disable selector
     const option = document.createElement('option');
+    option.value = ''; // Empty value so redefine uses default system prompt
     option.textContent = "No Custom Prompts";
     option.disabled = true;
+    option.selected = true;
     promptSelector.appendChild(option);
+    promptSelector.disabled = true; // Disable the entire selector
   }
 
   promptSelector.addEventListener('change', () => {
@@ -325,8 +328,7 @@ function createSelectors(models, prompts, currentModelId, currentPromptContent, 
   }
 }
 
-// --- NEW: Function to get a new definition with a specific model ---
-// --- NEW: Function to get a new definition with a specific model and prompt ---
+// --- Function to get a new definition with a specific model and prompt ---
 function redefineWithModelAndPrompt(word, modelId, promptContent) {
   if (!popup) return;
 
@@ -417,18 +419,67 @@ function createActionButtons(word, definition, modelName, promptName) {
         font-family: sans-serif;
         font-size: 13px;
       `;
-    lists.forEach(list => {
-      const option = document.createElement('option');
-      option.value = list.id;
-      option.textContent = list.name;
 
-      // --- NEW: Check if this list was the last one used ---
-      if (list.id === lastUsedListId) {
-        option.selected = true;
+    // Helper to populate options
+    function populateListOptions() {
+      listSelector.innerHTML = '';
+      lists.forEach(list => {
+        const option = document.createElement('option');
+        option.value = list.id;
+        option.textContent = list.name;
+
+        // --- NEW: Check if this list was the last one used ---
+        if (list.id === lastUsedListId) {
+          option.selected = true;
+        }
+        // --- END NEW ---
+
+        listSelector.appendChild(option);
+      });
+
+      // --- NEW: Add "Create New List" option ---
+      const createOption = document.createElement('option');
+      createOption.value = "__create_new__";
+      createOption.textContent = "+ Create New List...";
+      createOption.style.fontWeight = "bold";
+      createOption.style.color = "#88ff88"; // Light green to stand out
+      listSelector.appendChild(createOption);
+    }
+
+    populateListOptions();
+
+    // Handle change event for creating new list
+    listSelector.addEventListener('change', (e) => {
+      if (e.target.value === "__create_new__") {
+        const newListName = prompt("Enter a name for the new list:");
+        if (newListName && newListName.trim()) {
+          // Send message to create list
+          chrome.runtime.sendMessage({ type: "createList", listName: newListName.trim() }, (response) => {
+            if (response && response.success) {
+              // Add to local lists array
+              lists.push(response.newList);
+              // Update lastUsedListId to the new list
+              // actually we can't update the variable 'lastUsedListId' effectively for the next run without re-fetching, 
+              // but for this UI instance we just select it.
+
+              // Refresh options
+              populateListOptions();
+              // Select the new list
+              listSelector.value = response.newList.id;
+            } else {
+              alert("Failed to create list: " + (response.error || "Unknown error"));
+              // Revert selection?
+              // Simple revert to first or previous is hard without state tracking,
+              // simpler to just re-populate which resets to default/lastUsed logic if possible,
+              // or just let it stay on "Create New List" (harmless).
+              populateListOptions();
+            }
+          });
+        } else {
+          // User cancelled or entered empty
+          populateListOptions(); // Reset
+        }
       }
-      // --- END NEW ---
-
-      listSelector.appendChild(option);
     });
 
     // 3. Create the final "Save" button
@@ -441,8 +492,8 @@ function createActionButtons(word, definition, modelName, promptName) {
       ev.stopPropagation();
       const selectedListId = listSelector.value;
 
-      // Deselect text
-      window.getSelection().removeAllRanges();
+      // --- REMOVED: Deselect text ---
+      // window.getSelection().removeAllRanges();
 
       // Send message to background to save with listId
       chrome.runtime.sendMessage({
@@ -467,8 +518,10 @@ function createActionButtons(word, definition, modelName, promptName) {
       savedText.style.opacity = '0.8';
       actionsContainer.appendChild(savedText);
 
-      // Close popup after a delay
-      setTimeout(() => removePopup(), 800);
+      // --- REMOVED: Auto-close logic ---
+      // We keep the popup open so the user can continue interacting.
+      // window.getSelection().removeAllRanges();
+      // setTimeout(() => removePopup(), 800);
     });
 
     // 4. Add the new controls directly to the container
