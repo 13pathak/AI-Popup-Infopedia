@@ -150,6 +150,31 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true; // Async response
   }
 
+  // --- NEW: Case 4: Create a new list ---
+  if (request.type === "createList") {
+    const listName = request.listName;
+    if (listName && listName.trim()) {
+      chrome.storage.local.get({ wordLists: [] }, (data) => {
+        const lists = data.wordLists;
+        // Check for duplicates (optional but good)
+        if (lists.some(l => l.name === listName.trim())) {
+          sendResponse({ error: "List already exists" });
+          return;
+        }
+
+        const newList = { id: `list_${new Date().getTime()}`, name: listName.trim() };
+        lists.push(newList);
+
+        chrome.storage.local.set({ wordLists: lists }, () => {
+          sendResponse({ success: true, newList: newList });
+        });
+      });
+    } else {
+      sendResponse({ error: "Invalid list name" });
+    }
+    return true; // Async response
+  }
+
 });
 
 // --- UPDATED to accept source URL and title ---
