@@ -122,13 +122,6 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('.rating-btn').forEach(btn => {
     btn.addEventListener('click', (e) => rateFlashcard(parseInt(e.target.dataset.rating)));
   });
-
-  // --- NEW: Long Text Hotkey Event Listeners ---
-  loadHotkeySettings();
-  document.getElementById('enable-long-text').addEventListener('change', toggleHotkeyConfig);
-  document.getElementById('hotkey-input').addEventListener('keydown', recordHotkey);
-  document.getElementById('hotkey-input').addEventListener('focus', (e) => { e.target.select(); }); // Auto-select to indicate ready
-  document.getElementById('clear-hotkey-btn').addEventListener('click', clearHotkey);
 });
 
 
@@ -2235,82 +2228,3 @@ function rateFlashcard(rating) {
 }
 
 // Load flashcard lists when tab is clicked (handled by tab switching)
-
-// ---
-// --- NEW: HOTKEY SETTINGS FUNCTIONS
-// ---
-
-function loadHotkeySettings() {
-  chrome.storage.sync.get(['enableLongText', 'longTextHotkey'], (data) => {
-    const enableCheckbox = document.getElementById('enable-long-text');
-    const container = document.getElementById('hotkey-config-container');
-    const input = document.getElementById('hotkey-input');
-
-    enableCheckbox.checked = !!data.enableLongText;
-    container.style.display = data.enableLongText ? 'block' : 'none';
-
-    if (data.longTextHotkey) {
-      input.value = formatHotkeyDisplay(data.longTextHotkey);
-    } else {
-      input.value = '';
-    }
-  });
-}
-
-function toggleHotkeyConfig(event) {
-  const isEnabled = event.target.checked;
-  const container = document.getElementById('hotkey-config-container');
-
-  container.style.display = isEnabled ? 'block' : 'none';
-
-  chrome.storage.sync.set({ enableLongText: isEnabled }, () => {
-    updateStatus('Long text setting saved.', 'success');
-  });
-}
-
-function recordHotkey(event) {
-  event.preventDefault();
-  event.stopPropagation(); // Stop bubbling
-
-  const key = event.key;
-  // Ignore purely modifier key presses (e.g. just pressing 'Control')
-  if (['Control', 'Shift', 'Alt', 'Meta'].includes(key)) {
-    return;
-  }
-
-  const hotkeyData = {
-    key: key.length === 1 ? key.toUpperCase() : key, // 'a' -> 'A', 'Enter' -> 'Enter'
-    code: event.code,
-    ctrlKey: event.ctrlKey,
-    shiftKey: event.shiftKey,
-    altKey: event.altKey,
-    metaKey: event.metaKey
-  };
-
-  const displayString = formatHotkeyDisplay(hotkeyData);
-  document.getElementById('hotkey-input').value = displayString;
-
-  // Auto-save
-  chrome.storage.sync.set({ longTextHotkey: hotkeyData }, () => {
-    updateStatus('Hotkey saved!', 'success');
-    document.getElementById('hotkey-input').blur(); // Lose focus
-  });
-}
-
-function clearHotkey() {
-  document.getElementById('hotkey-input').value = '';
-  chrome.storage.sync.remove('longTextHotkey', () => {
-    updateStatus('Hotkey cleared.', 'info');
-  });
-}
-
-function formatHotkeyDisplay(hotkey) {
-  if (!hotkey) return '';
-  const parts = [];
-  if (hotkey.ctrlKey) parts.push('Ctrl');
-  if (hotkey.metaKey) parts.push('Meta'); // Command on Mac
-  if (hotkey.altKey) parts.push('Alt');
-  if (hotkey.shiftKey) parts.push('Shift');
-  parts.push(hotkey.key);
-  return parts.join(' + ');
-}
