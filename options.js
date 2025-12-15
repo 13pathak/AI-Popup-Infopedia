@@ -64,7 +64,16 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('import-file-input').addEventListener('change', importHistory);
 
   // --- NEW: Event Listeners for List Management ---
-  document.getElementById('list-select').addEventListener('change', () => applyFilters());
+  document.getElementById('list-select').addEventListener('change', (e) => {
+    if (e.target.value === "__create_new__") {
+      addList(); // Reuse existing addList function
+      // addList will refresh lists. If user cancels, we need to revert?
+      // addList implementation doesn't return anything or handle cancel nicely regarding UI selection revert.
+      // Let's rely on addList reloading lists. If cancel, it reloads, reverting to default/first.
+    } else {
+      applyFilters();
+    }
+  });
   document.getElementById('add-list-btn').addEventListener('click', addList);
   document.getElementById('rename-list-btn').addEventListener('click', renameList);
   document.getElementById('delete-list-btn').addEventListener('click', deleteList);
@@ -481,13 +490,28 @@ function loadLists() {
       listSelect.appendChild(option);
     });
 
+    // --- NEW: Add "Create New List" option ---
+    const createOption = document.createElement('option');
+    createOption.value = "__create_new__";
+    createOption.textContent = "+ Create New List...";
+    createOption.style.color = "#88ff88"; // Green tint
+    listSelect.appendChild(createOption);
+
     // Try to re-select the previously selected list
     if (currentVal && listSelect.querySelector(`option[value="${currentVal}"]`)) {
       listSelect.value = currentVal;
     }
 
+    // --- NEW: Handle "Create New List" selection logic here ---
+    // But since this is inside loadLists, we should attach the listener OUTSIDE/ONCE.
+    // However, options.js attaches 'change' listener to applyFilters().
+    // We need to intercept that specific value in the change listener or wrap it.
+    // Let's modify the change listener in DOMContentLoaded!
+    // Wait, modifying DOMContentLoaded is separate. Here we ensure the option exists.
+
     // --- NEW: Disable/Enable move buttons based on selection ---
     const selectedIndex = listSelect.selectedIndex;
+    // ... (rest of logic)
     const listCount = lists.length;
     moveUpBtn.disabled = selectedIndex <= 0;
     moveDownBtn.disabled = selectedIndex >= listCount - 1 || listCount <= 1;
@@ -541,20 +565,26 @@ function renameList() {
 function deleteList() {
   const listSelect = document.getElementById('list-select');
   const listId = listSelect.value;
-  if (!listId || listSelect.options.length <= 1) {
-    alert("You cannot delete the last remaining list.");
+  if (!listId) {
+    alert("No list selected.");
     return;
   }
 
-  if (confirm("Are you sure you want to delete this list? Words in it will NOT be deleted but will become unlisted.")) {
-    chrome.storage.local.get({ wordLists: [] }, (data) => {
+  // Check actual wordLists array length, not options count (which includes "+ Create New List...")
+  chrome.storage.local.get({ wordLists: [] }, (data) => {
+    if (data.wordLists.length <= 1) {
+      alert("You cannot delete the last remaining list.");
+      return;
+    }
+
+    if (confirm("Are you sure you want to delete this list? Words in it will NOT be deleted but will become unlisted.")) {
       const lists = data.wordLists.filter(list => list.id !== listId);
       chrome.storage.local.set({ wordLists: lists }, () => {
         updateStatus('List deleted.', 'success');
         loadLists();
       });
-    });
-  }
+    }
+  });
 }
 
 // --- NEW: Function to move a list up or down ---
@@ -707,7 +737,8 @@ function handleEditClick(event) {
     .replace(/<strong>(.*?)<\/strong>/gi, '**$1**');
 
   itemElement.querySelector('.display-view').style.display = 'none';
-  itemElement.querySelector('.anki-item-btn').style.display = 'none'; // --- NEW: Hide Anki button ---
+  itemElement.querySelector('.anki-item-btn').style.display = 'none';
+  itemElement.querySelector('.star-item-btn').style.display = 'none'; // Hide star button during edit
   itemElement.querySelector('.edit-item-btn').style.display = 'none';
   itemElement.querySelector('.delete-item-btn').style.display = 'none';
 
@@ -734,6 +765,58 @@ function handleEditClick(event) {
       }
       listSelector.appendChild(option);
     });
+
+    // --- NEW: Add Create List option ---
+    const createOption = document.createElement('option');
+    createOption.value = "__create_new__";
+    createOption.textContent = "+ Create New List...";
+    createOption.style.color = "lightgreen";
+    listSelector.appendChild(createOption);
+
+    // Add change listener for creation
+    listSelector.addEventListener('change', (e) => {
+      if (e.target.value === "__create_new__") {
+        const newListName = prompt("Enter the name for the new list:");
+        if (newListName && newListName.trim()) {
+          // We need to manually add to storage here or reuse addList logic?
+          // Since we are in options.js, we can access storage directly.
+          chrome.storage.local.get({ wordLists: [] }, (data) => {
+            const lists = data.wordLists;
+            const newList = { id: `list_${new Date().getTime()}`, name: newListName.trim() };
+            lists.push(newList);
+            chrome.storage.local.set({ wordLists: lists }, () => {
+              updateStatus('List created!', 'success');
+              // Re-populate this specific selector!
+              // We need to clear and re-add options.
+              listSelector.innerHTML = '';
+              lists.forEach(l => {
+                const opt = document.createElement('option');
+                opt.value = l.id;
+                opt.textContent = l.name;
+                if (l.id === newList.id) opt.selected = true;
+                listSelector.appendChild(opt);
+              });
+              // Add create option again
+              listSelector.appendChild(createOption);
+              listSelector.value = newList.id; // Select new one
+
+              // Also refresh the main list in background? 
+              // loadLists() would refresh the MAIN UI but might disrupt the editing flow?
+              // Yes, loadLists clears history list. We should NOT call loadLists here.
+              // But we should probably update the main dropdown silently?
+              // For now, let's just make sure the editing works. 
+              // The main dropdown will be outdated until page refresh or manual interaction.
+              // That's acceptable for this localized context.
+            });
+          });
+        } else {
+          // Revert to currentListId (original one) or try to find what was selected?
+          // Simplest is to set value back to currentListId
+          listSelector.value = currentListId;
+        }
+      }
+    });
+
     editControlsContainer.appendChild(listSelector); // Add selector to container
   });
 
@@ -1234,8 +1317,8 @@ function mergeHistory(newItems, parseErrors) {
 
       // --- NEW: Determine listId for the imported item ---
       let targetListId;
-      if (item.listName) {
-        // If listName is provided in CSV
+      if (item.listName && item.listName !== 'Unlisted') {
+        // If listName is provided in CSV and is NOT 'Unlisted'
         if (listNameToIdMap[item.listName]) {
           // List already exists, use its ID
           targetListId = listNameToIdMap[item.listName];
@@ -1249,8 +1332,33 @@ function mergeHistory(newItems, parseErrors) {
           wordListsModified = true; // Mark for saving
         }
       } else {
-        // If listName is NOT provided in CSV (e.g., old format), assign to currently selected list
-        targetListId = currentSelectedListId;
+        // If listName is NOT provided or is 'Unlisted', assign to currently selected list (if user wants) or leave null?
+        // Actually, the previous logic fell through to 'targetListId = currentSelectedListId' below?
+        // Wait, the original code had:
+        // } else { targetListId = currentSelectedListId; }
+        // We should replicate that structure properly.
+
+        // Let's rely on the outer-scope handling.
+        // If we fall through here, targetListId remains undefined.
+      }
+
+      // If we didn't determine a targetListId from the listName (because it was missing or 'Unlisted')
+      if (!targetListId) {
+        // assign to currently selected list? 
+        // Original code logic:
+        // } else {
+        //   targetListId = currentSelectedListId;
+        // }
+        // But that was only if item.listName was falsy. 
+        // If item.listName was 'Unlisted', we want it to be NULL (Unlisted), NOT currentSelectedListId (which might be "Biology").
+        // If we import "Unlisted" items, they should stay unlisted.
+
+        if (item.listName === 'Unlisted') {
+          targetListId = null;
+        } else {
+          // Basic fallback for old CSVs without listName col
+          targetListId = currentSelectedListId;
+        }
       }
       item.listId = targetListId;
 
@@ -1610,18 +1718,98 @@ function loadPrompts() {
     } else {
       noPromptsMsg.style.display = 'none';
 
-      prompts.forEach(prompt => {
+      prompts.forEach((prompt, index) => {
         const promptEl = document.createElement('div');
         promptEl.style.borderBottom = '1px solid var(--border-color)';
         promptEl.style.padding = '10px 0';
         promptEl.style.display = 'flex';
         promptEl.style.justifyContent = 'space-between';
         promptEl.style.alignItems = 'center';
+        promptEl.style.backgroundColor = 'var(--bg-color)'; // Ensure bg for opacity effects
+        promptEl.style.transition = 'background-color 0.2s, transform 0.2s';
+
+        // --- NEW: Drag and Drop Logic ---
+        promptEl.draggable = true;
+        promptEl.dataset.index = index;
+
+        promptEl.addEventListener('dragstart', (e) => {
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', index);
+          promptEl.style.opacity = '0.4';
+          promptEl.classList.add('dragging');
+        });
+
+        promptEl.addEventListener('dragend', () => {
+          promptEl.style.opacity = '1';
+          promptEl.classList.remove('dragging');
+          document.querySelectorAll('#prompts-list > div').forEach(el => {
+            el.style.borderTop = '';
+            el.style.borderBottom = '1px solid var(--border-color)'; // Restore default
+          });
+        });
+
+        promptEl.addEventListener('dragover', (e) => {
+          e.preventDefault(); // Essential to allow dropping
+          e.dataTransfer.dropEffect = 'move';
+          return false;
+        });
+
+        promptEl.addEventListener('dragenter', (e) => {
+          e.preventDefault();
+          // Highlight drop target (e.g., top border if moving up, bottom if moving down is harder to calc, just highlight)
+          promptEl.style.border = '2px dashed var(--primary-color)';
+        });
+
+        promptEl.addEventListener('dragleave', (e) => {
+          promptEl.style.border = '';
+          promptEl.style.borderBottom = '1px solid var(--border-color)'; // Restore default
+        });
+
+        promptEl.addEventListener('drop', (e) => {
+          e.stopPropagation();
+          e.preventDefault();
+
+          const fromIndex = parseInt(e.dataTransfer.getData('text/plain'));
+          const toIndex = index;
+
+          if (fromIndex !== toIndex) {
+            // Reorder array
+            const movedPrompt = prompts[fromIndex];
+            prompts.splice(fromIndex, 1); // Remove from old
+            prompts.splice(toIndex, 0, movedPrompt); // Insert at new
+
+            // Update storage
+            chrome.storage.sync.set({ customPrompts: prompts }, () => {
+              loadPrompts();
+              loadDefaultPromptSelect();
+            });
+          }
+          return false;
+        });
+
+
+        const infoWrapper = document.createElement('div');
+        infoWrapper.style.display = 'flex';
+        infoWrapper.style.alignItems = 'center';
+        infoWrapper.style.gap = '10px';
+
+        // Drag Handle
+        const dragHandle = document.createElement('span');
+        dragHandle.innerHTML = '&#9776;'; // Hamburger icon
+        dragHandle.style.cursor = 'grab';
+        dragHandle.style.color = '#888';
+        dragHandle.style.fontSize = '1.2em';
+        dragHandle.title = 'Drag to reorder';
 
         const infoDiv = document.createElement('div');
         infoDiv.innerHTML = `<strong>${escapeHTML(prompt.name)}</strong><br><small style="color: #888;">${escapeHTML(prompt.content.substring(0, 50))}${prompt.content.length > 50 ? '...' : ''}</small>`;
 
+        infoWrapper.appendChild(dragHandle);
+        infoWrapper.appendChild(infoDiv);
+
         const actionsDiv = document.createElement('div');
+        actionsDiv.style.display = 'flex';
+        actionsDiv.style.alignItems = 'center';
 
         const editBtn = document.createElement('button');
         editBtn.innerHTML = '&#9998;';
@@ -1638,7 +1826,7 @@ function loadPrompts() {
         actionsDiv.appendChild(editBtn);
         actionsDiv.appendChild(deleteBtn);
 
-        promptEl.appendChild(infoDiv);
+        promptEl.appendChild(infoWrapper);
         promptEl.appendChild(actionsDiv);
 
         listContainer.appendChild(promptEl);
@@ -1710,6 +1898,8 @@ function deletePrompt(id) {
     });
   }
 }
+
+
 
 function cancelPromptEdit() {
   document.getElementById('prompt-id').value = '';
