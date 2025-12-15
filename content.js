@@ -3,24 +3,6 @@ let popup = null;
 let isInteractingWithPopup = false;
 let isClickInsidePopup = false;
 
-// --- NEW: Hotkey Settings State ---
-let enableLongText = false;
-let longTextHotkey = null;
-
-// Initialize settings
-chrome.storage.sync.get(['enableLongText', 'longTextHotkey'], (data) => {
-  enableLongText = !!data.enableLongText;
-  longTextHotkey = data.longTextHotkey;
-});
-
-// Update settings when changed
-chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === 'sync') {
-    if (changes.enableLongText) enableLongText = changes.enableLongText.newValue;
-    if (changes.longTextHotkey) longTextHotkey = changes.longTextHotkey.newValue;
-  }
-});
-
 // --- Styles (unchanged) ---
 const popupStyles = `
   #ai-definition-popup {
@@ -105,61 +87,31 @@ document.addEventListener('mouseup', (event) => {
     return;
   }
 
+  // Count the words. We split by one or more whitespace characters.
   const wordCount = selectedText.split(/\s+/).length;
 
   if (wordCount > 0 && wordCount <= 6) {
     // Normal behavior for short text
     initiatePopupSequence(selection, selectedText);
   } else {
-    // Long text > 6 words
-    if (enableLongText) {
-      // If feature enabled, DO NOT close popup immediately (wait for hotkey)
-      // But if there's an existing popup from a previous selection, we might want to close it?
-      // Actually, if I select new text, the old selection is gone, so old popup should go?
-      // But standard behavior "removePopup()" handles that. 
-      // If I want to allow selecting new text without closing OLD popup? 
-      // No, UI paradigm is usually 1 popup.
-
-      // However, if I select text -> popup doesn't show.
-      // If I had a popup open, and I select NEW text (that is long), 
-      // the old popup should probably close because the selection changed.
-      removePopup();
-    } else {
-      removePopup();
-    }
+    // If more than 6 words are selected, ensure the popup is closed
+    // (User can trigger it manually via shortcut)
+    removePopup();
   }
 });
 
-// --- NEW: Keydown listener for Hotkey ---
-document.addEventListener('keydown', (event) => {
-  // 1. Check if feature is enabled and hotkey is configured
-  if (!enableLongText || !longTextHotkey) return;
-
-  // 2. Check for Escape (existing logic, preserved here or separated?)
-  // The existing Escape listener is separate, let's keep it separate or merge.
-  // I'll leave the separate Escape listener alone.
-
-  // 3. Match Hotkey
-  if (event.key.toUpperCase() === longTextHotkey.key.toUpperCase() &&
-    event.ctrlKey === longTextHotkey.ctrlKey &&
-    event.shiftKey === longTextHotkey.shiftKey &&
-    event.altKey === longTextHotkey.altKey &&
-    event.metaKey === longTextHotkey.metaKey) {
-
-    // 4. Check selection
+// --- NEW: Message Listener for activation ---
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.type === "triggerPopup") {
     const selection = window.getSelection();
     const selectedText = selection.toString().trim();
-    const wordCount = selectedText.split(/\s+/).length;
-
-    // The user wants it "only after a user selects more than six words"
-    // But practically, if I select 3 words and press hotkey, should it work? 
-    // Probably yes, but the requirement emphasizes > 6.
-    // I'll allow it for any valid selection > 0 words.
     if (selectedText.length > 0) {
       initiatePopupSequence(selection, selectedText);
     }
   }
 });
+
+
 
 // --- NEW: Helper to start the popup logic (extracted from mouseup) ---
 function initiatePopupSequence(selection, selectedText) {
