@@ -3,6 +3,19 @@ chrome.action.onClicked.addListener((tab) => {
   chrome.runtime.openOptionsPage();
 });
 
+// --- NEW: Listen for keyboard shortcuts (commands) ---
+chrome.commands.onCommand.addListener((command) => {
+  if (command === "trigger-popup") {
+    // Send message to the active tab to trigger the popup
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs.length > 0) {
+        chrome.tabs.sendMessage(tabs[0].id, { type: "triggerPopup" });
+      }
+    });
+  }
+});
+
+
 // --- This listener now handles multiple message types ---
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
