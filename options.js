@@ -23,6 +23,11 @@ document.addEventListener('DOMContentLoaded', () => {
         loadAnkiDecksAndModels();
       }
 
+      // --- NEW: Load Flashcard lists when tab is clicked ---
+      if (tab.dataset.tab === "flashcards-content") {
+        loadFlashcardLists();
+      }
+
       // --- NEW: Load Reminder settings when tab is clicked ---
       if (tab.dataset.tab === "reminder-content") {
         loadReminderSettings();
@@ -37,14 +42,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
   loadModels();
   loadLists(); // Load lists on initial page load
-  loadModels();
-  loadLists(); // Load lists on initial page load
+
   loadDefaultPromptSelect(); // Load default prompt selector
   loadAnkiSettings(); // Load saved Anki settings on page load
   loadReminderSettings(); // Load saved Reminder settings on page load
 
   // --- REVISED: Model Management Event Listeners ---
-  document.getElementById('add-model-btn').addEventListener('click', showModelForm);
+  document.getElementById('add-model-btn').addEventListener('click', () => showModelForm(false));
   document.getElementById('edit-model-btn').addEventListener('click', editSelectedModel);
   document.getElementById('delete-model-btn').addEventListener('click', deleteSelectedModel);
   document.getElementById('model-select').addEventListener('change', (e) => setDefaultModel(e.target.value));
@@ -60,7 +64,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('import-file-input').addEventListener('change', importHistory);
 
   // --- NEW: Event Listeners for List Management ---
-  document.getElementById('list-select').addEventListener('change', (e) => loadHistory(e.target.value));
+  document.getElementById('list-select').addEventListener('change', () => applyFilters());
   document.getElementById('add-list-btn').addEventListener('click', addList);
   document.getElementById('rename-list-btn').addEventListener('click', renameList);
   document.getElementById('delete-list-btn').addEventListener('click', deleteList);
@@ -90,6 +94,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // --- NEW: ANKI EVENT LISTENERS ---
   document.getElementById('anki-save-settings-btn').addEventListener('click', saveAnkiSettings);
   document.getElementById('anki-model-select').addEventListener('change', (e) => loadAnkiFields(e.target.value));
+  document.getElementById('anki-refresh-btn').addEventListener('click', loadAnkiDecksAndModels);
 
   // --- NEW: Reminder Event Listeners ---
   document.getElementById('save-reminder-settings-btn').addEventListener('click', saveReminderSettings);
@@ -97,6 +102,26 @@ document.addEventListener('DOMContentLoaded', () => {
   // --- NEW: Prompts Event Listeners ---
   document.getElementById('save-custom-prompt-btn').addEventListener('click', savePrompt);
   document.getElementById('cancel-custom-prompt-btn').addEventListener('click', cancelPromptEdit);
+
+  // --- NEW: Search, Filter, and Favorites Event Listeners ---
+  document.getElementById('history-search').addEventListener('input', debounce(applyFilters, 300));
+  document.getElementById('date-filter').addEventListener('change', applyFilters);
+  document.getElementById('favorites-only').addEventListener('change', applyFilters);
+
+  // --- NEW: Bulk Actions Event Listeners ---
+  document.getElementById('toggle-bulk-mode').addEventListener('click', toggleBulkMode);
+  document.getElementById('select-all-checkbox').addEventListener('change', toggleSelectAll);
+  document.getElementById('bulk-delete-btn').addEventListener('click', bulkDelete);
+  document.getElementById('bulk-move-btn').addEventListener('click', bulkMove);
+  document.getElementById('bulk-anki-btn').addEventListener('click', bulkExportToAnki);
+
+  // --- NEW: Flashcard Event Listeners ---
+  document.getElementById('start-review-btn').addEventListener('click', startFlashcardReview);
+  document.getElementById('show-answer-btn').addEventListener('click', showFlashcardAnswer);
+  document.getElementById('review-again-btn').addEventListener('click', startFlashcardReview);
+  document.querySelectorAll('.rating-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => rateFlashcard(parseInt(e.target.dataset.rating)));
+  });
 });
 
 
@@ -112,13 +137,13 @@ function showModelForm(isEdit = false, model = {}) {
 
   document.getElementById('model-form-container').style.display = 'block';
   document.getElementById('model-selection-container').style.display = 'none';
-  document.getElementById('global-prompt-container').style.display = 'none';
+  document.getElementById('default-prompt-container').style.display = 'none';
 }
 
 function hideModelForm() {
   document.getElementById('model-form-container').style.display = 'none';
   document.getElementById('model-selection-container').style.display = 'flex';
-  document.getElementById('global-prompt-container').style.display = 'block';
+  document.getElementById('default-prompt-container').style.display = 'block';
   // Clear form fields
   document.getElementById('model-id').value = '';
   document.getElementById('configName').value = '';
@@ -157,6 +182,11 @@ function saveModel() {
     }
 
     chrome.storage.sync.set({ models, defaultModelId }, () => {
+      if (chrome.runtime.lastError) {
+        console.error("Error saving model:", chrome.runtime.lastError);
+        updateStatus(`Error saving model: ${chrome.runtime.lastError.message}`, 'error');
+        return;
+      }
       updateStatus('Model saved successfully!', 'success');
       hideModelForm();
       loadModels();
@@ -377,7 +407,7 @@ function importAllSettings(event) {
       // Reload only the relevant data on the page
       setTimeout(() => {
         loadModels();
-        loadGlobalPrompt();
+        loadDefaultPromptSelect();
       }, 1000);
 
     } catch (error) {
@@ -467,8 +497,8 @@ function loadLists() {
       clearListBtn.textContent = `Clear Selected List`;
     }
 
-    // Load history for the currently selected list
-    loadHistory(listSelect.value);
+    // Load history for the currently selected list with filters
+    applyFilters();
   });
 }
 
@@ -589,13 +619,21 @@ function loadHistory(listId) {
 
         const displayView = document.createElement('div');
         displayView.className = 'display-view';
+
+        // Build source link HTML if available
+        let sourceHtml = '';
+        if (item.sourceUrl) {
+          const displayTitle = item.sourceTitle || (item.sourceUrl.length > 40 ? item.sourceUrl.substring(0, 40) + '...' : item.sourceUrl);
+          sourceHtml = ` | <a href="${escapeHTML(item.sourceUrl)}" target="_blank" style="color: #61afef; text-decoration: none;" title="${escapeHTML(item.sourceUrl)}">Source: ${escapeHTML(displayTitle)}</a>`;
+        }
+
         displayView.innerHTML = `
           <div class="history-word">${escapeHTML(item.word)}</div>
           <div class="history-definition">${formattedDefinition}</div>
           <div class="history-model" style="font-size: 0.8em; color: #888; margin-top: 4px;">
             Model: ${escapeHTML(item.modelName || 'Unknown')} | 
             Prompt: ${escapeHTML(item.promptName || 'Unknown')} | 
-            Date: ${new Date(item.timestamp).toLocaleDateString()}
+            Date: ${new Date(item.timestamp).toLocaleDateString()}${sourceHtml}
           </div>
         `;
         itemElement.appendChild(displayView);
@@ -609,6 +647,23 @@ function loadHistory(listId) {
         ankiButton.addEventListener('click', handleSendToAnkiClick);
         itemElement.appendChild(ankiButton);
         // --- END NEW ---
+
+        // --- NEW: Add Star/Favorite Button ---
+        const starButton = document.createElement('button');
+        starButton.className = 'star-item-btn' + (item.favorite ? ' favorited' : '');
+        starButton.innerHTML = item.favorite ? '★' : '☆';
+        starButton.title = item.favorite ? 'Remove from favorites' : 'Add to favorites';
+        starButton.dataset.timestamp = item.timestamp;
+        starButton.addEventListener('click', handleToggleFavoriteClick);
+        itemElement.appendChild(starButton);
+
+        // --- NEW: Add Bulk Selection Checkbox ---
+        const bulkCheckbox = document.createElement('input');
+        bulkCheckbox.type = 'checkbox';
+        bulkCheckbox.className = 'bulk-checkbox';
+        bulkCheckbox.dataset.timestamp = item.timestamp;
+        bulkCheckbox.addEventListener('change', updateSelectedCount);
+        itemElement.appendChild(bulkCheckbox);
 
         const editButton = document.createElement('button');
         editButton.className = 'edit-item-btn';
@@ -877,18 +932,22 @@ function exportHistory() {
       return;
     }
 
-    // --- REVISED HEADERS: Use 'listName' instead of 'listId' ---
-    const headers = ['timestamp', 'word', 'definition', 'listName', 'modelName'];
+    // --- REVISED HEADERS: Include all fields including flashcard progress ---
+    const headers = ['timestamp', 'word', 'definition', 'listName', 'modelName', 'sourceUrl', 'sourceTitle', 'favorite', 'nextReview', 'interval', 'lastReviewed'];
     const csvRows = [
       headers.join(','),
       ...historyToExport.map(item => [
         escapeCSV(item.timestamp),
         escapeCSV(item.word),
         escapeCSV(item.definition),
-        // --- REVISED: Get list name from map, default to 'Unlisted' if not found ---
-        // This handles cases where an item's listId might no longer correspond to an existing list
         escapeCSV(listIdToNameMap[item.listId] || 'Unlisted'),
-        escapeCSV(item.modelName || '')
+        escapeCSV(item.modelName || ''),
+        escapeCSV(item.sourceUrl || ''),
+        escapeCSV(item.sourceTitle || ''),
+        escapeCSV(item.favorite ? 'true' : 'false'),
+        escapeCSV(item.nextReview || ''),
+        escapeCSV(item.interval || ''),
+        escapeCSV(item.lastReviewed || '')
       ].join(','))
     ];
 
@@ -932,16 +991,21 @@ function exportAllHistory() {
       listIdToNameMap[list.id] = list.name;
     });
 
-    const headers = ['timestamp', 'word', 'definition', 'listName', 'modelName'];
+    const headers = ['timestamp', 'word', 'definition', 'listName', 'modelName', 'sourceUrl', 'sourceTitle', 'favorite', 'nextReview', 'interval', 'lastReviewed'];
     const csvRows = [
       headers.join(','),
       ...allHistory.map(item => [
         escapeCSV(item.timestamp),
         escapeCSV(item.word),
         escapeCSV(item.definition),
-        // Get list name from map, default to 'Unlisted' if not found
         escapeCSV(listIdToNameMap[item.listId] || 'Unlisted'),
-        escapeCSV(item.modelName || '')
+        escapeCSV(item.modelName || ''),
+        escapeCSV(item.sourceUrl || ''),
+        escapeCSV(item.sourceTitle || ''),
+        escapeCSV(item.favorite ? 'true' : 'false'),
+        escapeCSV(item.nextReview || ''),
+        escapeCSV(item.interval || ''),
+        escapeCSV(item.lastReviewed || '')
       ].join(','))
     ];
 
@@ -959,7 +1023,6 @@ function exportAllHistory() {
     link.click();
     document.body.removeChild(link);
 
-    URL.revokeObjectURL(url);
     URL.revokeObjectURL(url);
     updateIOStatus(`All history exported successfully!`, "success");
 
@@ -1048,10 +1111,14 @@ function importHistory(event) {
     const tsIndex = headers.indexOf('timestamp');
     const wordIndex = headers.indexOf('word');
     const defIndex = headers.indexOf('definition');
-    // --- NEW: Get listName index ---
     const listNameIndex = headers.indexOf('listName');
-    // --- NEW: Get modelName index ---
     const modelNameIndex = headers.indexOf('modelName');
+    const sourceUrlIndex = headers.indexOf('sourceUrl');
+    const sourceTitleIndex = headers.indexOf('sourceTitle');
+    const favoriteIndex = headers.indexOf('favorite');
+    const nextReviewIndex = headers.indexOf('nextReview');
+    const intervalIndex = headers.indexOf('interval');
+    const lastReviewedIndex = headers.indexOf('lastReviewed');
 
     if (tsIndex === -1 || wordIndex === -1 || defIndex === -1) {
       updateIOStatus("File is missing required headers: timestamp, word, or definition.", "error");
@@ -1064,24 +1131,44 @@ function importHistory(event) {
         continue;
       }
 
-      // Check if fields length matches headers length, or if listName is optional
-      if (fields.length >= headers.length - (listNameIndex === -1 ? 1 : 0) - (modelNameIndex === -1 ? 1 : 0)) {
+      // Relaxed check - only require the first 3 required fields
+      if (fields.length >= 3) {
         const newItem = {
           timestamp: fields[tsIndex],
           word: fields[wordIndex],
           definition: fields[defIndex]
         };
-        // --- NEW: Add listName to newItem if present in CSV ---
+
+        // Add optional fields if present
         if (listNameIndex !== -1 && fields[listNameIndex]) {
           newItem.listName = fields[listNameIndex];
         }
-        // --- NEW: Add modelName to newItem if present in CSV ---
         if (modelNameIndex !== -1 && fields[modelNameIndex]) {
           newItem.modelName = fields[modelNameIndex];
         }
+        if (sourceUrlIndex !== -1 && fields[sourceUrlIndex]) {
+          newItem.sourceUrl = fields[sourceUrlIndex];
+        }
+        if (sourceTitleIndex !== -1 && fields[sourceTitleIndex]) {
+          newItem.sourceTitle = fields[sourceTitleIndex];
+        }
+        if (favoriteIndex !== -1 && fields[favoriteIndex]) {
+          newItem.favorite = fields[favoriteIndex].toLowerCase() === 'true';
+        }
+        // Flashcard progress fields
+        if (nextReviewIndex !== -1 && fields[nextReviewIndex]) {
+          newItem.nextReview = parseInt(fields[nextReviewIndex]) || 0;
+        }
+        if (intervalIndex !== -1 && fields[intervalIndex]) {
+          newItem.interval = parseInt(fields[intervalIndex]) || 0;
+        }
+        if (lastReviewedIndex !== -1 && fields[lastReviewedIndex]) {
+          newItem.lastReviewed = parseInt(fields[lastReviewedIndex]) || 0;
+        }
+
         newItems.push(newItem);
       } else {
-        console.warn(`Skipping malformed CSV line (line ${i + 1}): Expected ${headers.length} fields, found ${fields.length}`);
+        console.warn(`Skipping malformed CSV line (line ${i + 1}): Expected at least 3 fields, found ${fields.length}`);
         parseErrors++;
       }
     }
@@ -1632,3 +1719,512 @@ function cancelPromptEdit() {
   document.getElementById('save-custom-prompt-btn').textContent = 'Save Prompt';
   document.getElementById('cancel-custom-prompt-btn').style.display = 'none';
 }
+
+// ---
+// --- NEW: UTILITY FUNCTIONS
+// ---
+
+function debounce(func, wait) {
+  let timeout;
+  return function executedFunction(...args) {
+    const later = () => {
+      clearTimeout(timeout);
+      func(...args);
+    };
+    clearTimeout(timeout);
+    timeout = setTimeout(later, wait);
+  };
+}
+
+// ---
+// --- NEW: SEARCH, FILTER, AND FAVORITES FUNCTIONS
+// ---
+
+function applyFilters() {
+  const searchQuery = document.getElementById('history-search').value.toLowerCase().trim();
+  const dateFilter = document.getElementById('date-filter').value;
+  const favoritesOnly = document.getElementById('favorites-only').checked;
+  const listId = document.getElementById('list-select').value;
+
+  chrome.storage.local.get(['history'], (result) => {
+    let history = result.history || [];
+
+    // Filter by list first
+    if (listId) {
+      history = history.filter(item => item.listId === listId);
+    }
+
+    // Filter by search query
+    if (searchQuery) {
+      history = history.filter(item =>
+        item.word.toLowerCase().includes(searchQuery) ||
+        item.definition.toLowerCase().includes(searchQuery)
+      );
+    }
+
+    // Filter by date
+    if (dateFilter !== 'all') {
+      const now = new Date();
+      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+      history = history.filter(item => {
+        const itemDate = new Date(item.timestamp);
+        if (dateFilter === 'today') {
+          return itemDate >= startOfDay;
+        } else if (dateFilter === 'week') {
+          const weekAgo = new Date(startOfDay);
+          weekAgo.setDate(weekAgo.getDate() - 7);
+          return itemDate >= weekAgo;
+        } else if (dateFilter === 'month') {
+          const monthAgo = new Date(startOfDay);
+          monthAgo.setMonth(monthAgo.getMonth() - 1);
+          return itemDate >= monthAgo;
+        }
+        return true;
+      });
+    }
+
+    // Filter by favorites
+    if (favoritesOnly) {
+      history = history.filter(item => item.favorite === true);
+    }
+
+    // Render filtered history
+    renderFilteredHistory(history);
+  });
+}
+
+function renderFilteredHistory(history) {
+  const historyList = document.getElementById('history-list');
+  const noHistoryMessage = document.getElementById('no-history-message');
+  historyList.innerHTML = '';
+
+  if (history.length === 0) {
+    noHistoryMessage.style.display = 'block';
+    noHistoryMessage.textContent = 'No matching items found.';
+    historyList.style.display = 'none';
+  } else {
+    noHistoryMessage.style.display = 'none';
+    historyList.style.display = 'block';
+
+    history.forEach(item => {
+      const itemElement = document.createElement('div');
+      itemElement.className = 'history-item';
+      itemElement.dataset.timestamp = item.timestamp;
+      itemElement.dataset.listId = item.listId;
+
+      let formattedDefinition = item.definition
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\n/g, '<br>');
+
+      const displayView = document.createElement('div');
+      displayView.className = 'display-view';
+
+      let sourceHtml = '';
+      if (item.sourceUrl) {
+        const displayTitle = item.sourceTitle || (item.sourceUrl.length > 40 ? item.sourceUrl.substring(0, 40) + '...' : item.sourceUrl);
+        sourceHtml = ` | <a href="${escapeHTML(item.sourceUrl)}" target="_blank" style="color: #61afef; text-decoration: none;" title="${escapeHTML(item.sourceUrl)}">Source: ${escapeHTML(displayTitle)}</a>`;
+      }
+
+      displayView.innerHTML = `
+        <div class="history-word">${escapeHTML(item.word)}</div>
+        <div class="history-definition">${formattedDefinition}</div>
+        <div class="history-model" style="font-size: 0.8em; color: #888; margin-top: 4px;">
+          Model: ${escapeHTML(item.modelName || 'Unknown')} | 
+          Prompt: ${escapeHTML(item.promptName || 'Unknown')} | 
+          Date: ${new Date(item.timestamp).toLocaleDateString()}${sourceHtml}
+        </div>
+      `;
+      itemElement.appendChild(displayView);
+
+      // Add buttons (same as in loadHistory)
+      const ankiButton = document.createElement('button');
+      ankiButton.className = 'anki-item-btn';
+      ankiButton.innerHTML = '<strong>A</strong>';
+      ankiButton.title = 'Send to Anki';
+      ankiButton.dataset.timestamp = item.timestamp;
+      ankiButton.addEventListener('click', handleSendToAnkiClick);
+      itemElement.appendChild(ankiButton);
+
+      const starButton = document.createElement('button');
+      starButton.className = 'star-item-btn' + (item.favorite ? ' favorited' : '');
+      starButton.innerHTML = item.favorite ? '★' : '☆';
+      starButton.title = item.favorite ? 'Remove from favorites' : 'Add to favorites';
+      starButton.dataset.timestamp = item.timestamp;
+      starButton.addEventListener('click', handleToggleFavoriteClick);
+      itemElement.appendChild(starButton);
+
+      const bulkCheckbox = document.createElement('input');
+      bulkCheckbox.type = 'checkbox';
+      bulkCheckbox.className = 'bulk-checkbox';
+      bulkCheckbox.dataset.timestamp = item.timestamp;
+      bulkCheckbox.addEventListener('change', updateSelectedCount);
+      itemElement.appendChild(bulkCheckbox);
+
+      const editButton = document.createElement('button');
+      editButton.className = 'edit-item-btn';
+      editButton.innerHTML = '&#9998;';
+      editButton.title = 'Edit this item';
+      editButton.dataset.timestamp = item.timestamp;
+      editButton.addEventListener('click', handleEditClick);
+      itemElement.appendChild(editButton);
+
+      const deleteButton = document.createElement('button');
+      deleteButton.className = 'delete-item-btn';
+      deleteButton.innerHTML = '&#128465;';
+      deleteButton.title = 'Delete this item';
+      deleteButton.dataset.timestamp = item.timestamp;
+      deleteButton.addEventListener('click', handleDeleteClick);
+      itemElement.appendChild(deleteButton);
+
+      historyList.appendChild(itemElement);
+    });
+  }
+}
+
+function handleToggleFavoriteClick(event) {
+  const btn = event.currentTarget;
+  const timestamp = btn.dataset.timestamp;
+
+  chrome.storage.local.get(['history'], (result) => {
+    let history = result.history || [];
+
+    history = history.map(item => {
+      if (item.timestamp === timestamp) {
+        return { ...item, favorite: !item.favorite };
+      }
+      return item;
+    });
+
+    chrome.storage.local.set({ history: history }, () => {
+      // Update button visually
+      const item = history.find(i => i.timestamp === timestamp);
+      if (item) {
+        btn.innerHTML = item.favorite ? '★' : '☆';
+        btn.className = 'star-item-btn' + (item.favorite ? ' favorited' : '');
+        btn.title = item.favorite ? 'Remove from favorites' : 'Add to favorites';
+      }
+    });
+  });
+}
+
+// ---
+// --- NEW: BULK ACTIONS FUNCTIONS
+// ---
+
+let bulkModeActive = false;
+
+function toggleBulkMode() {
+  bulkModeActive = !bulkModeActive;
+  const historyList = document.getElementById('history-list');
+  const bulkBar = document.getElementById('bulk-actions-bar');
+  const toggleBtn = document.getElementById('toggle-bulk-mode');
+
+  if (bulkModeActive) {
+    historyList.classList.add('bulk-mode');
+    bulkBar.style.display = 'block';
+    toggleBtn.textContent = 'Exit Bulk Mode';
+    toggleBtn.style.backgroundColor = 'var(--danger-color)';
+  } else {
+    historyList.classList.remove('bulk-mode');
+    bulkBar.style.display = 'none';
+    toggleBtn.textContent = 'Bulk Select Mode';
+    toggleBtn.style.backgroundColor = 'var(--button-bg)';
+    // Uncheck all checkboxes
+    document.querySelectorAll('.bulk-checkbox').forEach(cb => cb.checked = false);
+    document.getElementById('select-all-checkbox').checked = false;
+    updateSelectedCount();
+  }
+}
+
+function toggleSelectAll(event) {
+  const isChecked = event.target.checked;
+  document.querySelectorAll('.bulk-checkbox').forEach(cb => {
+    cb.checked = isChecked;
+  });
+  updateSelectedCount();
+}
+
+function updateSelectedCount() {
+  const selected = document.querySelectorAll('.bulk-checkbox:checked').length;
+  document.getElementById('selected-count').textContent = `${selected} selected`;
+}
+
+function getSelectedTimestamps() {
+  return Array.from(document.querySelectorAll('.bulk-checkbox:checked'))
+    .map(cb => cb.dataset.timestamp);
+}
+
+function bulkDelete() {
+  const timestamps = getSelectedTimestamps();
+  if (timestamps.length === 0) {
+    alert('No items selected.');
+    return;
+  }
+
+  if (!confirm(`Are you sure you want to delete ${timestamps.length} item(s)?`)) return;
+
+  chrome.storage.local.get(['history'], (result) => {
+    let history = result.history || [];
+    history = history.filter(item => !timestamps.includes(item.timestamp));
+
+    chrome.storage.local.set({ history: history }, () => {
+      updateIOStatus(`${timestamps.length} item(s) deleted.`, 'success');
+      applyFilters(); // Reload with current filters
+    });
+  });
+}
+
+function bulkMove() {
+  const timestamps = getSelectedTimestamps();
+  if (timestamps.length === 0) {
+    alert('No items selected.');
+    return;
+  }
+
+  // Get list of available lists
+  chrome.storage.local.get({ wordLists: [] }, (data) => {
+    const lists = data.wordLists;
+    if (lists.length === 0) {
+      alert('No lists available.');
+      return;
+    }
+
+    // Create a simple prompt with list names
+    const listNames = lists.map((l, i) => `${i + 1}. ${l.name}`).join('\n');
+    const choice = prompt(`Move ${timestamps.length} item(s) to which list?\n\n${listNames}\n\nEnter number:`);
+
+    if (!choice) return;
+
+    const index = parseInt(choice) - 1;
+    if (isNaN(index) || index < 0 || index >= lists.length) {
+      alert('Invalid choice.');
+      return;
+    }
+
+    const targetListId = lists[index].id;
+
+    chrome.storage.local.get(['history'], (result) => {
+      let history = result.history || [];
+
+      history = history.map(item => {
+        if (timestamps.includes(item.timestamp)) {
+          return { ...item, listId: targetListId };
+        }
+        return item;
+      });
+
+      chrome.storage.local.set({ history: history }, () => {
+        updateIOStatus(`${timestamps.length} item(s) moved to "${lists[index].name}".`, 'success');
+        applyFilters();
+      });
+    });
+  });
+}
+
+async function bulkExportToAnki() {
+  const timestamps = getSelectedTimestamps();
+  if (timestamps.length === 0) {
+    alert('No items selected.');
+    return;
+  }
+
+  // Get Anki settings
+  const settingsData = await new Promise(resolve => chrome.storage.sync.get('ankiSettings', resolve));
+  const settings = settingsData.ankiSettings;
+
+  if (!settings || !settings.deckName || !settings.modelName || !settings.wordField || !settings.definitionField) {
+    alert('Anki settings are not complete. Please configure them in the Anki tab.');
+    return;
+  }
+
+  // Get history items
+  const historyData = await new Promise(resolve => chrome.storage.local.get('history', resolve));
+  const history = historyData.history || [];
+  const itemsToExport = history.filter(item => timestamps.includes(item.timestamp));
+
+  let successCount = 0;
+
+  for (const item of itemsToExport) {
+    try {
+      const fields = {};
+      fields[settings.wordField] = item.word;
+      const ankiDefinition = item.definition
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\n/g, '<br>');
+      fields[settings.definitionField] = ankiDefinition;
+
+      const note = {
+        deckName: settings.deckName,
+        modelName: settings.modelName,
+        fields: fields,
+        options: { allowDuplicate: false }
+      };
+
+      const result = await ankiConnectRequest('addNote', { note: note });
+      if (result !== null) {
+        successCount++;
+      } else {
+        // Stop on first error as requested
+        throw new Error(`Failed to add "${item.word}" - might be a duplicate.`);
+      }
+    } catch (e) {
+      alert(`Anki Error: ${e.message}\n\nExported ${successCount} of ${itemsToExport.length} items before error.`);
+      return;
+    }
+  }
+
+  updateIOStatus(`Successfully exported ${successCount} item(s) to Anki!`, 'success');
+}
+
+// ---
+// --- NEW: FLASHCARD FUNCTIONS
+// ---
+
+let flashcardQueue = [];
+let currentCardIndex = 0;
+let cardsReviewedCount = 0;
+
+function loadFlashcardLists() {
+  chrome.storage.local.get({ wordLists: [] }, (data) => {
+    const select = document.getElementById('flashcard-list-select');
+    select.innerHTML = '<option value="all">All Lists</option>';
+    data.wordLists.forEach(list => {
+      const option = document.createElement('option');
+      option.value = list.id;
+      option.textContent = list.name;
+      select.appendChild(option);
+    });
+  });
+}
+
+function startFlashcardReview() {
+  const selectedList = document.getElementById('flashcard-list-select').value;
+
+  chrome.storage.local.get(['history'], (result) => {
+    let history = result.history || [];
+
+    // Filter by list if specified
+    if (selectedList !== 'all') {
+      history = history.filter(item => item.listId === selectedList);
+    }
+
+    // Filter for cards due for review
+    const now = Date.now();
+    flashcardQueue = history.filter(item => {
+      const nextReview = item.nextReview || 0;
+      return nextReview <= now;
+    });
+
+    // Shuffle the queue
+    flashcardQueue = flashcardQueue.sort(() => Math.random() - 0.5);
+
+    currentCardIndex = 0;
+    cardsReviewedCount = 0;
+
+    document.getElementById('cards-due').textContent = `Cards due: ${flashcardQueue.length}`;
+    document.getElementById('cards-reviewed').textContent = `Reviewed: 0`;
+
+    if (flashcardQueue.length === 0) {
+      document.getElementById('flashcard-container').style.display = 'none';
+      document.getElementById('review-complete').style.display = 'none';
+      document.getElementById('no-cards-message').style.display = 'block';
+    } else {
+      document.getElementById('flashcard-container').style.display = 'block';
+      document.getElementById('review-complete').style.display = 'none';
+      document.getElementById('no-cards-message').style.display = 'none';
+      showCurrentCard();
+    }
+  });
+}
+
+function showCurrentCard() {
+  if (currentCardIndex >= flashcardQueue.length) {
+    // Review complete
+    document.getElementById('flashcard-container').style.display = 'none';
+    document.getElementById('review-complete').style.display = 'block';
+    return;
+  }
+
+  const card = flashcardQueue[currentCardIndex];
+
+  document.getElementById('current-card-num').textContent = currentCardIndex + 1;
+  document.getElementById('total-cards-num').textContent = flashcardQueue.length;
+
+  document.getElementById('flashcard-word').textContent = card.word;
+  document.getElementById('flashcard-source').textContent = card.sourceTitle ? `From: ${card.sourceTitle}` : '';
+
+  // Reset card state
+  document.getElementById('flashcard-back').style.display = 'none';
+  document.getElementById('show-answer-btn').style.display = 'inline-block';
+  document.getElementById('rating-buttons').style.display = 'none';
+}
+
+function showFlashcardAnswer() {
+  const card = flashcardQueue[currentCardIndex];
+
+  let formattedDef = card.definition
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\n/g, '<br>');
+
+  document.getElementById('flashcard-definition').innerHTML = formattedDef;
+  document.getElementById('flashcard-back').style.display = 'block';
+  document.getElementById('show-answer-btn').style.display = 'none';
+  document.getElementById('rating-buttons').style.display = 'block';
+}
+
+function rateFlashcard(rating) {
+  const card = flashcardQueue[currentCardIndex];
+
+  // Simple spaced repetition: calculate next review time
+  // Rating: 1=Again (1min), 2=Hard (1day), 3=Good (3days), 4=Easy (7days)
+  const intervals = {
+    1: 1 * 60 * 1000,          // 1 minute
+    2: 1 * 24 * 60 * 60 * 1000, // 1 day
+    3: 3 * 24 * 60 * 60 * 1000, // 3 days
+    4: 7 * 24 * 60 * 60 * 1000  // 7 days
+  };
+
+  // Multiply by existing interval if card has been reviewed before
+  const currentInterval = card.interval || intervals[3];
+  let newInterval;
+
+  if (rating === 1) {
+    newInterval = intervals[1]; // Reset to 1 minute
+  } else if (rating === 2) {
+    newInterval = currentInterval * 0.8; // Decrease interval
+  } else if (rating === 3) {
+    newInterval = currentInterval * 1.5; // Increase by 50%
+  } else {
+    newInterval = currentInterval * 2.5; // More than double
+  }
+
+  const nextReview = Date.now() + newInterval;
+
+  // Update the card in storage
+  chrome.storage.local.get(['history'], (result) => {
+    let history = result.history || [];
+
+    history = history.map(item => {
+      if (item.timestamp === card.timestamp) {
+        return {
+          ...item,
+          nextReview: nextReview,
+          interval: newInterval,
+          lastReviewed: Date.now()
+        };
+      }
+      return item;
+    });
+
+    chrome.storage.local.set({ history: history }, () => {
+      cardsReviewedCount++;
+      document.getElementById('cards-reviewed').textContent = `Reviewed: ${cardsReviewedCount}`;
+
+      currentCardIndex++;
+      showCurrentCard();
+    });
+  });
+}
+
+// Load flashcard lists when tab is clicked (handled by tab switching)

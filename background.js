@@ -120,7 +120,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // --- Case 2: Save an item to history ---
   if (request.type === "saveToHistory") {
     // We pass sendResponse as a callback to run *after* saving
-    saveToHistory(request.word, request.definition, request.listId, request.modelName, request.promptName, () => {
+    saveToHistory(request.word, request.definition, request.listId, request.modelName, request.promptName, request.sourceUrl, request.sourceTitle, () => {
       sendResponse({ status: "saved" });
     });
     // Return true to tell Chrome this is an async operation
@@ -139,8 +139,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 });
 
-// --- UPDATED to accept a callback and save last listId ---
-function saveToHistory(word, definition, listId, modelName, promptName, callback) {
+// --- UPDATED to accept source URL and title ---
+function saveToHistory(word, definition, listId, modelName, promptName, sourceUrl, sourceTitle, callback) {
   chrome.storage.local.get(['history'], (result) => {
     let history = result.history || [];
 
@@ -148,19 +148,16 @@ function saveToHistory(word, definition, listId, modelName, promptName, callback
     const newItem = {
       word: word,
       definition: definition,
-      timestamp: new Date().toISOString(), // Store timestamp
-      listId: listId, // --- NEW: Store the list ID ---
-      modelName: modelName, // --- NEW: Store the model name ---
-      promptName: promptName // --- NEW: Store the prompt name ---
+      timestamp: new Date().toISOString(),
+      listId: listId,
+      modelName: modelName,
+      promptName: promptName,
+      sourceUrl: sourceUrl || '',
+      sourceTitle: sourceTitle || ''
     };
 
     // Add new item to the beginning of the array
     history.unshift(newItem);
-
-    // Keep history limited to 100 items
-    if (history.length > 100) {
-      history = history.slice(0, 100);
-    }
 
     // --- NEW: Save back history AND the lastUsedListId ---
     chrome.storage.local.set({ history: history, lastUsedListId: listId }, () => {

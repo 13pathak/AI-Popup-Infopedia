@@ -121,10 +121,10 @@ document.addEventListener('mouseup', (event) => {
       updatePopup(definitionText); // Show the definition
 
       if (!response.error) {
-        // --- UPDATED: Pass modelName ---
+        // --- UPDATED: Pass modelName and promptName ---
         // We need to find the model name from the ID or response
         const modelName = response.models.find(m => m.id === response.defaultModelId)?.name || 'Unknown Model';
-        createActionButtons(selectedText, definitionText, modelName);
+        createActionButtons(selectedText, definitionText, modelName, response.promptName);
       }
       adjustPopupPosition();
 
@@ -273,13 +273,13 @@ function createSelectors(models, prompts, currentModelId, currentPromptContent, 
   const promptSelector = document.createElement('select');
   promptSelector.id = 'ai-popup-prompt-selector';
 
-// Default option REMOVED
+  // Default option REMOVED
 
   if (prompts && prompts.length > 0) {
     prompts.forEach(prompt => {
       const option = document.createElement('option');
       option.value = prompt.content; // Use content as value for simplicity
-      
+
       let displayName = prompt.name;
       if (prompt.id === defaultPromptId) {
         displayName += " (Default)";
@@ -292,15 +292,15 @@ function createSelectors(models, prompts, currentModelId, currentPromptContent, 
       } else if (!currentPromptContent && prompt.id === defaultPromptId) {
         option.selected = true;
       }
-      
+
       promptSelector.appendChild(option);
     });
   } else {
-      // Handle case with no prompts
-      const option = document.createElement('option');
-      option.textContent = "No Custom Prompts";
-      option.disabled = true;
-      promptSelector.appendChild(option);
+    // Handle case with no prompts
+    const option = document.createElement('option');
+    option.textContent = "No Custom Prompts";
+    option.disabled = true;
+    promptSelector.appendChild(option);
   }
 
   promptSelector.addEventListener('change', () => {
@@ -446,8 +446,10 @@ function createActionButtons(word, definition, modelName, promptName) {
         word: word,
         definition: definition,
         listId: selectedListId,
-        modelName: modelName, // --- NEW: Pass modelName ---
-        promptName: promptName // --- NEW: Pass promptName ---
+        modelName: modelName,
+        promptName: promptName,
+        sourceUrl: window.location.href,
+        sourceTitle: document.title
       }, (saveResponse) => {
         if (saveResponse && saveResponse.status === 'saved') {
           console.log('Definition saved to list.');
