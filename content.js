@@ -1,7 +1,25 @@
 let popupContainer = null;
 let popup = null;
-let isInteractingWithPopup = false; // --- NEW: The definitive flag to solve the race condition ---
-let isClickInsidePopup = false; // --- Our flag to prevent the bug ---
+let isInteractingWithPopup = false;
+let isClickInsidePopup = false;
+
+// --- NEW: Hotkey Settings State ---
+let enableLongText = false;
+let longTextHotkey = null;
+
+// Initialize settings
+chrome.storage.sync.get(['enableLongText', 'longTextHotkey'], (data) => {
+  enableLongText = !!data.enableLongText;
+  longTextHotkey = data.longTextHotkey;
+});
+
+// Update settings when changed
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'sync') {
+    if (changes.enableLongText) enableLongText = changes.enableLongText.newValue;
+    if (changes.longTextHotkey) longTextHotkey = changes.longTextHotkey.newValue;
+  }
+});
 
 // --- Styles (unchanged) ---
 const popupStyles = `
@@ -74,73 +92,107 @@ const popupStyles = `
 
 // --- Main mouseup listener ---
 document.addEventListener('mouseup', (event) => {
-  // --- THE DEFINITIVE FIX ---
-  // If the click started inside our popup OR we are in the middle of an interaction (like changing a model),
-  // do absolutely nothing. This prevents this listener from re-triggering a new popup.
   if (isClickInsidePopup || isInteractingWithPopup) {
-    isClickInsidePopup = false; // Reset flag
+    isClickInsidePopup = false;
     return;
   }
 
   const selection = window.getSelection();
   const selectedText = selection.toString().trim();
 
-  // If nothing is selected (or just whitespace), remove the popup and exit
   if (selectedText.length === 0) {
     removePopup();
     return;
   }
 
-  // Count the words. We split by one or more whitespace characters.
   const wordCount = selectedText.split(/\s+/).length;
 
-  // --- THIS IS THE CHANGE ---
-  // Only proceed if 1 to 6 words are selected
   if (wordCount > 0 && wordCount <= 6) {
-    // --- END OF CHANGE ---
-
-    const range = selection.getRangeAt(0);
-    const rect = range.getBoundingClientRect(); // This is already viewport-relative!
-
-    // Create and show the popup
-    // We pass the viewport-relative coordinates
-    showPopup(rect.left, rect.top, "Loading...");
-
-    // Send the selected word to the background script
-    // --- REVISED: Removed context from message ---
-    chrome.runtime.sendMessage({ type: "getAiDefinition", word: selectedText }, (response) => {
-      if (!popup) return; // Popup might have been closed while loading
-
-      // --- NEW: Create selectors if models are available ---
-      if (response.models && response.models.length > 0) {
-        createSelectors(response.models, response.customPrompts, response.defaultModelId, null, selectedText, response.defaultPromptId);
-      }
-
-      const definitionText = response.error ? response.error : response.definition;
-
-      updatePopup(definitionText); // Show the definition
-
-      if (!response.error) {
-        // --- UPDATED: Pass modelName and promptName ---
-        // We need to find the model name from the ID or response
-        const modelName = response.models.find(m => m.id === response.defaultModelId)?.name || 'Unknown Model';
-        createActionButtons(selectedText, definitionText, modelName, response.promptName);
-      }
-      adjustPopupPosition();
-
-      setTimeout(() => {
-        if (popupContainer && document.documentElement.contains(popupContainer)) {
-          popupContainer.remove();
-          document.documentElement.appendChild(popupContainer);
-        }
-      }, 150); // 150ms delay
-    }
-    );
+    // Normal behavior for short text
+    initiatePopupSequence(selection, selectedText);
   } else {
-    // If more than 6 words are selected, ensure the popup is closed
-    removePopup();
+    // Long text > 6 words
+    if (enableLongText) {
+      // If feature enabled, DO NOT close popup immediately (wait for hotkey)
+      // But if there's an existing popup from a previous selection, we might want to close it?
+      // Actually, if I select new text, the old selection is gone, so old popup should go?
+      // But standard behavior "removePopup()" handles that. 
+      // If I want to allow selecting new text without closing OLD popup? 
+      // No, UI paradigm is usually 1 popup.
+
+      // However, if I select text -> popup doesn't show.
+      // If I had a popup open, and I select NEW text (that is long), 
+      // the old popup should probably close because the selection changed.
+      removePopup();
+    } else {
+      removePopup();
+    }
   }
 });
+
+// --- NEW: Keydown listener for Hotkey ---
+document.addEventListener('keydown', (event) => {
+  // 1. Check if feature is enabled and hotkey is configured
+  if (!enableLongText || !longTextHotkey) return;
+
+  // 2. Check for Escape (existing logic, preserved here or separated?)
+  // The existing Escape listener is separate, let's keep it separate or merge.
+  // I'll leave the separate Escape listener alone.
+
+  // 3. Match Hotkey
+  if (event.key.toUpperCase() === longTextHotkey.key.toUpperCase() &&
+    event.ctrlKey === longTextHotkey.ctrlKey &&
+    event.shiftKey === longTextHotkey.shiftKey &&
+    event.altKey === longTextHotkey.altKey &&
+    event.metaKey === longTextHotkey.metaKey) {
+
+    // 4. Check selection
+    const selection = window.getSelection();
+    const selectedText = selection.toString().trim();
+    const wordCount = selectedText.split(/\s+/).length;
+
+    // The user wants it "only after a user selects more than six words"
+    // But practically, if I select 3 words and press hotkey, should it work? 
+    // Probably yes, but the requirement emphasizes > 6.
+    // I'll allow it for any valid selection > 0 words.
+    if (selectedText.length > 0) {
+      initiatePopupSequence(selection, selectedText);
+    }
+  }
+});
+
+// --- NEW: Helper to start the popup logic (extracted from mouseup) ---
+function initiatePopupSequence(selection, selectedText) {
+  const range = selection.getRangeAt(0);
+  const rect = range.getBoundingClientRect();
+
+  showPopup(rect.left, rect.top, "Loading...");
+
+  chrome.runtime.sendMessage({ type: "getAiDefinition", word: selectedText }, (response) => {
+    if (!popup) return;
+
+    if (response && response.models && response.models.length > 0) {
+      createSelectors(response.models, response.customPrompts, response.defaultModelId, null, selectedText, response.defaultPromptId);
+    }
+
+    const definitionText = (response && response.error) ? response.error : (response ? response.definition : "Error resolving definition");
+
+    updatePopup(definitionText);
+
+    if (response && !response.error) {
+      const modelName = response.models.find(m => m.id === response.defaultModelId)?.name || 'Unknown Model';
+      createActionButtons(selectedText, definitionText, modelName, response.promptName);
+    }
+    adjustPopupPosition();
+
+    setTimeout(() => {
+      if (popupContainer && document.documentElement.contains(popupContainer)) {
+        popupContainer.remove();
+        document.documentElement.appendChild(popupContainer);
+      }
+    }, 150);
+  });
+}
 
 
 // --- Mousedown listener ---
