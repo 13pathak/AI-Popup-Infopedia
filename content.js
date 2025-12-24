@@ -3,24 +3,6 @@ let popup = null;
 let isInteractingWithPopup = false;
 let isClickInsidePopup = false;
 
-// --- NEW: Hotkey Settings State ---
-let enableLongText = false;
-let longTextHotkey = null;
-
-// Initialize settings
-chrome.storage.sync.get(['enableLongText', 'longTextHotkey'], (data) => {
-  enableLongText = !!data.enableLongText;
-  longTextHotkey = data.longTextHotkey;
-});
-
-// Update settings when changed
-chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === 'sync') {
-    if (changes.enableLongText) enableLongText = changes.enableLongText.newValue;
-    if (changes.longTextHotkey) longTextHotkey = changes.longTextHotkey.newValue;
-  }
-});
-
 // --- Styles (unchanged) ---
 const popupStyles = `
   #ai-definition-popup {
@@ -105,61 +87,31 @@ document.addEventListener('mouseup', (event) => {
     return;
   }
 
+  // Count the words. We split by one or more whitespace characters.
   const wordCount = selectedText.split(/\s+/).length;
 
   if (wordCount > 0 && wordCount <= 6) {
     // Normal behavior for short text
     initiatePopupSequence(selection, selectedText);
   } else {
-    // Long text > 6 words
-    if (enableLongText) {
-      // If feature enabled, DO NOT close popup immediately (wait for hotkey)
-      // But if there's an existing popup from a previous selection, we might want to close it?
-      // Actually, if I select new text, the old selection is gone, so old popup should go?
-      // But standard behavior "removePopup()" handles that. 
-      // If I want to allow selecting new text without closing OLD popup? 
-      // No, UI paradigm is usually 1 popup.
-
-      // However, if I select text -> popup doesn't show.
-      // If I had a popup open, and I select NEW text (that is long), 
-      // the old popup should probably close because the selection changed.
-      removePopup();
-    } else {
-      removePopup();
-    }
+    // If more than 6 words are selected, ensure the popup is closed
+    // (User can trigger it manually via shortcut)
+    removePopup();
   }
 });
 
-// --- NEW: Keydown listener for Hotkey ---
-document.addEventListener('keydown', (event) => {
-  // 1. Check if feature is enabled and hotkey is configured
-  if (!enableLongText || !longTextHotkey) return;
-
-  // 2. Check for Escape (existing logic, preserved here or separated?)
-  // The existing Escape listener is separate, let's keep it separate or merge.
-  // I'll leave the separate Escape listener alone.
-
-  // 3. Match Hotkey
-  if (event.key.toUpperCase() === longTextHotkey.key.toUpperCase() &&
-    event.ctrlKey === longTextHotkey.ctrlKey &&
-    event.shiftKey === longTextHotkey.shiftKey &&
-    event.altKey === longTextHotkey.altKey &&
-    event.metaKey === longTextHotkey.metaKey) {
-
-    // 4. Check selection
+// --- NEW: Message Listener for activation ---
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.type === "triggerPopup") {
     const selection = window.getSelection();
     const selectedText = selection.toString().trim();
-    const wordCount = selectedText.split(/\s+/).length;
-
-    // The user wants it "only after a user selects more than six words"
-    // But practically, if I select 3 words and press hotkey, should it work? 
-    // Probably yes, but the requirement emphasizes > 6.
-    // I'll allow it for any valid selection > 0 words.
     if (selectedText.length > 0) {
       initiatePopupSequence(selection, selectedText);
     }
   }
 });
+
+
 
 // --- NEW: Helper to start the popup logic (extracted from mouseup) ---
 function initiatePopupSequence(selection, selectedText) {
@@ -348,11 +300,14 @@ function createSelectors(models, prompts, currentModelId, currentPromptContent, 
       promptSelector.appendChild(option);
     });
   } else {
-    // Handle case with no prompts
+    // Handle case with no prompts - use empty value and disable selector
     const option = document.createElement('option');
+    option.value = ''; // Empty value so redefine uses default system prompt
     option.textContent = "No Custom Prompts";
     option.disabled = true;
+    option.selected = true;
     promptSelector.appendChild(option);
+    promptSelector.disabled = true; // Disable the entire selector
   }
 
   promptSelector.addEventListener('change', () => {
@@ -373,8 +328,7 @@ function createSelectors(models, prompts, currentModelId, currentPromptContent, 
   }
 }
 
-// --- NEW: Function to get a new definition with a specific model ---
-// --- NEW: Function to get a new definition with a specific model and prompt ---
+// --- Function to get a new definition with a specific model and prompt ---
 function redefineWithModelAndPrompt(word, modelId, promptContent) {
   if (!popup) return;
 
@@ -465,18 +419,67 @@ function createActionButtons(word, definition, modelName, promptName) {
         font-family: sans-serif;
         font-size: 13px;
       `;
-    lists.forEach(list => {
-      const option = document.createElement('option');
-      option.value = list.id;
-      option.textContent = list.name;
 
-      // --- NEW: Check if this list was the last one used ---
-      if (list.id === lastUsedListId) {
-        option.selected = true;
+    // Helper to populate options
+    function populateListOptions() {
+      listSelector.innerHTML = '';
+      lists.forEach(list => {
+        const option = document.createElement('option');
+        option.value = list.id;
+        option.textContent = list.name;
+
+        // --- NEW: Check if this list was the last one used ---
+        if (list.id === lastUsedListId) {
+          option.selected = true;
+        }
+        // --- END NEW ---
+
+        listSelector.appendChild(option);
+      });
+
+      // --- NEW: Add "Create New List" option ---
+      const createOption = document.createElement('option');
+      createOption.value = "__create_new__";
+      createOption.textContent = "+ Create New List...";
+      createOption.style.fontWeight = "bold";
+      createOption.style.color = "#88ff88"; // Light green to stand out
+      listSelector.appendChild(createOption);
+    }
+
+    populateListOptions();
+
+    // Handle change event for creating new list
+    listSelector.addEventListener('change', (e) => {
+      if (e.target.value === "__create_new__") {
+        const newListName = prompt("Enter a name for the new list:");
+        if (newListName && newListName.trim()) {
+          // Send message to create list
+          chrome.runtime.sendMessage({ type: "createList", listName: newListName.trim() }, (response) => {
+            if (response && response.success) {
+              // Add to local lists array
+              lists.push(response.newList);
+              // Update lastUsedListId to the new list
+              // actually we can't update the variable 'lastUsedListId' effectively for the next run without re-fetching, 
+              // but for this UI instance we just select it.
+
+              // Refresh options
+              populateListOptions();
+              // Select the new list
+              listSelector.value = response.newList.id;
+            } else {
+              alert("Failed to create list: " + (response.error || "Unknown error"));
+              // Revert selection?
+              // Simple revert to first or previous is hard without state tracking,
+              // simpler to just re-populate which resets to default/lastUsed logic if possible,
+              // or just let it stay on "Create New List" (harmless).
+              populateListOptions();
+            }
+          });
+        } else {
+          // User cancelled or entered empty
+          populateListOptions(); // Reset
+        }
       }
-      // --- END NEW ---
-
-      listSelector.appendChild(option);
     });
 
     // 3. Create the final "Save" button
@@ -489,8 +492,8 @@ function createActionButtons(word, definition, modelName, promptName) {
       ev.stopPropagation();
       const selectedListId = listSelector.value;
 
-      // Deselect text
-      window.getSelection().removeAllRanges();
+      // --- REMOVED: Deselect text ---
+      // window.getSelection().removeAllRanges();
 
       // Send message to background to save with listId
       chrome.runtime.sendMessage({
@@ -515,8 +518,10 @@ function createActionButtons(word, definition, modelName, promptName) {
       savedText.style.opacity = '0.8';
       actionsContainer.appendChild(savedText);
 
-      // Close popup after a delay
-      setTimeout(() => removePopup(), 800);
+      // --- REMOVED: Auto-close logic ---
+      // We keep the popup open so the user can continue interacting.
+      // window.getSelection().removeAllRanges();
+      // setTimeout(() => removePopup(), 800);
     });
 
     // 4. Add the new controls directly to the container

@@ -8,6 +8,14 @@
     "scripting",
     "alarms"
   ],
+  "commands": {
+    "trigger-popup": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Y"
+      },
+      "description": "Trigger AI Popup for selected text"
+    }
+  },
   "host_permissions": [
     "https://generativelanguage.googleapis.com/",
     "http://localhost:11434/",

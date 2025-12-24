@@ -3,6 +3,19 @@ chrome.action.onClicked.addListener((tab) => {
   chrome.runtime.openOptionsPage();
 });
 
+// --- NEW: Listen for keyboard shortcuts (commands) ---
+chrome.commands.onCommand.addListener((command) => {
+  if (command === "trigger-popup") {
+    // Send message to the active tab to trigger the popup
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs.length > 0) {
+        chrome.tabs.sendMessage(tabs[0].id, { type: "triggerPopup" });
+      }
+    });
+  }
+});
+
+
 // --- This listener now handles multiple message types ---
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
@@ -134,6 +147,31 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       // Send back both the lists and the last used ID
       sendResponse({ lists: data.wordLists, lastUsedListId: data.lastUsedListId });
     });
+    return true; // Async response
+  }
+
+  // --- NEW: Case 4: Create a new list ---
+  if (request.type === "createList") {
+    const listName = request.listName;
+    if (listName && listName.trim()) {
+      chrome.storage.local.get({ wordLists: [] }, (data) => {
+        const lists = data.wordLists;
+        // Check for duplicates (optional but good)
+        if (lists.some(l => l.name === listName.trim())) {
+          sendResponse({ error: "List already exists" });
+          return;
+        }
+
+        const newList = { id: `list_${new Date().getTime()}`, name: listName.trim() };
+        lists.push(newList);
+
+        chrome.storage.local.set({ wordLists: lists }, () => {
+          sendResponse({ success: true, newList: newList });
+        });
+      });
+    } else {
+      sendResponse({ error: "Invalid list name" });
+    }
     return true; // Async response
   }
 
