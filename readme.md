@@ -114,6 +114,19 @@ Built-in flashcard system with spaced repetition for effective learning:
 4. Select your deck, note type, and map fields
 5. Use the **A** button on any history item to export to Anki
 
+### 🔄 Auto-Backup & Restore
+1. **Auto-Backup:**
+   - Go to **Backup** tab in extension settings.
+   - Set frequency (e.g., Daily, Weekly).
+   - (Optional) Set a subfolder name (e.g., `Infopedia-Backups`).
+   - The backup file is a JSON containing your history, lists, models, and prompts.
+   - **Note:** Backups are saved to your default **Downloads** directory. To skip the "Save As" prompt and save automatically, ensure "Ask where to save each file before downloading" is **OFF** in Chrome Settings.
+2. **Manual Backup:** Click **Backup Now** to trigger an immediate backup (this resets the auto-backup timer).
+3. **Restore:**
+   - Click **Restore Backup File** in the Backup tab.
+   - Select your valid JSON backup file.
+   - **Warning:** This will overwrite your current data with the backup content.
+
 ---
 
 ## 💻 Technology

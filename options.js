@@ -107,6 +107,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // --- NEW: Reminder Event Listeners ---
   document.getElementById('save-reminder-settings-btn').addEventListener('click', saveReminderSettings);
+  document.getElementById('manual-backup-btn').addEventListener('click', () => {
+    chrome.runtime.sendMessage({ type: "checkBackupReminder", force: true });
+    // We reuse checkBackupReminder but adding a force flag or separate type? 
+    // Actually, let's use a distinct type "manualBackup" or just reuse "testBackup" logic but rename it.
+    // Let's us "manualBackup" for clarity in background.js
+    chrome.runtime.sendMessage({ type: "manualBackup" });
+    updateReminderStatus('Manual backup initiated... check Downloads.', 'info');
+  });
+
+  // --- NEW: Restore Backup Listener ---
+  document.getElementById('restore-backup-btn').addEventListener('click', () => {
+    document.getElementById('restore-backup-file').click();
+  });
+  document.getElementById('restore-backup-file').addEventListener('change', restoreBackup);
 
   // --- NEW: Prompts Event Listeners ---
   document.getElementById('save-custom-prompt-btn').addEventListener('click', savePrompt);
@@ -130,6 +144,15 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('review-again-btn').addEventListener('click', startFlashcardReview);
   document.querySelectorAll('.rating-btn').forEach(btn => {
     btn.addEventListener('click', (e) => rateFlashcard(parseInt(e.target.dataset.rating)));
+  });
+  // --- NEW: Storage Listener for Real-time Backup Status ---
+  chrome.storage.onChanged.addListener((changes, namespace) => {
+    if (namespace === 'local') {
+      if (changes.lastBackupTime || changes.lastBackupError || changes.lastBackupType) {
+        // Reload status
+        loadReminderSettings();
+      }
+    }
   });
 });
 
@@ -1661,21 +1684,53 @@ async function handleSendToAnkiClick(event) {
 
 function saveReminderSettings() {
   const frequency = document.getElementById('reminder-frequency-select').value;
+  const subfolder = document.getElementById('backup-subfolder').value.trim();
 
-  chrome.storage.sync.set({ backupReminderFrequency: parseInt(frequency, 10) }, () => {
-    updateReminderStatus('Reminder settings saved!', 'success');
+  chrome.storage.sync.set({
+    backupReminderFrequency: parseInt(frequency, 10),
+    backupSubfolder: subfolder
+  }, () => {
+    updateReminderStatus('Backup settings saved!', 'success');
 
     // Also check if we need to update the badge immediately
     // If user turned it off (0), we should clear the badge
     if (parseInt(frequency, 10) === 0) {
       chrome.action.setBadgeText({ text: '' });
     }
+
+    // Trigger a check immediately to schedule/unschedule
+    chrome.runtime.sendMessage({ type: "checkBackupReminder" });
   });
 }
 
 function loadReminderSettings() {
-  chrome.storage.sync.get({ backupReminderFrequency: 0 }, (data) => {
-    document.getElementById('reminder-frequency-select').value = data.backupReminderFrequency;
+  // Load settings from sync
+  chrome.storage.sync.get({ backupReminderFrequency: 0, backupSubfolder: '' }, (syncData) => {
+    document.getElementById('reminder-frequency-select').value = syncData.backupReminderFrequency;
+    document.getElementById('backup-subfolder').value = syncData.backupSubfolder;
+  });
+
+  // Load status from local
+  chrome.storage.local.get({ lastBackupTime: 0, lastBackupType: '', lastBackupError: null }, (localData) => {
+    const statusEl = document.getElementById('backup-status');
+
+    if (localData.lastBackupError) {
+      statusEl.textContent = `Last Backup Error: ${localData.lastBackupError}`;
+      statusEl.style.color = '#d9534f'; // Red color
+    } else if (localData.lastBackupTime > 0) {
+      const date = new Date(localData.lastBackupTime);
+      const day = String(date.getDate()).padStart(2, '0');
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const year = date.getFullYear();
+      const timeStr = date.toLocaleTimeString();
+      const typeStr = localData.lastBackupType ? ` (${localData.lastBackupType})` : '';
+
+      statusEl.textContent = `Last Backup: ${day}/${month}/${year}, ${timeStr}${typeStr}`;
+      statusEl.style.color = '#61afef'; // Original blue color (or rely on CSS class)
+    } else {
+      statusEl.textContent = 'Last Backup: Never';
+      statusEl.style.color = 'var(--primary-color)';
+    }
   });
 }
 

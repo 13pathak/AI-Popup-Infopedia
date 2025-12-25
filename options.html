@@ -513,7 +513,7 @@
         <button class="tab-button" data-tab="history-content">History</button>
         <button class="tab-button" data-tab="anki-content">Anki</button>
         <button class="tab-button" data-tab="flashcards-content">Flashcards</button>
-        <button class="tab-button" data-tab="reminder-content">Reminder</button>
+        <button class="tab-button" data-tab="reminder-content">Backup</button>
         <button class="tab-button" data-tab="prompts-content">Prompts</button>
     </div>
 
@@ -786,13 +786,13 @@
 
     <!-- --- NEW REMINDER TAB CONTENT --- -->
     <div id="reminder-content" class="tab-content">
-        <h2>Backup Reminder Settings</h2>
-        <p>Configure how often you want to be reminded to backup (export) your history list.</p>
+        <h2>Auto-Backup Settings</h2>
+        <p>Configure automatic backups of your history list. Files will be saved to your Downloads folder.</p>
 
         <div style="margin-top: 20px;">
-            <label for="reminder-frequency-select">Reminder Frequency</label>
+            <label for="reminder-frequency-select">Backup Frequency</label>
             <select id="reminder-frequency-select">
-                <option value="0">Never</option>
+                <option value="0">Disabled</option>
                 <option value="1">Daily</option>
                 <option value="2">Every 2 Days</option>
                 <option value="3">Every 3 Days</option>
@@ -800,8 +800,31 @@
             </select>
         </div>
 
+        <div style="margin-top: 20px;">
+            <label for="backup-subfolder">Backup Subfolder (inside Downloads)</label>
+            <input type="text" id="backup-subfolder" placeholder="Infopedia-Backups">
+            <small>Leave empty to save directly in Downloads folder.</small>
+        </div>
+
+        <div id="backup-status" style="margin-top: 20px; font-weight: bold; color: var(--primary-color);">
+            Last Backup: Never
+        </div>
+
         <button id="save-reminder-settings-btn" style="margin-top: 20px; background-color: var(--secondary-color);">Save
-            Reminder Settings</button>
+            Settings</button>
+        <button id="manual-backup-btn"
+            style="margin-top: 20px; margin-left: 10px; background-color: var(--primary-color);">Backup Now</button>
+
+        <hr style="margin-top: 30px; border-color: #444;">
+
+        <h3 style="margin-top: 20px;">Restore from Backup</h3>
+        <p style="color: #bbb; font-size: 0.9em; margin-bottom: 10px;">
+            Restore your history, lists, and settings from a backup file. <br>
+            <strong style="color: #d9534f;">Warning: This will overwrite your current data!</strong>
+        </p>
+        <input type="file" id="restore-backup-file" accept=".json" style="display: none;">
+        <button id="restore-backup-btn" style="background-color: #d9534f;">Restore Backup file</button>
+        <div id="restore-status" style="margin-top: 10px; font-weight: bold; min-height: 1em;"></div>
 
         <div id="reminder-status" style="margin-top: 10px; font-weight: bold; min-height: 1em;"></div>
     </div>

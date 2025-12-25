@@ -175,6 +175,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true; // Async response
   }
 
+  // --- NEW: Case 5: Check Backup manually (from Options) ---
+  if (request.type === "checkBackupReminder") {
+    performAutoBackupCheck();
+    return true;
+  }
+
+  // --- NEW: Case 6: Force Manual Backup ---
+  if (request.type === "manualBackup" || request.type === "testBackup") {
+    // Force a backup regardless of time
+    triggerBackup("Manual");
+    return true;
+  }
+
 });
 
 // --- UPDATED to accept source URL and title ---
@@ -206,41 +219,39 @@ function saveToHistory(word, definition, listId, modelName, promptName, sourceUr
   });
 }
 
-// --- NEW: Backup Reminder Logic ---
+// --- NEW: Auto-Backup Logic ---
 
 // Check every 60 minutes
 chrome.alarms.create("checkBackupReminder", { periodInMinutes: 60 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === "checkBackupReminder") {
-    checkBackupReminder();
+    performAutoBackupCheck();
   }
 });
 
 // Also check on startup
 chrome.runtime.onStartup.addListener(() => {
-  checkBackupReminder();
+  performAutoBackupCheck();
 });
 
 // And on installed
 chrome.runtime.onInstalled.addListener(() => {
-  checkBackupReminder();
+  performAutoBackupCheck();
 });
 
 // Listen for changes in settings to update immediately
 chrome.storage.onChanged.addListener((changes, namespace) => {
   if (namespace === 'sync' && changes.backupReminderFrequency) {
-    checkBackupReminder();
-  }
-  if (namespace === 'local' && changes.lastBackupTime) {
-    checkBackupReminder();
+    performAutoBackupCheck();
   }
 });
 
-function checkBackupReminder() {
+function performAutoBackupCheck() {
   chrome.storage.sync.get({ backupReminderFrequency: 0 }, (syncData) => {
     const frequencyDays = syncData.backupReminderFrequency;
 
+    // specific check: if 0 (disabled), ensure no badge/action
     if (frequencyDays === 0) {
       chrome.action.setBadgeText({ text: '' });
       return;
@@ -252,12 +263,109 @@ function checkBackupReminder() {
       const msPerDay = 24 * 60 * 60 * 1000;
       const daysSinceBackup = (now - lastBackup) / msPerDay;
 
+      // If time has passed, Trigger the Backup!
       if (daysSinceBackup >= frequencyDays) {
-        chrome.action.setBadgeText({ text: '!' });
-        chrome.action.setBadgeBackgroundColor({ color: '#FF0000' });
-      } else {
-        chrome.action.setBadgeText({ text: '' });
+        triggerBackup("Auto");
       }
+    });
+  });
+}
+
+// --- NEW: Better Download Tracking ---
+chrome.downloads.onChanged.addListener((delta) => {
+  if (delta.state && delta.state.current === 'complete') {
+    // Check if this download ID matches a pending backup
+    chrome.storage.local.get(['pendingBackupId', 'pendingBackupType'], (data) => {
+      if (data.pendingBackupId === delta.id) {
+        console.log("Backup download completed successfully.");
+        chrome.storage.local.set({
+          lastBackupTime: Date.now(),
+          lastBackupType: data.pendingBackupType,
+          pendingBackupId: null // clear pending
+        });
+      }
+    });
+  } else if (delta.error) {
+    console.error("Backup download failed:", delta.error.current);
+    // Optionally save the error to display to user
+    chrome.storage.local.get(['pendingBackupId'], (data) => {
+      if (data.pendingBackupId === delta.id) {
+        chrome.storage.local.set({
+          lastBackupError: delta.error.current,
+          pendingBackupId: null
+        });
+      }
+    });
+  }
+});
+
+function triggerBackup(type = "Auto") {
+  // 1. Fetch all data to backup
+  chrome.storage.local.get(['history', 'wordLists'], (localData) => {
+    chrome.storage.sync.get(['models', 'customPrompts', 'defaultModelId', 'defaultPromptId'], (syncData) => {
+
+      const backupData = {
+        history: localData.history || [],
+        wordLists: localData.wordLists || [],
+        models: syncData.models || [],
+        customPrompts: syncData.customPrompts || [],
+        exportedAt: new Date().toISOString(),
+        backupType: type,
+        version: "1.0"
+      };
+
+      // 2. Create Data URI (Base64) - Service Worker safe
+      const jsonString = JSON.stringify(backupData, null, 2);
+      // Encode properly to handle Unicode characters if any
+      const base64Content = btoa(unescape(encodeURIComponent(jsonString)));
+      const url = `data:application/json;base64,${base64Content}`;
+
+      // 3. Determine Filename
+      const dateStr = new Date().toISOString().slice(0, 10);
+      const timestamp = new Date().getTime(); // ensure uniqueness
+      const defaultFilename = `infopedia_backup_${dateStr}_${timestamp}.json`;
+
+      // 4. Check Subfolder setting
+      chrome.storage.sync.get({ backupSubfolder: '' }, (settings) => {
+        let finalPath = defaultFilename;
+        if (settings.backupSubfolder && settings.backupSubfolder.trim()) {
+          // Allow simple subfolder organization
+          const folder = settings.backupSubfolder.trim().replace(/[<>:"/\\|?*]/g, ''); // sanitize info
+          if (folder) {
+            finalPath = `${folder}/${defaultFilename}`;
+          }
+        }
+
+        try {
+          if (!chrome.downloads || !chrome.downloads.download) {
+            throw new Error("chrome.downloads API is not available. Check permissions.");
+          }
+
+          // 5. Download
+          chrome.downloads.download({
+            url: url,
+            filename: finalPath,
+            saveAs: false, // Attempt to save automatically without prompt
+            conflictAction: 'uniquify'
+          }, (downloadId) => {
+            if (chrome.runtime.lastError) {
+              console.error("Auto-Backup Start Failed:", chrome.runtime.lastError);
+              chrome.storage.local.set({ lastBackupError: chrome.runtime.lastError.message });
+            } else {
+              console.log("Auto-Backup Started. ID:", downloadId);
+              // --- CHANGED: Don't set success yet. Set "Pending". ---
+              chrome.storage.local.set({
+                pendingBackupId: downloadId,
+                pendingBackupType: type,
+                lastBackupError: null // clear previous errors
+              });
+            }
+          });
+        } catch (err) {
+          console.error("Backup Exception:", err);
+          chrome.storage.local.set({ lastBackupError: err.message });
+        }
+      });
     });
   });
 }
