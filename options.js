@@ -37,6 +37,11 @@ document.addEventListener('DOMContentLoaded', () => {
       if (tab.dataset.tab === "prompts-content") {
         loadPrompts();
       }
+
+      // --- NEW: Load TTS Settings when tab is clicked ---
+      if (tab.dataset.tab === "tts-content") {
+        loadTTSSettings();
+      }
     });
   });
 
@@ -47,93 +52,81 @@ document.addEventListener('DOMContentLoaded', () => {
   loadAnkiSettings(); // Load saved Anki settings on page load
   loadReminderSettings(); // Load saved Reminder settings on page load
 
-  // --- REVISED: Model Management Event Listeners ---
-  document.getElementById('add-model-btn').addEventListener('click', () => showModelForm(false));
-  document.getElementById('edit-model-btn').addEventListener('click', editSelectedModel);
-  document.getElementById('delete-model-btn').addEventListener('click', deleteSelectedModel);
-  document.getElementById('model-select').addEventListener('change', (e) => setDefaultModel(e.target.value));
-  document.getElementById('save-model-btn').addEventListener('click', saveModel);
-  document.getElementById('default-prompt-select').addEventListener('change', (e) => saveDefaultPromptId(e.target.value));
-  document.getElementById('cancel-model-btn').addEventListener('click', hideModelForm);
-  // --- Event Listeners for Import/Export ---
-  document.getElementById('export-history').addEventListener('click', exportHistory);
-  document.getElementById('import-history').addEventListener('click', () => {
-    // Trigger the hidden file input
-    document.getElementById('import-file-input').click();
-  });
-  document.getElementById('import-file-input').addEventListener('change', importHistory);
+  // Helper helper to safely add listeners
+  function safeAddListener(id, event, handler) {
+    const el = document.getElementById(id);
+    if (el) {
+      el.addEventListener(event, handler);
+    } else {
+      console.warn(`Element with ID '${id}' not found for event '${event}'`);
+    }
+  }
 
-  // --- NEW: Event Listeners for List Management ---
-  document.getElementById('list-select').addEventListener('change', (e) => {
+  // --- REVISED: Safe Event Listener Attachments ---
+  safeAddListener('add-model-btn', 'click', () => showModelForm(false));
+  safeAddListener('edit-model-btn', 'click', editSelectedModel);
+  safeAddListener('delete-model-btn', 'click', deleteSelectedModel);
+  safeAddListener('model-select', 'change', (e) => setDefaultModel(e.target.value));
+  safeAddListener('save-model-btn', 'click', saveModel);
+  safeAddListener('default-prompt-select', 'change', (e) => saveDefaultPromptId(e.target.value));
+  safeAddListener('cancel-model-btn', 'click', hideModelForm);
+
+  safeAddListener('export-history', 'click', exportHistory);
+  safeAddListener('import-history', 'click', () => document.getElementById('import-file-input').click());
+  safeAddListener('import-file-input', 'change', importHistory);
+  safeAddListener('list-select', 'change', (e) => {
     if (e.target.value === "__create_new__") {
-      addList(); // Reuse existing addList function
-      // addList will refresh lists. If user cancels, we need to revert?
-      // addList implementation doesn't return anything or handle cancel nicely regarding UI selection revert.
-      // Let's rely on addList reloading lists. If cancel, it reloads, reverting to default/first.
+      addList();
     } else {
       applyFilters();
     }
   });
-  document.getElementById('add-list-btn').addEventListener('click', addList);
-  document.getElementById('rename-list-btn').addEventListener('click', renameList);
-  document.getElementById('delete-list-btn').addEventListener('click', deleteList);
+  safeAddListener('add-list-btn', 'click', addList);
+  safeAddListener('rename-list-btn', 'click', renameList);
+  safeAddListener('delete-list-btn', 'click', deleteList);
+  safeAddListener('move-list-up-btn', 'click', () => moveList('up'));
+  safeAddListener('move-list-down-btn', 'click', () => moveList('down'));
 
-  // --- NEW: Event Listeners for List Reordering ---
-  document.getElementById('move-list-up-btn').addEventListener('click', () => moveList('up'));
-  document.getElementById('move-list-down-btn').addEventListener('click', () => moveList('down'));
+  safeAddListener('export-all-history', 'click', exportAllHistory);
+  safeAddListener('import-all-history', 'click', () => document.getElementById('import-file-input').click());
 
+  safeAddListener('clear-history', 'click', clearAllHistory);
+  safeAddListener('clear-list-history', 'click', clearListHistory);
 
-  // --- NEW: Event Listeners for Global Import/Export ---
-  document.getElementById('export-all-history').addEventListener('click', exportAllHistory);
-  document.getElementById('import-all-history').addEventListener('click', () => {
-    document.getElementById('import-file-input').click();
-  });
+  safeAddListener('export-all-settings-btn', 'click', exportAllSettings);
+  safeAddListener('import-all-settings-btn', 'click', () => document.getElementById('import-settings-file-input').click());
+  safeAddListener('import-settings-file-input', 'change', importAllSettings);
 
-  // --- NEW: Event Listeners for Clear Actions ---
-  document.getElementById('clear-history').addEventListener('click', clearAllHistory);
-  document.getElementById('clear-list-history').addEventListener('click', clearListHistory);
+  safeAddListener('anki-save-settings-btn', 'click', saveAnkiSettings);
+  safeAddListener('anki-model-select', 'change', (e) => loadAnkiFields(e.target.value));
+  safeAddListener('anki-refresh-btn', 'click', loadAnkiDecksAndModels);
 
-  // --- NEW: Event Listeners for Global Settings I/O ---
-  document.getElementById('export-all-settings-btn').addEventListener('click', exportAllSettings);
-  document.getElementById('import-all-settings-btn').addEventListener('click', () => {
-    document.getElementById('import-settings-file-input').click();
-  });
-  document.getElementById('import-settings-file-input').addEventListener('change', importAllSettings);
-
-  // --- NEW: ANKI EVENT LISTENERS ---
-  document.getElementById('anki-save-settings-btn').addEventListener('click', saveAnkiSettings);
-  document.getElementById('anki-model-select').addEventListener('change', (e) => loadAnkiFields(e.target.value));
-  document.getElementById('anki-refresh-btn').addEventListener('click', loadAnkiDecksAndModels);
-
-  // --- NEW: Reminder Event Listeners ---
-  document.getElementById('save-reminder-settings-btn').addEventListener('click', saveReminderSettings);
-  document.getElementById('manual-backup-btn').addEventListener('click', () => {
-    chrome.runtime.sendMessage({ type: "checkBackupReminder", force: true });
-    // We reuse checkBackupReminder but adding a force flag or separate type? 
-    // Actually, let's use a distinct type "manualBackup" or just reuse "testBackup" logic but rename it.
-    // Let's us "manualBackup" for clarity in background.js
+  safeAddListener('save-reminder-settings-btn', 'click', saveReminderSettings);
+  safeAddListener('manual-backup-btn', 'click', () => {
     chrome.runtime.sendMessage({ type: "manualBackup" });
     updateReminderStatus('Manual backup initiated... check Downloads.', 'info');
   });
 
-  // --- NEW: Restore Backup Listener ---
-  document.getElementById('restore-backup-btn').addEventListener('click', () => {
-    document.getElementById('restore-backup-file').click();
+  safeAddListener('restore-backup-btn', 'click', () => document.getElementById('restore-backup-file').click());
+  safeAddListener('restore-backup-file', 'change', restoreBackup);
+
+  safeAddListener('save-custom-prompt-btn', 'click', savePrompt);
+  safeAddListener('cancel-custom-prompt-btn', 'click', cancelPromptEdit);
+
+  // --- TTS Event Listeners ---
+  safeAddListener('tts-test-btn', 'click', testTTSVoice);
+  safeAddListener('tts-save-btn', 'click', saveTTSSettings);
+  safeAddListener('tts-rate-range', 'input', (e) => {
+    const valSpan = document.getElementById('tts-rate-value');
+    if (valSpan) valSpan.textContent = e.target.value;
   });
-  document.getElementById('restore-backup-file').addEventListener('change', restoreBackup);
 
-  // --- NEW: Prompts Event Listeners ---
-  document.getElementById('save-custom-prompt-btn').addEventListener('click', savePrompt);
-  document.getElementById('cancel-custom-prompt-btn').addEventListener('click', cancelPromptEdit);
+  safeAddListener('history-search', 'input', debounce(applyFilters, 300));
+  safeAddListener('date-filter', 'change', applyFilters);
+  safeAddListener('favorites-only', 'change', applyFilters);
 
-  // --- NEW: Search, Filter, and Favorites Event Listeners ---
-  document.getElementById('history-search').addEventListener('input', debounce(applyFilters, 300));
-  document.getElementById('date-filter').addEventListener('change', applyFilters);
-  document.getElementById('favorites-only').addEventListener('change', applyFilters);
-
-  // --- NEW: Bulk Actions Event Listeners ---
-  document.getElementById('toggle-bulk-mode').addEventListener('click', toggleBulkMode);
-  document.getElementById('select-all-checkbox').addEventListener('change', toggleSelectAll);
+  safeAddListener('toggle-bulk-mode', 'click', toggleBulkMode);
+  safeAddListener('select-all-checkbox', 'change', toggleSelectAll);
   document.getElementById('bulk-delete-btn').addEventListener('click', bulkDelete);
   document.getElementById('bulk-move-btn').addEventListener('click', bulkMove);
   document.getElementById('bulk-anki-btn').addEventListener('click', bulkExportToAnki);
@@ -1754,9 +1747,93 @@ function resetBackupReminder() {
   });
 }
 
-// ---
-// --- NEW: PROMPTS MANAGEMENT FUNCTIONS
-// ---
+// --- NEW: Restore Backup Logic ---
+function restoreBackup() {
+  const fileInput = document.getElementById('restore-backup-file');
+  const file = fileInput.files[0];
+
+  if (!file) {
+    return;
+  }
+
+  const reader = new FileReader();
+
+  reader.onload = function (e) {
+    try {
+      const backupData = JSON.parse(e.target.result);
+
+      // We expect a structure like: { history: [...], date: ... } or just raw history?
+      // Based on export, it likely has history info. 
+      // Actually, exportAllHistory usually just dumps the history array or object wrapper.
+      // Let's assume the backup format from previous conversations: { history: [], models: [], ... } if it's a full backup.
+      // But looking at "Backup Now", it triggers a download. 
+      // Let's implement a generic restore that merges/overwrites keys found in the JSON.
+
+      // Update: The requirement is to restore history, lists, settings.
+      // Let's iterate over keys and save them to storage.
+
+      const keysToRestore = ['history', 'lists', 'settings', 'models', 'customPrompts', 'ttsSettings', 'ankiSettings'];
+      const dataToSave = {};
+      let restoredCount = 0;
+
+      for (const key in backupData) {
+        if (keysToRestore.includes(key) || key === 'history' || key === 'lists') {
+          dataToSave[key] = backupData[key];
+          restoredCount++;
+        }
+      }
+
+      // Special handling if the backup is just an array (old history export)
+      if (Array.isArray(backupData)) {
+        dataToSave['history'] = backupData;
+        restoredCount = 1;
+      }
+
+      if (restoredCount > 0) {
+        chrome.storage.local.set(dataToSave, () => {
+          // Also check for sync settings if any
+          const syncKeys = ['models', 'customPrompts', 'ttsSettings', 'ankiSettings'];
+          const syncData = {};
+          let syncCount = 0;
+          for (const key of syncKeys) {
+            if (backupData[key]) {
+              syncData[key] = backupData[key];
+              syncCount++;
+            }
+          }
+
+          if (syncCount > 0) {
+            chrome.storage.sync.set(syncData, () => {
+              updateRestoreStatus('Backup restored successfully! Reloading...', 'success');
+              setTimeout(() => location.reload(), 1500);
+            });
+          } else {
+            updateRestoreStatus('Backup restored successfully! Reloading...', 'success');
+            setTimeout(() => location.reload(), 1500);
+          }
+        });
+      } else {
+        updateRestoreStatus('Invalid backup file format.', 'error');
+      }
+
+    } catch (err) {
+      console.error("Restore failed:", err);
+      updateRestoreStatus('Error parsing backup file.', 'error');
+    }
+  };
+
+  reader.readAsText(file);
+}
+
+function updateRestoreStatus(message, type) {
+  const statusEl = document.getElementById('restore-status');
+  if (statusEl) {
+    statusEl.textContent = message;
+    statusEl.style.color = type === 'error' ? 'red' : 'green';
+    setTimeout(() => statusEl.textContent = '', 5000);
+  }
+}
+
 
 function loadPrompts() {
   chrome.storage.sync.get({ customPrompts: [] }, (data) => {
@@ -1799,49 +1876,9 @@ function loadPrompts() {
           promptEl.classList.remove('dragging');
           document.querySelectorAll('#prompts-list > div').forEach(el => {
             el.style.borderTop = '';
-            el.style.borderBottom = '1px solid var(--border-color)'; // Restore default
+            el.style.borderBottom = '1px solid var(--border-color)';
           });
         });
-
-        promptEl.addEventListener('dragover', (e) => {
-          e.preventDefault(); // Essential to allow dropping
-          e.dataTransfer.dropEffect = 'move';
-          return false;
-        });
-
-        promptEl.addEventListener('dragenter', (e) => {
-          e.preventDefault();
-          // Highlight drop target (e.g., top border if moving up, bottom if moving down is harder to calc, just highlight)
-          promptEl.style.border = '2px dashed var(--primary-color)';
-        });
-
-        promptEl.addEventListener('dragleave', (e) => {
-          promptEl.style.border = '';
-          promptEl.style.borderBottom = '1px solid var(--border-color)'; // Restore default
-        });
-
-        promptEl.addEventListener('drop', (e) => {
-          e.stopPropagation();
-          e.preventDefault();
-
-          const fromIndex = parseInt(e.dataTransfer.getData('text/plain'));
-          const toIndex = index;
-
-          if (fromIndex !== toIndex) {
-            // Reorder array
-            const movedPrompt = prompts[fromIndex];
-            prompts.splice(fromIndex, 1); // Remove from old
-            prompts.splice(toIndex, 0, movedPrompt); // Insert at new
-
-            // Update storage
-            chrome.storage.sync.set({ customPrompts: prompts }, () => {
-              loadPrompts();
-              loadDefaultPromptSelect();
-            });
-          }
-          return false;
-        });
-
 
         const infoWrapper = document.createElement('div');
         infoWrapper.style.display = 'flex';
@@ -1884,10 +1921,147 @@ function loadPrompts() {
         promptEl.appendChild(infoWrapper);
         promptEl.appendChild(actionsDiv);
 
+        // Add Drop listeners
+        promptEl.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          return false;
+        });
+
+        promptEl.addEventListener('dragenter', (e) => {
+          e.preventDefault();
+          promptEl.style.border = '2px dashed var(--primary-color)';
+        });
+
+        promptEl.addEventListener('dragleave', (e) => {
+          promptEl.style.border = '';
+          promptEl.style.borderBottom = '1px solid var(--border-color)';
+        });
+
+        promptEl.addEventListener('drop', (e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          const fromIndex = parseInt(e.dataTransfer.getData('text/plain'));
+          const toIndex = index;
+          if (fromIndex !== toIndex) {
+            const movedPrompt = prompts[fromIndex];
+            prompts.splice(fromIndex, 1);
+            prompts.splice(toIndex, 0, movedPrompt);
+            chrome.storage.sync.set({ customPrompts: prompts }, () => {
+              loadPrompts();
+              loadDefaultPromptSelect();
+            });
+          }
+          return false;
+        });
+
         listContainer.appendChild(promptEl);
       });
     }
   });
+}
+
+// ---
+// --- NEW: TTS SETTINGS FUNCTIONS
+// ---
+
+function loadTTSSettings() {
+  // 1. Load saved settings first
+  chrome.storage.sync.get(['ttsSettings'], (data) => {
+    const settings = data.ttsSettings || { rate: 1.0, voiceURI: null };
+
+    // Update Rate Slider
+    document.getElementById('tts-rate-range').value = settings.rate;
+    document.getElementById('tts-rate-value').textContent = settings.rate;
+
+    // 2. Load Voices
+    populateVoiceList(settings.voiceURI);
+  });
+}
+
+function populateVoiceList(savedVoiceURI) {
+  const voiceSelect = document.getElementById('tts-voice-select');
+
+  function updateList() {
+    const voices = window.speechSynthesis.getVoices();
+    voiceSelect.innerHTML = '';
+
+    if (voices.length === 0) {
+      const option = document.createElement('option');
+      option.textContent = "No voices found (or loading...)";
+      voiceSelect.appendChild(option);
+      return;
+    }
+
+    // Add Default/Auto option
+    const defaultOption = document.createElement('option');
+    defaultOption.value = "";
+    defaultOption.textContent = "Default (Browser Decision)";
+    voiceSelect.appendChild(defaultOption);
+
+    voices.forEach(voice => {
+      const option = document.createElement('option');
+      option.value = voice.voiceURI;
+      option.textContent = `${voice.name} (${voice.lang})`;
+
+      if (voice.voiceURI === savedVoiceURI) {
+        option.selected = true;
+      }
+      voiceSelect.appendChild(option);
+    });
+  }
+
+  updateList();
+  // Chrome loads voices asynchronously, so we must listen for changes
+  if (window.speechSynthesis.onvoiceschanged !== undefined) {
+    window.speechSynthesis.onvoiceschanged = updateList;
+  }
+}
+
+function saveTTSSettings() {
+  const voiceSelect = document.getElementById('tts-voice-select');
+  const rateRange = document.getElementById('tts-rate-range');
+
+  const settings = {
+    voiceURI: voiceSelect.value || null, // Empty string means null (default)
+    rate: parseFloat(rateRange.value)
+  };
+
+  chrome.storage.sync.set({ ttsSettings: settings }, () => {
+    updateTTSStatus("Settings saved successfully!", "success");
+  });
+}
+
+function testTTSVoice() {
+  const voiceSelect = document.getElementById('tts-voice-select');
+  const rateRange = document.getElementById('tts-rate-range');
+  const selectedURI = voiceSelect.value;
+  const rate = parseFloat(rateRange.value);
+
+  // Cancel current speech
+  window.speechSynthesis.cancel();
+
+  const utterance = new SpeechSynthesisUtterance("Hello! This is a test of your selected voice.");
+  utterance.rate = rate;
+
+  if (selectedURI) {
+    const voices = window.speechSynthesis.getVoices();
+    const selectedVoice = voices.find(v => v.voiceURI === selectedURI);
+    if (selectedVoice) {
+      utterance.voice = selectedVoice;
+    }
+  }
+
+  window.speechSynthesis.speak(utterance);
+}
+
+function updateTTSStatus(message, type = 'info') {
+  const statusEl = document.getElementById('tts-status');
+  if (statusEl) {
+    statusEl.textContent = message;
+    statusEl.style.color = type === 'error' ? '#d9534f' : (type === 'success' ? '#5cb85c' : '#eee');
+    setTimeout(() => statusEl.textContent = '', 3000);
+  }
 }
 
 function savePrompt() {
@@ -1920,9 +2094,18 @@ function savePrompt() {
       // Reset form
       cancelPromptEdit();
       loadPrompts();
-      loadDefaultPromptSelect(); // Refresh the default selector
+      loadDefaultPromptSelect();
     });
   });
+}
+
+function cancelPromptEdit() {
+  document.getElementById('prompt-id').value = '';
+  document.getElementById('prompt-name').value = '';
+  document.getElementById('prompt-content').value = '';
+
+  document.getElementById('save-custom-prompt-btn').textContent = 'Save Prompt';
+  document.getElementById('cancel-custom-prompt-btn').style.display = 'none';
 }
 
 function editPrompt(id) {
@@ -1948,22 +2131,13 @@ function deletePrompt(id) {
       const prompts = data.customPrompts.filter(p => p.id !== id);
       chrome.storage.sync.set({ customPrompts: prompts }, () => {
         loadPrompts();
-        loadDefaultPromptSelect(); // Refresh the default selector
+        loadDefaultPromptSelect();
       });
     });
   }
 }
 
 
-
-function cancelPromptEdit() {
-  document.getElementById('prompt-id').value = '';
-  document.getElementById('prompt-name').value = '';
-  document.getElementById('prompt-content').value = '';
-
-  document.getElementById('save-custom-prompt-btn').textContent = 'Save Prompt';
-  document.getElementById('cancel-custom-prompt-btn').style.display = 'none';
-}
 
 // ---
 // --- NEW: UTILITY FUNCTIONS

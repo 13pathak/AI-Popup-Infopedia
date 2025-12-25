@@ -508,13 +508,13 @@
 
 <body>
 
-    <div class="tab-nav">
-        <button class="tab-button active" data-tab="settings-content">Settings</button>
-        <button class="tab-button" data-tab="history-content">History</button>
-        <button class="tab-button" data-tab="anki-content">Anki</button>
-        <button class="tab-button" data-tab="flashcards-content">Flashcards</button>
-        <button class="tab-button" data-tab="reminder-content">Backup</button>
-        <button class="tab-button" data-tab="prompts-content">Prompts</button>
+    <button class="tab-button" data-tab="settings-content">Settings</button>
+    <button class="tab-button" data-tab="history-content">History</button>
+    <button class="tab-button" data-tab="anki-content">Anki</button>
+    <button class="tab-button" data-tab="flashcards-content">Flashcards</button>
+    <button class="tab-button" data-tab="reminder-content">Backup</button>
+    <button class="tab-button" data-tab="prompts-content">Prompts</button>
+    <button class="tab-button" data-tab="tts-content">Text-to-Speech</button>
     </div>
 
     <div id="status-global"></div>
@@ -861,6 +861,33 @@
             <p id="no-prompts-message" style="color: #888;">No custom prompts added yet.</p>
             <!-- Prompts will be added here dynamically -->
         </div>
+    </div>
+
+    <!-- --- NEW TTS TAB CONTENT --- -->
+    <div id="tts-content" class="tab-content">
+        <h2>Text-to-Speech Settings</h2>
+        <p>Configure the voice used for reading aloud AI responses.</p>
+
+        <div class="form-group">
+            <label for="tts-voice-select">Select Voice:</label>
+            <select id="tts-voice-select"
+                style="width: 100%; padding: 8px; margin-top: 5px; background: #333; color: #fff; border: 1px solid #555;">
+                <option value="" disabled selected>Loading voices...</option>
+            </select>
+        </div>
+
+        <div class="form-group" style="margin-top: 20px;">
+            <label for="tts-rate-range">Speed (Rate): <span id="tts-rate-value">1.0</span>x</label>
+            <input type="range" id="tts-rate-range" min="0.5" max="2.0" step="0.1" value="1.0"
+                style="width: 100%; margin-top: 5px;">
+        </div>
+
+        <div style="margin-top: 30px;">
+            <button id="tts-test-btn" style="background-color: var(--primary-color); margin-right: 10px;">Test
+                Voice</button>
+            <button id="tts-save-btn" style="background-color: var(--secondary-color);">Save Settings</button>
+        </div>
+        <div id="tts-status" style="margin-top: 10px; font-weight: bold; min-height: 1em;"></div>
     </div>
 
     <script src="options.js"></script>

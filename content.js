@@ -50,7 +50,8 @@ const popupStyles = `
   /* --- STYLES FOR BUTTONS --- */
   .ai-popup-actions {
     display: flex;
-    justify-content: flex-start; /* Aligns the single button to the LEFT */
+    align-items: center; /* Vertically center items */
+    gap: 10px; /* Space between items */
     margin-top: 15px;
     padding-top: 10px;
     border-top: 1px solid #555;
@@ -58,17 +59,33 @@ const popupStyles = `
 
   .ai-popup-button {
     font-family: sans-serif;
-    font-size: 14px; /* Matches popup text */
-    font-weight: bold; /* Make it stand out */
-    color: #ff6b6b; /* Make it red */
+    font-size: 14px; 
+    font-weight: bold; 
+    color: #ff6b6b; 
     cursor: pointer;
     background: none;
     border: none;
-    padding: 5px 0; /* Padding only top/bottom */
+    padding: 5px 10px; /* Add horizontal padding */
+    white-space: nowrap; /* Prevent wrapping */
+    flex-shrink: 0; /* Prevent button from shrinking */
   }
 
   .ai-popup-button:hover {
     opacity: 0.8;
+  }
+
+  /* SPEECH BUTTON */
+  #ai-popup-speak-btn {
+    font-size: 18px; /* Slightly larger icon */
+    color: #4db6ac;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  #ai-popup-speak-btn:hover {
+    color: #80cbc4;
   }
 `;
 
@@ -407,6 +424,16 @@ function createActionButtons(word, definition, modelName, promptName) {
     const lists = response.lists;
     const lastUsedListId = response.lastUsedListId; // --- NEW ---
 
+    // --- NEW: SPEECH BUTTON ---
+    const speakButton = document.createElement('span'); // Use span for icon
+    speakButton.id = 'ai-popup-speak-btn';
+    speakButton.innerHTML = '🔊'; // Speaker icon
+    speakButton.title = 'Listen to explanation';
+    speakButton.onclick = (e) => {
+      e.stopPropagation();
+      toggleSpeech(definition);
+    };
+
     // 2. Create list selector
     const listSelector = document.createElement('select');
     listSelector.style.cssText = `
@@ -482,11 +509,12 @@ function createActionButtons(word, definition, modelName, promptName) {
       }
     });
 
-    // 3. Create the final "Save" button
+    // 4. Create the final "Save" button
     const finalSaveButton = document.createElement('button');
-    finalSaveButton.textContent = 'Save'; // Changed from 'Confirm Save'
+    finalSaveButton.textContent = 'Save';
     finalSaveButton.className = 'ai-popup-button';
-    finalSaveButton.style.marginLeft = '10px';
+    // Removed manual margin-left, relying on flex gap
+
 
     finalSaveButton.addEventListener('click', (ev) => {
       ev.stopPropagation();
@@ -525,6 +553,8 @@ function createActionButtons(word, definition, modelName, promptName) {
     });
 
     // 4. Add the new controls directly to the container
+    // 4. Add the new controls directly to the container
+    actionsContainer.appendChild(speakButton); // Add speaker first
     actionsContainer.appendChild(listSelector);
     actionsContainer.appendChild(finalSaveButton);
   });
@@ -541,6 +571,57 @@ function removePopup() {
     popupContainer = null;
   }
   popup = null; // Clear the reference
+  window.speechSynthesis.cancel(); // Stop speaking when closed
+}
+
+// --- NEW: Text-to-Speech Logic ---
+let isSpeaking = false;
+
+function toggleSpeech(text) {
+  const btn = popup.querySelector('#ai-popup-speak-btn');
+
+  if (isSpeaking) {
+    window.speechSynthesis.cancel();
+    isSpeaking = false;
+    if (btn) btn.innerHTML = '🔊';
+  } else {
+    // Start speaking
+    chrome.storage.sync.get(['ttsSettings'], (data) => {
+      const settings = data.ttsSettings || { rate: 1.0, voiceURI: null };
+
+      // Cancel any previous speech
+      window.speechSynthesis.cancel();
+
+      // Prepare text: Remove markdown for cleaner reading
+      const cleanText = text.replace(/\*\*/g, '').replace(/<br>/g, ' ').replace(/\n/g, ' ');
+
+      const utterance = new SpeechSynthesisUtterance(cleanText);
+      utterance.rate = settings.rate;
+
+      if (settings.voiceURI) {
+        const voices = window.speechSynthesis.getVoices();
+        const selectedVoice = voices.find(v => v.voiceURI === settings.voiceURI);
+        if (selectedVoice) {
+          utterance.voice = selectedVoice;
+        }
+      }
+
+      utterance.onend = () => {
+        isSpeaking = false;
+        if (btn) btn.innerHTML = '🔊';
+      };
+
+      utterance.onerror = (e) => {
+        console.error("Speech error", e);
+        isSpeaking = false;
+        if (btn) btn.innerHTML = '🔊';
+      };
+
+      window.speechSynthesis.speak(utterance);
+      isSpeaking = true;
+      if (btn) btn.innerHTML = '⏹'; // Stop icon
+    });
+  }
 }
 
 // --- UPDATED adjustPopupPosition ---
