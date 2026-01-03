@@ -1792,11 +1792,11 @@ function restoreBackup() {
       if (restoredCount > 0) {
         chrome.storage.local.set(dataToSave, () => {
           // Also check for sync settings if any
-          const syncKeys = ['models', 'customPrompts', 'ttsSettings', 'ankiSettings'];
+          const syncKeys = ['models', 'customPrompts', 'defaultModelId', 'defaultPromptId', 'ttsSettings', 'ankiSettings', 'backupReminderFrequency', 'backupSubfolder'];
           const syncData = {};
           let syncCount = 0;
           for (const key of syncKeys) {
-            if (backupData[key]) {
+            if (backupData[key] !== undefined) {
               syncData[key] = backupData[key];
               syncCount++;
             }

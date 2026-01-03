@@ -302,16 +302,22 @@ chrome.downloads.onChanged.addListener((delta) => {
 function triggerBackup(type = "Auto") {
   // 1. Fetch all data to backup
   chrome.storage.local.get(['history', 'wordLists'], (localData) => {
-    chrome.storage.sync.get(['models', 'customPrompts', 'defaultModelId', 'defaultPromptId'], (syncData) => {
+    chrome.storage.sync.get(['models', 'customPrompts', 'defaultModelId', 'defaultPromptId', 'ankiSettings', 'ttsSettings', 'backupReminderFrequency', 'backupSubfolder'], (syncData) => {
 
       const backupData = {
         history: localData.history || [],
         wordLists: localData.wordLists || [],
         models: syncData.models || [],
         customPrompts: syncData.customPrompts || [],
+        defaultModelId: syncData.defaultModelId,
+        defaultPromptId: syncData.defaultPromptId,
+        ankiSettings: syncData.ankiSettings,
+        ttsSettings: syncData.ttsSettings,
+        backupReminderFrequency: syncData.backupReminderFrequency,
+        backupSubfolder: syncData.backupSubfolder,
         exportedAt: new Date().toISOString(),
         backupType: type,
-        version: "1.0"
+        version: "1.1"
       };
 
       // 2. Create Data URI (Base64) - Service Worker safe
