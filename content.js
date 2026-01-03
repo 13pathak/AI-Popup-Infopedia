@@ -1,7 +1,6 @@
-let popupContainer = null;
-let popup = null;
-let isInteractingWithPopup = false;
-let isClickInsidePopup = false;
+// --- Global State for Stacked Popups ---
+let activePopups = []; // Array of { container, popup, isInteracting, isClickInside }
+let baseZIndex = 2100000000;
 
 // --- Styles (unchanged) ---
 const popupStyles = `
@@ -91,29 +90,59 @@ const popupStyles = `
 
 // --- Main mouseup listener ---
 document.addEventListener('mouseup', (event) => {
-  if (isClickInsidePopup || isInteractingWithPopup) {
-    isClickInsidePopup = false;
-    return;
+  // 1. Check for selection inside existing popups (Nested Selection) FIRST
+  let selectedText = "";
+  let selectionRect = null;
+
+  // Check from top-most to bottom-most
+  for (let i = activePopups.length - 1; i >= 0; i--) {
+    const shadowRoot = activePopups[i].container.shadowRoot;
+    const selection = shadowRoot.getSelection();
+    if (selection && !selection.isCollapsed) {
+      const text = selection.toString().trim();
+      if (text.length > 0) {
+        selectedText = text;
+        selectionRect = selection.getRangeAt(0).getBoundingClientRect();
+        break; // Found a nested selection, stop looking
+      }
+    }
   }
 
+  // 2. If a nested selection was found, trigger NEW popup and ignore "click inside" blocking
+  if (selectedText.length > 0) {
+    const wordCount = selectedText.split(/\s+/).length;
+    if (wordCount > 0 && wordCount <= 6) {
+      // Reset flags to avoid sticking
+      activePopups.forEach(p => { p.isClickInside = false; p.isInteracting = false; });
+      initiatePopupSequence(selectionRect, selectedText);
+      return;
+    }
+  }
+
+  // 3. If NO nested selection, check if we clicked inside (Interaction Blocking)
+  // We want to block triggering/closing if just clicking inside a popup
+  let isInteractionBlocked = false;
+  for (let i = activePopups.length - 1; i >= 0; i--) {
+    if (activePopups[i].isClickInside) {
+      activePopups[i].isClickInside = false; // Reset for next time
+      isInteractionBlocked = true;
+    }
+    // note: we don't strictly block on isInteracting here unless we want to lock UI during load
+  }
+
+  if (isInteractionBlocked) return;
+
+  // 4. Check main window selection
   const selection = window.getSelection();
-  const selectedText = selection.toString().trim();
-
-  if (selectedText.length === 0) {
-    removePopup();
-    return;
-  }
-
-  // Count the words. We split by one or more whitespace characters.
-  const wordCount = selectedText.split(/\s+/).length;
-
-  if (wordCount > 0 && wordCount <= 6) {
-    // Normal behavior for short text
-    initiatePopupSequence(selection, selectedText);
+  selectedText = selection.toString().trim();
+  if (selectedText.length > 0) {
+    selectionRect = selection.getRangeAt(0).getBoundingClientRect();
+    const wordCount = selectedText.split(/\s+/).length;
+    if (wordCount > 0 && wordCount <= 6) {
+      initiatePopupSequence(selectionRect, selectedText);
+    }
   } else {
-    // If more than 6 words are selected, ensure the popup is closed
-    // (User can trigger it manually via shortcut)
-    removePopup();
+    // No text selected anywhere. logic for closing is handled in mousedown (outside click)
   }
 });
 
@@ -123,96 +152,93 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     const selection = window.getSelection();
     const selectedText = selection.toString().trim();
     if (selectedText.length > 0) {
-      initiatePopupSequence(selection, selectedText);
+      const rect = selection.getRangeAt(0).getBoundingClientRect();
+      initiatePopupSequence(rect, selectedText);
     }
   }
 });
 
 
-
 // --- NEW: Helper to start the popup logic (extracted from mouseup) ---
-function initiatePopupSequence(selection, selectedText) {
-  const range = selection.getRangeAt(0);
-  const rect = range.getBoundingClientRect();
-
-  showPopup(rect.left, rect.top, "Loading...");
+function initiatePopupSequence(rect, selectedText) {
+  // Create a new popup instance
+  // Note: we track the instance object to manage its state updates
+  const popupInstance = showPopup(rect.left, rect.top, "Loading...");
 
   chrome.runtime.sendMessage({ type: "getAiDefinition", word: selectedText }, (response) => {
-    if (!popup) return;
+    // Verify instance still exists (user might have closed it)
+    if (!activePopups.includes(popupInstance)) return;
+
+    const popupEl = popupInstance.popup;
 
     if (response && response.models && response.models.length > 0) {
-      createSelectors(response.models, response.customPrompts, response.defaultModelId, null, selectedText, response.defaultPromptId);
+      createSelectors(popupInstance, response.models, response.customPrompts, response.defaultModelId, null, selectedText, response.defaultPromptId);
     }
 
     const definitionText = (response && response.error) ? response.error : (response ? response.definition : "Error resolving definition");
 
-    updatePopup(definitionText);
+    updatePopupContent(popupInstance, definitionText);
 
     if (response && !response.error) {
       const modelName = response.models.find(m => m.id === response.defaultModelId)?.name || 'Unknown Model';
-      createActionButtons(selectedText, definitionText, modelName, response.promptName);
+      createActionButtons(popupInstance, selectedText, definitionText, modelName, response.promptName);
     }
-    adjustPopupPosition();
-
-    setTimeout(() => {
-      if (popupContainer && document.documentElement.contains(popupContainer)) {
-        popupContainer.remove();
-        document.documentElement.appendChild(popupContainer);
-      }
-    }, 150);
+    adjustPopupPosition(popupInstance, rect);
   });
 }
 
 
 // --- Mousedown listener ---
 document.addEventListener('mousedown', (event) => {
-  if (popupContainer && popupContainer.shadowRoot) {
-    const path = event.composedPath();
-    const isClickInside = popupContainer.shadowRoot.contains(path[0]);
+  // Check interaction for ALL popups
+  let clickedInsideAny = false;
 
-    if (isClickInside) {
-      // If click starts inside, set the flag so the mouseup listener will ignore it
-      isClickInsidePopup = true;
-      isInteractingWithPopup = true; // Also set the interaction flag
-    } else {
-      // --- REVISED LOGIC ---
-      // If the click is outside, reset the flag and check for closure.
-      isClickInsidePopup = false;
-      // Click was outside, so check if we should close
-      const selection = window.getSelection();
-      if (selection.isCollapsed) {
-        removePopup();
+  activePopups.forEach(instance => {
+    if (instance.container && instance.container.shadowRoot) {
+      const path = event.composedPath();
+      // Check if click path includes the shadow root's content
+      if (path.includes(instance.container)) {
+        instance.isClickInside = true;
+        // instance.isInteracting = true; // Dropped this as it sticks. 
+        clickedInsideAny = true;
+      } else {
+        instance.isClickInside = false;
       }
-      isInteractingWithPopup = false; // Reset on outside click
     }
-  }
-  else {
-    isInteractingWithPopup = false;
-    isClickInsidePopup = false;
+  });
+
+  if (!clickedInsideAny) {
+    // Click was outside ALL active popups
+    // Close ALL popups
+    removeAllPopups();
   }
 });
 
+// --- Keydown listener ---
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && popup) {
-    removePopup();
+  if (event.key === 'Escape') {
+    if (activePopups.length > 0) {
+      // Close the most recently added popup (top-most)
+      removeLastPopup();
+    }
   }
 });
 
 // --- UPDATED showPopup ---
 function showPopup(x, y, content) {
-  // Remove existing popup if any
-  removePopup();
+  // Do NOT remove existing popups. Stack them.
 
   // Create the isolated container
-  popupContainer = document.createElement('div');
+  const popupContainer = document.createElement('div');
   popupContainer.style.all = 'initial'; // Reset all inherited styles
   popupContainer.style.position = 'fixed';
   popupContainer.style.top = '0';
   popupContainer.style.left = '0';
   popupContainer.style.width = '0';
   popupContainer.style.height = '0';
-  popupContainer.style.zIndex = '2147483647'; // This wins the z-index war
-  popupContainer.style.pointerEvents = 'none'; // Click-through
+  // Increment z-index for stacking
+  popupContainer.style.zIndex = (baseZIndex + activePopups.length).toString();
+  popupContainer.style.pointerEvents = 'none'; // Click-through wrapper
 
   // Attach the shadow root
   const shadow = popupContainer.attachShadow({ mode: 'open' });
@@ -223,7 +249,7 @@ function showPopup(x, y, content) {
   shadow.appendChild(styleTag);
 
   // Create the popup element
-  popup = document.createElement('div');
+  const popup = document.createElement('div');
   popup.id = 'ai-definition-popup';
 
   const contentWrapper = document.createElement('div');
@@ -240,27 +266,39 @@ function showPopup(x, y, content) {
 
   // Add our container to the main page
   document.documentElement.appendChild(popupContainer);
+
+  const instance = {
+    container: popupContainer,
+    popup: popup, // The inner div
+    shadow: shadow,
+    isInteracting: false,
+    isClickInside: false
+  };
+
+  activePopups.push(instance);
+  return instance;
 }
 
-// --- UPDATED updatePopup ---
-function updatePopup(content) {
-  if (popup) {
-    const contentWrapper = popup.querySelector('#ai-popup-content');
-    if (contentWrapper) {
-      // Convert Markdown bold (**) to HTML <strong>
-      let formattedContent = content.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-      // Convert newlines to <br>
-      formattedContent = formattedContent.replace(/\n/g, '<br>');
+// --- UPDATED updatePopupContent ---
+function updatePopupContent(instance, content) {
+  const popup = instance.popup;
+  if (!popup) return;
 
-      // Set the formatted HTML
-      contentWrapper.innerHTML = formattedContent;
-    }
+  const contentWrapper = popup.querySelector('#ai-popup-content');
+  if (contentWrapper) {
+    // Convert Markdown bold (**) to HTML <strong>
+    let formattedContent = content.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    // Convert newlines to <br>
+    formattedContent = formattedContent.replace(/\n/g, '<br>');
+
+    // Set the formatted HTML
+    contentWrapper.innerHTML = formattedContent;
   }
 }
 
-// --- NEW: Function to create the model selector dropdown ---
-// --- NEW: Function to create the model and prompt selectors ---
-function createSelectors(models, prompts, currentModelId, currentPromptContent, selectedText, defaultPromptId) {
+// --- Function to create the model and prompt selectors ---
+function createSelectors(instance, models, prompts, currentModelId, currentPromptContent, selectedText, defaultPromptId) {
+  const popup = instance.popup;
   if (!popup) return;
 
   // Remove existing container if present
@@ -294,8 +332,6 @@ function createSelectors(models, prompts, currentModelId, currentPromptContent, 
   const promptSelector = document.createElement('select');
   promptSelector.id = 'ai-popup-prompt-selector';
 
-  // Default option REMOVED
-
   if (prompts && prompts.length > 0) {
     prompts.forEach(prompt => {
       const option = document.createElement('option');
@@ -307,7 +343,6 @@ function createSelectors(models, prompts, currentModelId, currentPromptContent, 
       }
       option.textContent = displayName;
 
-      // Select if it matches current content OR if it's the default and no current content is specified
       if (prompt.content === currentPromptContent) {
         option.selected = true;
       } else if (!currentPromptContent && prompt.id === defaultPromptId) {
@@ -341,19 +376,20 @@ function createSelectors(models, prompts, currentModelId, currentPromptContent, 
   function triggerRedefine() {
     const newModelId = modelSelector.value;
     const newPromptContent = promptSelector.value;
-    redefineWithModelAndPrompt(selectedText, newModelId, newPromptContent);
+    redefineWithModelAndPrompt(instance, selectedText, newModelId, newPromptContent);
   }
 }
 
 // --- Function to get a new definition with a specific model and prompt ---
-function redefineWithModelAndPrompt(word, modelId, promptContent) {
-  if (!popup) return;
+function redefineWithModelAndPrompt(instance, word, modelId, promptContent) {
+  if (!activePopups.includes(instance)) return;
+  const popup = instance.popup;
 
-  // --- NEW: Set the interaction flag ---
-  isInteractingWithPopup = true;
+  // Set the interaction flag
+  instance.isInteracting = true;
 
   // Update UI to show loading state
-  updatePopup("Loading...");
+  updatePopupContent(instance, "Loading...");
   // Remove old action buttons
   const actions = popup.querySelector('.ai-popup-actions');
   if (actions) actions.remove();
@@ -362,34 +398,38 @@ function redefineWithModelAndPrompt(word, modelId, promptContent) {
   chrome.runtime.sendMessage(
     { type: "getAiDefinition", word: word, modelId: modelId, customPrompt: promptContent },
     (response) => {
-      if (!popup) return;
+      if (!activePopups.includes(instance)) return;
 
       // 1. Re-create selectors
       if (response.models && response.models.length > 0) {
-        createSelectors(response.models, response.customPrompts, modelId, promptContent, word, response.defaultPromptId);
+        createSelectors(instance, response.models, response.customPrompts, modelId, promptContent, word, response.defaultPromptId);
       }
 
       // Update the definition
       const definitionText = response.error ? response.error : response.definition;
-      updatePopup(definitionText);
+      updatePopupContent(instance, definitionText);
 
-      // --- NEW: Re-create the save button after model change ---
+      // Re-create the save button after model change
       if (!response.error) {
         const modelName = response.models.find(m => m.id === modelId)?.name || 'Unknown Model';
-        createActionButtons(word, definitionText, modelName, response.promptName);
+        createActionButtons(instance, word, definitionText, modelName, response.promptName);
       }
 
-      adjustPopupPosition();
+      // We don't automatically adjust position on redefine to prevent jumping, 
+      // but if size changes significantly we might need to. 
+      // For now, let's keep it in place or just ensure it stays within bounds.
+      // adjustPopupPosition(instance, ...); 
 
-      // --- NEW: Reset the flag AFTER the entire operation is complete ---
-      setTimeout(() => { isInteractingWithPopup = false; }, 100);
+      // Reset the flag
+      setTimeout(() => { instance.isInteracting = false; }, 100);
     }
   );
 }
 
-// --- UPDATED function to only add Save button ---
-function createActionButtons(word, definition, modelName, promptName) {
-  if (!popup) return;
+// --- UPDATED to accept instance ---
+function createActionButtons(instance, word, definition, modelName, promptName) {
+  if (!activePopups.includes(instance)) return;
+  const popup = instance.popup;
 
   const actionsContainer = document.createElement('div');
   actionsContainer.className = 'ai-popup-actions';
@@ -404,6 +444,9 @@ function createActionButtons(word, definition, modelName, promptName) {
   // 1. Get the lists from the background
   chrome.runtime.sendMessage({ type: "getWordLists" }, (response) => {
     // --- UPDATED: Handle new response format ---
+    // Fix: check if instance still valid after async
+    if (!activePopups.includes(instance)) return;
+
     if (!response || !response.lists || response.lists.length === 0) {
       // --- Handle case where NO lists exist ---
       actionsContainer.innerHTML = ''; // Clear any previous content
@@ -415,8 +458,8 @@ function createActionButtons(word, definition, modelName, promptName) {
 
       // Keep the popup open for a bit longer so the user can read the message
       setTimeout(() => {
-        isInteractingWithPopup = false; // Allow closure again
-        removePopup();
+        instance.isInteracting = false; // Allow closure again
+        removePopupInstance(instance);
       }, 2500);
       return; // Stop execution
     }
@@ -431,7 +474,7 @@ function createActionButtons(word, definition, modelName, promptName) {
     speakButton.title = 'Listen to explanation';
     speakButton.onclick = (e) => {
       e.stopPropagation();
-      toggleSpeech(definition);
+      toggleSpeech(instance, definition);
     };
 
     // 2. Create list selector
@@ -478,7 +521,10 @@ function createActionButtons(word, definition, modelName, promptName) {
     // Handle change event for creating new list
     listSelector.addEventListener('change', (e) => {
       if (e.target.value === "__create_new__") {
+        instance.isInteracting = true; // Prevent close while prompting
         const newListName = prompt("Enter a name for the new list:");
+        instance.isInteracting = false;
+
         if (newListName && newListName.trim()) {
           // Send message to create list
           chrome.runtime.sendMessage({ type: "createList", listName: newListName.trim() }, (response) => {
@@ -564,26 +610,48 @@ function createActionButtons(word, definition, modelName, promptName) {
 }
 
 
-// --- UPDATED removePopup ---
-function removePopup() {
-  if (popupContainer) {
-    popupContainer.remove();
-    popupContainer = null;
-  }
-  popup = null; // Clear the reference
-  window.speechSynthesis.cancel(); // Stop speaking when closed
+// --- Updated remove functions ---
+function removeAllPopups() {
+  activePopups.forEach(instance => {
+    if (instance.container) instance.container.remove();
+  });
+  activePopups = [];
+  window.speechSynthesis.cancel();
 }
 
-// --- NEW: Text-to-Speech Logic ---
+function removeLastPopup() {
+  if (activePopups.length === 0) return;
+  const lastInstance = activePopups.pop();
+  if (lastInstance.container) lastInstance.container.remove();
+  if (activePopups.length === 0) {
+    window.speechSynthesis.cancel();
+  }
+}
+
+function removePopupInstance(instance) {
+  const index = activePopups.indexOf(instance);
+  if (index > -1) {
+    activePopups.splice(index, 1);
+    if (instance.container) instance.container.remove();
+  }
+  if (activePopups.length === 0) {
+    window.speechSynthesis.cancel();
+  }
+}
+
+// --- Text-to-Speech Logic (Scope: Global but controlled per button) ---
 let isSpeaking = false;
 
-function toggleSpeech(text) {
-  const btn = popup.querySelector('#ai-popup-speak-btn');
+function toggleSpeech(instance, text) {
+  const popup = instance.popup;
+  const btn = popup.querySelector('#ai-popup-speak-btn'); // Only controls THIS popup's button
 
   if (isSpeaking) {
     window.speechSynthesis.cancel();
     isSpeaking = false;
     if (btn) btn.innerHTML = '🔊';
+    // Reset all buttons just in case? Or just the active one?
+    // Let's reset all check to simple state
   } else {
     // Start speaking
     chrome.storage.sync.get(['ttsSettings'], (data) => {
@@ -625,29 +693,21 @@ function toggleSpeech(text) {
 }
 
 // --- UPDATED adjustPopupPosition ---
-function adjustPopupPosition() {
+function adjustPopupPosition(instance, selectionRect) {
+  const popup = instance.popup;
   if (!popup) return;
 
-  // --- THE DEFINITIVE FIX ---
-  // If we are interacting with the popup (e.g., changing a model), do NOT close it, even if text is deselected.
-  if (isInteractingWithPopup) {
-    return;
-  }
-  const selection = window.getSelection();
-  // We check rangeCount *and* if the selection is collapsed (no text)
-  if (selection.rangeCount === 0 || selection.isCollapsed) {
-    // Don't remove popup if it's in the 'Saved!' state
-    if (popup.querySelector('.ai-popup-button:disabled')) {
-      return;
-    }
-    removePopup();
-    return;
-  }
+  if (instance.isInteracting) return;
 
-  const selectionRect = selection.getRangeAt(0).getBoundingClientRect(); // Viewport-relative
-  const popupRect = popup.getBoundingClientRect(); // Viewport-relative
+  // We rely on the initial selectionRect passed to init, 
+  // or we could possibly re-measure if we tracked the range.
+  // The passed `selectionRect` is static (snapshot at mouseup).
+  // Ideally, if the user scrolls, the popup is 'fixed', so it stays on screen, but it might drift from text.
+  // The original implementation used 'fixed' and 'mousedown' closing logic, effectively behaving like a modal tooltip.
+
+  const popupRect = popup.getBoundingClientRect();
   const viewportWidth = window.innerWidth;
-  const viewportHeight = window.innerHeight;
+  // const viewportHeight = window.innerHeight; // unused
 
   let newLeft = selectionRect.left; // Start with selection's left
   let newTop;
