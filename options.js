@@ -1772,12 +1772,12 @@ function restoreBackup() {
       // Update: The requirement is to restore history, lists, settings.
       // Let's iterate over keys and save them to storage.
 
-      const keysToRestore = ['history', 'lists', 'settings', 'models', 'customPrompts', 'ttsSettings', 'ankiSettings'];
+      const keysToRestore = ['history', 'lists', 'wordLists', 'settings', 'models', 'customPrompts', 'ttsSettings', 'ankiSettings'];
       const dataToSave = {};
       let restoredCount = 0;
 
       for (const key in backupData) {
-        if (keysToRestore.includes(key) || key === 'history' || key === 'lists') {
+        if (keysToRestore.includes(key) || key === 'history' || key === 'lists' || key === 'wordLists') {
           dataToSave[key] = backupData[key];
           restoredCount++;
         }
@@ -1787,6 +1787,37 @@ function restoreBackup() {
       if (Array.isArray(backupData)) {
         dataToSave['history'] = backupData;
         restoredCount = 1;
+      }
+
+      // --- NEW: Map 'lists' to 'wordLists' if needed ---
+      if (!dataToSave.wordLists && dataToSave.lists) {
+        dataToSave.wordLists = dataToSave.lists;
+      }
+
+      // --- NEW: Reconstruct wordLists if missing ---
+      // If history exists but wordLists is missing (empty array), we must rebuild it from history items
+      if (dataToSave.history && (!dataToSave.wordLists || dataToSave.wordLists.length === 0)) {
+        const uniqueListIds = new Set();
+        dataToSave.history.forEach(item => {
+          if (item.listId) uniqueListIds.add(item.listId);
+        });
+
+        if (uniqueListIds.size > 0) {
+          dataToSave.wordLists = [];
+          uniqueListIds.forEach(id => {
+            let name = "Restored List " + id.substring(0, 4);
+            // Try to extract timestamp from id (format: list_TIMESTAMP_RANDOM or list_TIMESTAMP)
+            const match = id.match(/list_(\d+)/);
+            if (match && match[1]) {
+              const date = new Date(parseInt(match[1]));
+              if (!isNaN(date.getTime())) {
+                name = "Restored List (" + date.toLocaleDateString() + ")";
+              }
+            }
+            dataToSave.wordLists.push({ id: id, name: name });
+          });
+          restoredCount++; // We effectively restored lists
+        }
       }
 
       if (restoredCount > 0) {
@@ -1802,14 +1833,16 @@ function restoreBackup() {
             }
           }
 
+          const msg = `Restored: ${dataToSave.history ? dataToSave.history.length : 0} items, ${dataToSave.wordLists ? dataToSave.wordLists.length : 0} lists, ${syncCount} settings. Reloading...`;
+
           if (syncCount > 0) {
             chrome.storage.sync.set(syncData, () => {
-              updateRestoreStatus('Backup restored successfully! Reloading...', 'success');
-              setTimeout(() => location.reload(), 1500);
+              updateRestoreStatus(msg, 'success');
+              setTimeout(() => location.reload(), 2000);
             });
           } else {
-            updateRestoreStatus('Backup restored successfully! Reloading...', 'success');
-            setTimeout(() => location.reload(), 1500);
+            updateRestoreStatus(msg, 'success');
+            setTimeout(() => location.reload(), 2000);
           }
         });
       } else {
