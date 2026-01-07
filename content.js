@@ -139,6 +139,19 @@ document.addEventListener('mouseup', (event) => {
     selectionRect = selection.getRangeAt(0).getBoundingClientRect();
     const wordCount = selectedText.split(/\s+/).length;
     if (wordCount > 0 && wordCount <= 6) {
+
+      // --- NEW: Duplicate Check ---
+      // If the top-most popup was opened with the SAME text, ignore this trigger.
+      // This happens when clicking UI elements inside the popup (like select dropdowns) 
+      // where the 'click inside' check might fail but the original page text is still selected.
+      if (activePopups.length > 0) {
+        const topPopup = activePopups[activePopups.length - 1];
+        if (topPopup.sourceText === selectedText) {
+          // It's the same selection. Assume user is interacting with existing popup.
+          return;
+        }
+      }
+
       initiatePopupSequence(selectionRect, selectedText);
     }
   } else {
@@ -164,6 +177,9 @@ function initiatePopupSequence(rect, selectedText) {
   // Create a new popup instance
   // Note: we track the instance object to manage its state updates
   const popupInstance = showPopup(rect.left, rect.top, "Loading...");
+
+  // --- NEW: Store the source text to prevent duplicate triggers ---
+  popupInstance.sourceText = selectedText;
 
   chrome.runtime.sendMessage({ type: "getAiDefinition", word: selectedText }, (response) => {
     // Verify instance still exists (user might have closed it)
