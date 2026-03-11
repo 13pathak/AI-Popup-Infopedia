@@ -15,6 +15,9 @@ const popupStyles = `
     font-size: 14px;
     line-height: 1.5;
     max-width: 350px;
+    max-height: 85vh; /* Keep the popup within screen bounds */
+    display: flex;
+    flex-direction: column;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
     pointer-events: auto; /* Re-enable pointer events for the popup itself */
     z-index: 1; /* z-index is now relative to its container */
@@ -43,7 +46,8 @@ const popupStyles = `
 
   /* Wrapper for the AI-generated text */
   #ai-popup-content {
-    /* no styles needed, but useful for structure */
+    overflow-y: auto; /* Scroll if content overflows */
+    padding-right: 5px; /* Spacing for the scrollbar */
   }
 
   /* --- STYLES FOR BUTTONS --- */
@@ -85,6 +89,46 @@ const popupStyles = `
   }
   #ai-popup-speak-btn:hover {
     color: #80cbc4;
+  }
+
+  /* --- NEW: Follow-up Prompt --- */
+  #ai-popup-followup-container {
+    display: flex;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid #555;
+    gap: 8px;
+  }
+  
+  #ai-popup-followup-input {
+    flex-grow: 1;
+    background-color: #444;
+    color: #eee;
+    border: 1px solid #666;
+    border-radius: 4px;
+    padding: 6px 10px;
+    font-family: sans-serif;
+    font-size: 13px;
+    outline: none;
+  }
+  
+  #ai-popup-followup-input::placeholder {
+    color: #aaa;
+  }
+
+  .ai-popup-followup-send {
+    background: #4db6ac;
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    padding: 6px 12px;
+    cursor: pointer;
+    font-weight: bold;
+    font-size: 13px;
+  }
+
+  .ai-popup-followup-send:hover {
+    background: #62c3b8;
   }
 `;
 
@@ -181,26 +225,62 @@ function initiatePopupSequence(rect, selectedText) {
   // --- NEW: Store the source text to prevent duplicate triggers ---
   popupInstance.sourceText = selectedText;
 
-  chrome.runtime.sendMessage({ type: "getAiDefinition", word: selectedText }, (response) => {
-    // Verify instance still exists (user might have closed it)
-    if (!activePopups.includes(popupInstance)) return;
-
-    const popupEl = popupInstance.popup;
-
-    if (response && response.models && response.models.length > 0) {
-      createSelectors(popupInstance, response.models, response.customPrompts, response.defaultModelId, null, selectedText, response.defaultPromptId);
+  function performInitialFetch() {
+    updatePopupContent(popupInstance, "Loading...");
+    
+    // Remove old action buttons if retrying
+    if (popupInstance.popup) {
+      const actions = popupInstance.popup.querySelector('.ai-popup-actions');
+      if (actions) actions.remove();
     }
 
-    const definitionText = (response && response.error) ? response.error : (response ? response.definition : "Error resolving definition");
+    chrome.runtime.sendMessage({ type: "getAiDefinition", word: selectedText }, (response) => {
+      // Verify instance still exists (user might have closed it)
+      if (!activePopups.includes(popupInstance)) return;
 
-    updatePopupContent(popupInstance, definitionText);
+      const popupEl = popupInstance.popup;
 
-    if (response && !response.error) {
-      const modelName = response.models.find(m => m.id === response.defaultModelId)?.name || 'Unknown Model';
-      createActionButtons(popupInstance, selectedText, definitionText, modelName, response.promptName);
-    }
-    adjustPopupPosition(popupInstance, rect);
-  });
+      if (response && response.models && response.models.length > 0) {
+        createSelectors(popupInstance, response.models, response.customPrompts, response.defaultModelId, null, selectedText, response.defaultPromptId);
+      }
+
+      if (response && response.error) {
+        const errorId = 'error-' + Date.now();
+        const errorHtml = `<span style="color:red;">Error: ${response.error}</span> <button id="${errorId}-retry" class="ai-popup-retry-btn" style="background:#4db6ac; color:white; border:none; border-radius:3px; cursor:pointer; padding:2px 6px; font-size:11px; margin-left:5px;">Reload</button>`;
+        updatePopupContent(popupInstance, errorHtml);
+        
+        // Wait a tick for innerHTML to parse
+        setTimeout(() => {
+          if (popupInstance.popup) {
+            const retryBtn = popupInstance.popup.querySelector(`#${errorId}-retry`);
+            if (retryBtn) {
+              retryBtn.addEventListener('click', () => {
+                performInitialFetch();
+              });
+            }
+          }
+        }, 0);
+      } else {
+        const definitionText = response ? response.definition : "Error resolving definition";
+
+        // --- NEW: Initialize conversation history ---
+        if (response && response.usedPrompt) {
+           popupInstance.messages = [
+             { role: 'user', content: response.usedPrompt },
+             { role: 'assistant', content: response.definition }
+           ];
+        }
+
+        updatePopupContent(popupInstance, definitionText);
+
+        const modelName = response.models.find(m => m.id === response.defaultModelId)?.name || 'Unknown Model';
+        createActionButtons(popupInstance, selectedText, definitionText, modelName, response.promptName);
+      }
+      adjustPopupPosition(popupInstance, rect);
+    });
+  }
+
+  performInitialFetch();
 }
 
 
@@ -288,7 +368,8 @@ function showPopup(x, y, content) {
     popup: popup, // The inner div
     shadow: shadow,
     isInteracting: false,
-    isClickInside: false
+    isClickInside: false,
+    messages: []
   };
 
   activePopups.push(instance);
@@ -309,6 +390,27 @@ function updatePopupContent(instance, content) {
 
     // Set the formatted HTML
     contentWrapper.innerHTML = formattedContent;
+  }
+}
+
+// --- NEW appendPopupContent ---
+function appendPopupContent(instance, role, content) {
+  const popup = instance.popup;
+  if (!popup) return;
+
+  const contentWrapper = popup.querySelector('#ai-popup-content');
+  if (contentWrapper) {
+    let formattedContent = content.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    formattedContent = formattedContent.replace(/\n/g, '<br>');
+
+    const roleName = role === 'user' ? 'You' : 'AI';
+    const color = role === 'user' ? '#90caf9' : '#a5d6a7';
+    contentWrapper.insertAdjacentHTML('beforeend', `<div style="margin-top: 12px;"><strong style="color: ${color};">${roleName}:</strong> ${formattedContent}</div>`);
+    
+    // Automatically scroll to bottom if it overflows
+    if (contentWrapper.scrollHeight > contentWrapper.clientHeight) {
+       contentWrapper.scrollTop = contentWrapper.scrollHeight;
+    }
   }
 }
 
@@ -404,42 +506,64 @@ function redefineWithModelAndPrompt(instance, word, modelId, promptContent) {
   // Set the interaction flag
   instance.isInteracting = true;
 
-  // Update UI to show loading state
-  updatePopupContent(instance, "Loading...");
-  // Remove old action buttons
-  const actions = popup.querySelector('.ai-popup-actions');
-  if (actions) actions.remove();
+  function performRedefineFetch() {
+    // Update UI to show loading state
+    updatePopupContent(instance, "Loading...");
+    // Remove old action buttons
+    const actions = popup.querySelector('.ai-popup-actions');
+    if (actions) actions.remove();
 
-  // Send message to background
-  chrome.runtime.sendMessage(
-    { type: "getAiDefinition", word: word, modelId: modelId, customPrompt: promptContent },
-    (response) => {
-      if (!activePopups.includes(instance)) return;
+    // Send message to background
+    chrome.runtime.sendMessage(
+      { type: "getAiDefinition", word: word, modelId: modelId, customPrompt: promptContent },
+      (response) => {
+        if (!activePopups.includes(instance)) return;
 
-      // 1. Re-create selectors
-      if (response.models && response.models.length > 0) {
-        createSelectors(instance, response.models, response.customPrompts, modelId, promptContent, word, response.defaultPromptId);
+        // 1. Re-create selectors
+        if (response && response.models && response.models.length > 0) {
+          createSelectors(instance, response.models, response.customPrompts, modelId, promptContent, word, response.defaultPromptId);
+        }
+
+        if (response && response.error) {
+          const errorId = 'error-' + Date.now();
+          const errorHtml = `<span style="color:red;">Error: ${response.error}</span> <button id="${errorId}-retry" class="ai-popup-retry-btn" style="background:#4db6ac; color:white; border:none; border-radius:3px; cursor:pointer; padding:2px 6px; font-size:11px; margin-left:5px;">Reload</button>`;
+          updatePopupContent(instance, errorHtml);
+          
+          setTimeout(() => {
+            if (popup) {
+              const retryBtn = popup.querySelector(`#${errorId}-retry`);
+              if (retryBtn) {
+                retryBtn.addEventListener('click', () => {
+                  performRedefineFetch();
+                });
+              }
+            }
+          }, 0);
+        } else {
+          // Update the definition
+          const definitionText = response ? response.definition : "Error resolving definition";
+          
+          if (response && response.usedPrompt) {
+             instance.messages = [
+               { role: 'user', content: response.usedPrompt },
+               { role: 'assistant', content: response.definition }
+             ];
+          }
+
+          updatePopupContent(instance, definitionText);
+
+          // Re-create the save button after model change
+          const modelName = response.models.find(m => m.id === modelId)?.name || 'Unknown Model';
+          createActionButtons(instance, word, definitionText, modelName, response.promptName);
+        }
+
+        // Reset the flag
+        setTimeout(() => { instance.isInteracting = false; }, 100);
       }
+    );
+  }
 
-      // Update the definition
-      const definitionText = response.error ? response.error : response.definition;
-      updatePopupContent(instance, definitionText);
-
-      // Re-create the save button after model change
-      if (!response.error) {
-        const modelName = response.models.find(m => m.id === modelId)?.name || 'Unknown Model';
-        createActionButtons(instance, word, definitionText, modelName, response.promptName);
-      }
-
-      // We don't automatically adjust position on redefine to prevent jumping, 
-      // but if size changes significantly we might need to. 
-      // For now, let's keep it in place or just ensure it stays within bounds.
-      // adjustPopupPosition(instance, ...); 
-
-      // Reset the flag
-      setTimeout(() => { instance.isInteracting = false; }, 100);
-    }
-  );
+  performRedefineFetch();
 }
 
 // --- UPDATED to accept instance ---
@@ -623,6 +747,138 @@ function createActionButtons(instance, word, definition, modelName, promptName) 
 
   // Add the container to the popup
   popup.appendChild(actionsContainer);
+  
+  // --- NEW: Add Follow-up Input ---
+  createFollowupInput(instance, word);
+}
+
+// --- NEW Function to construct the follow-up input container ---
+function createFollowupInput(instance, word) {
+  const popup = instance.popup;
+  if (!popup) return;
+
+  // Cleanup if already exists
+  const existingContainer = popup.querySelector('#ai-popup-followup-container');
+  if (existingContainer) existingContainer.remove();
+
+  const container = document.createElement('div');
+  container.id = 'ai-popup-followup-container';
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.id = 'ai-popup-followup-input';
+  input.placeholder = 'Ask a follow-up question...';
+
+  const sendBtn = document.createElement('button');
+  sendBtn.className = 'ai-popup-followup-send';
+  sendBtn.textContent = 'Send';
+
+  container.appendChild(input);
+  container.appendChild(sendBtn);
+  popup.appendChild(container);
+
+  // Interaction handlers to avoid popup closing while typing
+  input.addEventListener('focus', () => { instance.isInteracting = true; });
+  input.addEventListener('blur', () => { setTimeout(() => { instance.isInteracting = false; }, 200); });
+  input.addEventListener('keydown', (e) => {
+    e.stopPropagation(); // Avoid triggering window hotkeys
+    if (e.key === 'Escape') {
+      input.blur();
+      instance.isInteracting = false;
+    }
+    if (e.key === 'Enter') {
+      submitFollowup();
+    }
+  });
+
+  sendBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    submitFollowup();
+  });
+
+  function submitFollowup() {
+    const text = input.value.trim();
+    if (!text) return;
+
+    input.value = ''; // clear
+    input.disabled = true;
+    sendBtn.disabled = true;
+
+    // Append to UI
+    appendPopupContent(instance, 'user', text);
+
+    // Fetch custom follow-up message setting and append if exists
+    chrome.storage.sync.get({ followupCustomMessage: '' }, (settings) => {
+      let promptToSend = text;
+      if (settings.followupCustomMessage && settings.followupCustomMessage.trim() !== '') {
+         promptToSend += '\n\n' + settings.followupCustomMessage;
+      }
+
+      // Add to history
+      instance.messages.push({ role: 'user', content: promptToSend });
+
+      performFetch();
+    });
+  }
+
+  function performFetch() {
+    input.disabled = true;
+    sendBtn.disabled = true;
+
+    // Add thinking text WITHOUT the 'AI:' prefix to avoid duplication later
+    const contentWrapper = popup.querySelector('#ai-popup-content');
+    if (contentWrapper) {
+      contentWrapper.insertAdjacentHTML('beforeend', `<div id="ai-thinking-indicator" style="margin-top: 12px; color: #aaa;"><i>Thinking...</i></div>`);
+      if (contentWrapper.scrollHeight > contentWrapper.clientHeight) {
+        contentWrapper.scrollTop = contentWrapper.scrollHeight;
+      }
+    }
+
+    const selectedModelOpt = popup.querySelector('#ai-popup-model-selector');
+    const modelId = selectedModelOpt ? selectedModelOpt.value : null;
+
+    chrome.runtime.sendMessage(
+      { type: "getAiDefinition", word: word, modelId: modelId, messages: instance.messages },
+      (response) => {
+        if (!activePopups.includes(instance)) return;
+
+        input.disabled = false;
+        sendBtn.disabled = false;
+        input.focus();
+
+        // Find and clean the "Thinking..." node
+        if (contentWrapper) {
+          const thinkingIndicator = contentWrapper.querySelector('#ai-thinking-indicator');
+          if (thinkingIndicator) {
+             thinkingIndicator.remove();
+          }
+        }
+
+        if (response && !response.error) {
+          appendPopupContent(instance, 'assistant', response.definition);
+          instance.messages.push({ role: 'assistant', content: response.definition });
+        } else {
+          // Add error message with retry button
+          const errorId = 'error-' + Date.now();
+          const errorHtml = `<div id="${errorId}" style="margin-top: 12px;"><strong style="color: #a5d6a7;">AI:</strong> <span style="color:red;">Error: ${response?.error || 'Unknown error'}</span> <button class="ai-popup-retry-btn" style="background:#4db6ac; color:white; border:none; border-radius:3px; cursor:pointer; padding:2px 6px; font-size:11px; margin-left:5px;">Reload</button></div>`;
+          if (contentWrapper) {
+            contentWrapper.insertAdjacentHTML('beforeend', errorHtml);
+            if (contentWrapper.scrollHeight > contentWrapper.clientHeight) {
+              contentWrapper.scrollTop = contentWrapper.scrollHeight;
+            }
+            const retryBtn = contentWrapper.querySelector(`#${errorId} .ai-popup-retry-btn`);
+            if (retryBtn) {
+              retryBtn.addEventListener('click', () => {
+                 const errNode = contentWrapper.querySelector(`#${errorId}`);
+                 if (errNode) errNode.remove();
+                 performFetch();
+              });
+            }
+          }
+        }
+      }
+    );
+  }
 }
 
 
@@ -715,38 +971,8 @@ function adjustPopupPosition(instance, selectionRect) {
 
   if (instance.isInteracting) return;
 
-  // We rely on the initial selectionRect passed to init, 
-  // or we could possibly re-measure if we tracked the range.
-  // The passed `selectionRect` is static (snapshot at mouseup).
-  // Ideally, if the user scrolls, the popup is 'fixed', so it stays on screen, but it might drift from text.
-  // The original implementation used 'fixed' and 'mousedown' closing logic, effectively behaving like a modal tooltip.
-
-  const popupRect = popup.getBoundingClientRect();
-  const viewportWidth = window.innerWidth;
-  // const viewportHeight = window.innerHeight; // unused
-
-  let newLeft = selectionRect.left; // Start with selection's left
-  let newTop;
-
-  // --- DYNAMIC VERTICAL PLACEMENT (VIEWPORT-RELATIVE) ---
-  // Check if there's enough space *above* the selection
-  if (selectionRect.top > popupRect.height + 10) {
-    // Yes, place it ABOVE
-    newTop = selectionRect.top - popupRect.height - 10; // 10px padding
-  } else {
-    // No, place it BELOW
-    newTop = selectionRect.bottom + 10; // 10px padding
-  }
-
-  // --- Horizontal Adjustment ---
-  if (newLeft + popupRect.width > viewportWidth - 10) {
-    newLeft = viewportWidth - popupRect.width - 10;
-  }
-  if (newLeft < 10) {
-    newLeft = 10;
-  }
-
-  // Apply final positions (NO scrollX/scrollY needed!)
-  popup.style.left = `${newLeft}px`;
-  popup.style.top = `${newTop}px`;
+  // Render the popup box at a fixed top right corner
+  popup.style.top = '20px';
+  popup.style.right = '20px';
+  popup.style.left = 'auto'; // Clear out the previously set left property
 }

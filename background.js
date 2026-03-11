@@ -67,7 +67,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       // Create the OpenAI-style payload
       const payload = {
         "model": modelName,
-        "messages": [
+        "messages": request.messages || [
           {
             "role": "user",
             "content": prompt
@@ -117,7 +117,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         const data = await response.json();
         const aiText = data.choices[0].message.content;
 
-        sendResponse({ definition: aiText, models: models, defaultModelId: defaultModelId, customPrompts: customPrompts || [], defaultPromptId: defaultPromptId, promptName: promptName });
+        sendResponse({ definition: aiText, usedPrompt: prompt, models: models, defaultModelId: defaultModelId, customPrompts: customPrompts || [], defaultPromptId: defaultPromptId, promptName: promptName });
 
       } catch (error) {
         console.error("AI API call failed:", error);

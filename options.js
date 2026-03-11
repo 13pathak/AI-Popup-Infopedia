@@ -51,6 +51,7 @@ document.addEventListener('DOMContentLoaded', () => {
   loadDefaultPromptSelect(); // Load default prompt selector
   loadAnkiSettings(); // Load saved Anki settings on page load
   loadReminderSettings(); // Load saved Reminder settings on page load
+  loadFollowupSettings(); // Load follow-up custom message
 
   // Helper helper to safely add listeners
   function safeAddListener(id, event, handler) {
@@ -70,6 +71,7 @@ document.addEventListener('DOMContentLoaded', () => {
   safeAddListener('save-model-btn', 'click', saveModel);
   safeAddListener('default-prompt-select', 'change', (e) => saveDefaultPromptId(e.target.value));
   safeAddListener('cancel-model-btn', 'click', hideModelForm);
+  safeAddListener('save-followup-settings-btn', 'click', saveFollowupSettings);
 
   safeAddListener('export-history', 'click', exportHistory);
   safeAddListener('import-history', 'click', () => document.getElementById('import-file-input').click());
@@ -304,6 +306,26 @@ function setDefaultModel(modelId) {
 function saveDefaultPromptId(promptId) {
   chrome.storage.sync.set({ defaultPromptId: promptId }, () => {
     updateStatus('Default prompt updated.', 'success');
+  });
+}
+
+function saveFollowupSettings() {
+  const customMessage = document.getElementById('followup-custom-message').value;
+  chrome.storage.sync.set({ followupCustomMessage: customMessage }, () => {
+    const statusEl = document.getElementById('followup-status');
+    statusEl.textContent = 'Follow-up settings saved successfully!';
+    statusEl.style.color = '#5cb85c';
+    setTimeout(() => {
+      statusEl.textContent = '';
+    }, 3000);
+  });
+}
+
+function loadFollowupSettings() {
+  chrome.storage.sync.get(['followupCustomMessage'], (data) => {
+    if (data.followupCustomMessage !== undefined) {
+      document.getElementById('followup-custom-message').value = data.followupCustomMessage;
+    }
   });
 }
 

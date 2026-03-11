@@ -582,6 +582,16 @@
             <input type="file" id="import-settings-file-input" accept=".json" style="display: none;">
             <div id="global-io-status" style="margin-top: 10px; font-weight: bold; min-height: 1em;"></div>
         </div>
+        
+        <div id="followup-settings-container"
+            style="margin-top: 30px; padding-top: 20px; border-top: 1px solid var(--border-color);">
+            <h3 style="color: var(--primary-color); margin-top: 0;">Follow-up Settings</h3>
+            <label for="followup-custom-message">Custom Follow-up Message</label>
+            <textarea id="followup-custom-message" rows="3" placeholder="e.g., restrict your reply within 500 characters"></textarea>
+            <small style="display: block; margin-top: 5px;">This message will be automatically appended to every subsequent question you ask in the popup.</small>
+            <button id="save-followup-settings-btn" style="margin-top: 10px; background-color: var(--secondary-color);">Save Follow-up Settings</button>
+            <div id="followup-status" style="margin-top: 10px; font-weight: bold; min-height: 1em;"></div>
+        </div>
 
         <div id="status"></div>
     </div>
