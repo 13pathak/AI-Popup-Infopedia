@@ -64,15 +64,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
       const prompt = promptTemplate.replace('{word}', word);
 
+      // Sanitize the messages array for strict API compatibility
+      let safeMessagesText = [];
+      if (request.messages && Array.isArray(request.messages)) {
+         safeMessagesText = request.messages.map(m => ({ role: m.role, content: m.content }));
+      } else {
+         safeMessagesText = [{ role: "user", content: prompt }];
+      }
+
       // Create the OpenAI-style payload
       const payload = {
         "model": modelName,
-        "messages": request.messages || [
-          {
-            "role": "user",
-            "content": prompt
-          }
-        ],
+        "messages": safeMessagesText,
         "stream": false
       };
 

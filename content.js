@@ -247,7 +247,12 @@ function initiatePopupSequence(rect, selectedText) {
       if (response && response.error) {
         const errorId = 'error-' + Date.now();
         const errorHtml = `<span style="color:red;">Error: ${response.error}</span> <button id="${errorId}-retry" class="ai-popup-retry-btn" style="background:#4db6ac; color:white; border:none; border-radius:3px; cursor:pointer; padding:2px 6px; font-size:11px; margin-left:5px;">Reload</button>`;
-        updatePopupContent(popupInstance, errorHtml);
+        
+        // Temporarily put error in messages to render it
+        instance.messages = [
+           { role: 'assistant', content: errorHtml, isError: true }
+        ];
+        renderMessages(popupInstance);
         
         // Wait a tick for innerHTML to parse
         setTimeout(() => {
@@ -269,9 +274,13 @@ function initiatePopupSequence(rect, selectedText) {
              { role: 'user', content: response.usedPrompt },
              { role: 'assistant', content: response.definition }
            ];
+        } else {
+           popupInstance.messages = [
+             { role: 'assistant', content: definitionText }
+           ];
         }
 
-        updatePopupContent(popupInstance, definitionText);
+        renderMessages(popupInstance);
 
         const modelName = response.models.find(m => m.id === response.defaultModelId)?.name || 'Unknown Model';
         createActionButtons(popupInstance, selectedText, definitionText, modelName, response.promptName);
@@ -376,42 +385,117 @@ function showPopup(x, y, content) {
   return instance;
 }
 
-// --- UPDATED updatePopupContent ---
-function updatePopupContent(instance, content) {
+// --- NEW: renderMessages maps state to UI ---
+function renderMessages(instance) {
   const popup = instance.popup;
   if (!popup) return;
 
   const contentWrapper = popup.querySelector('#ai-popup-content');
-  if (contentWrapper) {
-    // Convert Markdown bold (**) to HTML <strong>
-    let formattedContent = content.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-    // Convert newlines to <br>
-    formattedContent = formattedContent.replace(/\n/g, '<br>');
+  if (!contentWrapper) return;
 
-    // Set the formatted HTML
-    contentWrapper.innerHTML = formattedContent;
-  }
-}
+  // Clear existing content
+  contentWrapper.innerHTML = '';
 
-// --- NEW appendPopupContent ---
-function appendPopupContent(instance, role, content) {
-  const popup = instance.popup;
-  if (!popup) return;
+  try {
+    instance.messages.forEach((msg, index) => {
+      let formattedContent = msg.displayContent || msg.content || "";
+      
+      // Defensively stringify to avoid replace() crashes on unexpected types
+      formattedContent = String(formattedContent);
+      
+      // Only format markdown if it's not an already HTML styled error/thinking message
+      if (!msg.isError && !msg.isThinking && !msg.needsRetry) {
+        formattedContent = formattedContent.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+        formattedContent = formattedContent.replace(/\n/g, '<br>');
+      }
 
-  const contentWrapper = popup.querySelector('#ai-popup-content');
-  if (contentWrapper) {
-    let formattedContent = content.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-    formattedContent = formattedContent.replace(/\n/g, '<br>');
+      if (index === 0 && instance.messages.length <= 2 && !msg.isError && msg.role !== 'user') {
+        // If it's the very first main definition (and no user prompt is shown), don't prefix with You:/AI:
+        contentWrapper.insertAdjacentHTML('beforeend', `<div>${formattedContent}</div>`);
+      } else {
+        // Conversational flow UI
+        const roleName = msg.role === 'user' ? 'You' : 'AI';
+        const color = msg.role === 'user' ? '#90caf9' : '#a5d6a7';
+        
+        let html = '';
+        if (msg.needsRetry) {
+          // Output a retry button instead of the message content
+          const retryBtnId = `retry-msg-${index}`;
+          const targetModelName = instance.lastModelName || 'New Model';
+          html = `<div style="margin-top: 12px; font-style: italic; color: #888;">
+                    <strong style="color: ${color};">${roleName}:</strong>
+                    <div style="margin-top: 5px;">
+                       <button id="${retryBtnId}" class="ai-popup-retry-btn" style="background:#4db6ac; color:white; border:none; border-radius:3px; cursor:pointer; padding:4px 8px; font-size:12px;">
+                         🔄 Retry with ${targetModelName}
+                       </button>
+                    </div>
+                  </div>`;
+                  
+          contentWrapper.insertAdjacentHTML('beforeend', html);
+          
+          // Attach listener
+          setTimeout(() => {
+             const btn = contentWrapper.querySelector(`#${retryBtnId}`);
+             if (btn) {
+                btn.addEventListener('click', () => {
+                   retryMessage(instance, index);
+                });
+             }
+          }, 0);
+        } else {
+          html = `<div style="margin-top: 12px;"><strong style="color: ${color};">${roleName}:</strong> ${formattedContent}</div>`;
+          contentWrapper.insertAdjacentHTML('beforeend', html);
+        }
+      }
+    });
 
-    const roleName = role === 'user' ? 'You' : 'AI';
-    const color = role === 'user' ? '#90caf9' : '#a5d6a7';
-    contentWrapper.insertAdjacentHTML('beforeend', `<div style="margin-top: 12px;"><strong style="color: ${color};">${roleName}:</strong> ${formattedContent}</div>`);
-    
     // Automatically scroll to bottom if it overflows
     if (contentWrapper.scrollHeight > contentWrapper.clientHeight) {
        contentWrapper.scrollTop = contentWrapper.scrollHeight;
     }
+  } catch (err) {
+    console.error("Popup render loop crashed:", err);
+    contentWrapper.insertAdjacentHTML('beforeend', `<div style="color: red;">Error rendering messages: ${err.message}</div>`);
   }
+}
+
+// Temporary compatibility function
+function updatePopupContent(instance, content) {
+  instance.messages = [{ role: 'assistant', content: content, isError: true }];
+  renderMessages(instance);
+}
+
+// --- NEW logic to handle Retrying a message ---
+function retryMessage(instance, messageIndex) {
+  if (!activePopups.includes(instance)) return;
+
+  // The conversation context we send should be everything UP TO the user's prompt (which is messageIndex - 1)
+  // because we are rewriting the assistant's previous answer at `messageIndex`.
+  const messagesContext = instance.messages.slice(0, messageIndex);
+  
+  // Set the message state to loading
+  instance.messages[messageIndex] = { role: 'assistant', content: '<i>Thinking...</i>', isError: false, needsRetry: false };
+  renderMessages(instance);
+
+  const modelId = instance.lastModelId || null;
+
+  chrome.runtime.sendMessage(
+    { type: "getAiDefinition", word: instance.sourceWord, modelId: modelId, messages: messagesContext },
+    (response) => {
+      if (!activePopups.includes(instance)) return;
+
+      if (response && !response.error) {
+        instance.messages[messageIndex] = { role: 'assistant', content: response.definition, isError: false, needsRetry: false };
+      } else {
+        instance.messages[messageIndex] = { 
+           role: 'assistant', 
+           content: `<span style="color:red;">Error retrying message: ${response?.error || 'Unknown error'}</span>`, 
+           isError: true 
+        };
+      }
+      renderMessages(instance);
+    }
+  );
 }
 
 // --- Function to create the model and prompt selectors ---
@@ -507,8 +591,10 @@ function redefineWithModelAndPrompt(instance, word, modelId, promptContent) {
   instance.isInteracting = true;
 
   function performRedefineFetch() {
-    // Update UI to show loading state
-    updatePopupContent(instance, "Loading...");
+    // Update UI to show loading state by adding a thinking indicator
+    instance.messages.push({ role: 'assistant', content: '<i style="color: #aaa;">Reloading model definition...</i>', isThinking: true });
+    try { renderMessages(instance); } catch (e) { console.error('crash in pre redfr', e); }
+    
     // Remove old action buttons
     const actions = popup.querySelector('.ai-popup-actions');
     if (actions) actions.remove();
@@ -518,6 +604,9 @@ function redefineWithModelAndPrompt(instance, word, modelId, promptContent) {
       { type: "getAiDefinition", word: word, modelId: modelId, customPrompt: promptContent },
       (response) => {
         if (!activePopups.includes(instance)) return;
+        
+        // Remove the temporary thinking indicator
+        instance.messages = instance.messages.filter(m => !m.isThinking);
 
         // 1. Re-create selectors
         if (response && response.models && response.models.length > 0) {
@@ -527,7 +616,12 @@ function redefineWithModelAndPrompt(instance, word, modelId, promptContent) {
         if (response && response.error) {
           const errorId = 'error-' + Date.now();
           const errorHtml = `<span style="color:red;">Error: ${response.error}</span> <button id="${errorId}-retry" class="ai-popup-retry-btn" style="background:#4db6ac; color:white; border:none; border-radius:3px; cursor:pointer; padding:2px 6px; font-size:11px; margin-left:5px;">Reload</button>`;
-          updatePopupContent(instance, errorHtml);
+          
+          // Temporarily put error in messages to render it
+          instance.messages = [
+             { role: 'assistant', content: errorHtml, isError: true }
+          ];
+          renderMessages(instance);
           
           setTimeout(() => {
             if (popup) {
@@ -542,18 +636,41 @@ function redefineWithModelAndPrompt(instance, word, modelId, promptContent) {
         } else {
           // Update the definition
           const definitionText = response ? response.definition : "Error resolving definition";
+          const modelName = response.models.find(m => m.id === modelId)?.name || 'Unknown Model';
           
           if (response && response.usedPrompt) {
+             // Instead of wiping the array, rebuild/modify the existing messages.
+             // If we already have follow-ups, preserve them.
+             if (instance.messages && instance.messages.length > 2) {
+                instance.messages[0] = { role: 'user', content: response.usedPrompt };
+                instance.messages[1] = { role: 'assistant', content: response.definition };
+                
+                // Flag subsequent AI messages as needing retry
+                instance.lastModelId = modelId;
+                instance.lastModelName = modelName;
+                instance.lastPromptContent = promptContent;
+                instance.sourceWord = word;
+                
+                for (let i = 2; i < instance.messages.length; i++) {
+                   if (instance.messages[i].role === 'assistant') {
+                      instance.messages[i].needsRetry = true;
+                   }
+                }
+             } else {
+                instance.messages = [
+                  { role: 'user', content: response.usedPrompt },
+                  { role: 'assistant', content: response.definition }
+                ];
+             }
+          } else {
              instance.messages = [
-               { role: 'user', content: response.usedPrompt },
-               { role: 'assistant', content: response.definition }
+                { role: 'assistant', content: definitionText }
              ];
           }
 
-          updatePopupContent(instance, definitionText);
+          renderMessages(instance);
 
           // Re-create the save button after model change
-          const modelName = response.models.find(m => m.id === modelId)?.name || 'Unknown Model';
           createActionButtons(instance, word, definitionText, modelName, response.promptName);
         }
 
@@ -804,9 +921,6 @@ function createFollowupInput(instance, word) {
     input.disabled = true;
     sendBtn.disabled = true;
 
-    // Append to UI
-    appendPopupContent(instance, 'user', text);
-
     // Fetch custom follow-up message setting and append if exists
     chrome.storage.sync.get({ followupCustomMessage: '' }, (settings) => {
       let promptToSend = text;
@@ -814,9 +928,9 @@ function createFollowupInput(instance, word) {
          promptToSend += '\n\n' + settings.followupCustomMessage;
       }
 
-      // Add to history
-      instance.messages.push({ role: 'user', content: promptToSend });
-
+      // Add to history (use displayContent to hide the hidden prompt rule from the popup UI)
+      instance.messages.push({ role: 'user', content: promptToSend, displayContent: text });
+      
       performFetch();
     });
   }
@@ -825,20 +939,19 @@ function createFollowupInput(instance, word) {
     input.disabled = true;
     sendBtn.disabled = true;
 
-    // Add thinking text WITHOUT the 'AI:' prefix to avoid duplication later
-    const contentWrapper = popup.querySelector('#ai-popup-content');
-    if (contentWrapper) {
-      contentWrapper.insertAdjacentHTML('beforeend', `<div id="ai-thinking-indicator" style="margin-top: 12px; color: #aaa;"><i>Thinking...</i></div>`);
-      if (contentWrapper.scrollHeight > contentWrapper.clientHeight) {
-        contentWrapper.scrollTop = contentWrapper.scrollHeight;
-      }
+    try {
+      // Push thinking indicator and render to UI immediately
+      instance.messages.push({ role: 'assistant', content: '<i style="color: #aaa;">Thinking...</i>', isThinking: true });
+      renderMessages(instance);
+    } catch (e) {
+      console.error("render crashed on pre-fetch", e);
     }
 
     const selectedModelOpt = popup.querySelector('#ai-popup-model-selector');
     const modelId = selectedModelOpt ? selectedModelOpt.value : null;
 
     chrome.runtime.sendMessage(
-      { type: "getAiDefinition", word: word, modelId: modelId, messages: instance.messages },
+      { type: "getAiDefinition", word: word, modelId: modelId, messages: instance.messages.filter(m => !m.isThinking) },
       (response) => {
         if (!activePopups.includes(instance)) return;
 
@@ -846,35 +959,37 @@ function createFollowupInput(instance, word) {
         sendBtn.disabled = false;
         input.focus();
 
-        // Find and clean the "Thinking..." node
-        if (contentWrapper) {
-          const thinkingIndicator = contentWrapper.querySelector('#ai-thinking-indicator');
-          if (thinkingIndicator) {
-             thinkingIndicator.remove();
-          }
-        }
+        // Remove the loading indicator
+        instance.messages = instance.messages.filter(m => !m.isThinking);
 
         if (response && !response.error) {
-          appendPopupContent(instance, 'assistant', response.definition);
           instance.messages.push({ role: 'assistant', content: response.definition });
         } else {
-          // Add error message with retry button
+          // Add error message with retry button to history
           const errorId = 'error-' + Date.now();
-          const errorHtml = `<div id="${errorId}" style="margin-top: 12px;"><strong style="color: #a5d6a7;">AI:</strong> <span style="color:red;">Error: ${response?.error || 'Unknown error'}</span> <button class="ai-popup-retry-btn" style="background:#4db6ac; color:white; border:none; border-radius:3px; cursor:pointer; padding:2px 6px; font-size:11px; margin-left:5px;">Reload</button></div>`;
-          if (contentWrapper) {
-            contentWrapper.insertAdjacentHTML('beforeend', errorHtml);
-            if (contentWrapper.scrollHeight > contentWrapper.clientHeight) {
-              contentWrapper.scrollTop = contentWrapper.scrollHeight;
+          const errorHtml = `<span style="color:red;">Error: ${response?.error || 'Unknown error'}</span> <button id="${errorId}-retry" class="ai-popup-retry-btn" style="background:#4db6ac; color:white; border:none; border-radius:3px; cursor:pointer; padding:2px 6px; font-size:11px; margin-left:5px;">Reload</button>`;
+          instance.messages.push({ role: 'assistant', content: errorHtml, isError: true, errorId: errorId });
+        }
+
+        try {
+          renderMessages(instance);
+        } catch(e) { console.error("render crashed on post-fetch", e); }
+
+        // Setup the error retry button
+        if (response && response.error) {
+          setTimeout(() => {
+            const lastMsg = instance.messages[instance.messages.length - 1];
+            if (lastMsg && lastMsg.errorId) {
+              const retryBtn = popup.querySelector(`#${lastMsg.errorId}-retry`);
+              if (retryBtn) {
+                retryBtn.addEventListener('click', () => {
+                   // Pop off the error
+                   instance.messages.pop();
+                   performFetch();
+                });
+              }
             }
-            const retryBtn = contentWrapper.querySelector(`#${errorId} .ai-popup-retry-btn`);
-            if (retryBtn) {
-              retryBtn.addEventListener('click', () => {
-                 const errNode = contentWrapper.querySelector(`#${errorId}`);
-                 if (errNode) errNode.remove();
-                 performFetch();
-              });
-            }
-          }
+          }, 0);
         }
       }
     );
