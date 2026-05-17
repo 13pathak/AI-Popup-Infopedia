@@ -130,6 +130,26 @@ const popupStyles = `
   .ai-popup-followup-send:hover {
     background: #62c3b8;
   }
+
+  /* --- NEW: Open Button Popup --- */
+  #ai-open-button-popup {
+    position: fixed;
+    background-color: #4db6ac;
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    padding: 6px 12px;
+    font-family: sans-serif;
+    font-size: 13px;
+    font-weight: bold;
+    cursor: pointer;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+    pointer-events: auto;
+    z-index: 1;
+  }
+  #ai-open-button-popup:hover {
+    background-color: #62c3b8;
+  }
 `;
 
 // --- Main mouseup listener ---
@@ -158,7 +178,7 @@ document.addEventListener('mouseup', (event) => {
     if (wordCount > 0 && wordCount <= 6) {
       // Reset flags to avoid sticking
       activePopups.forEach(p => { p.isClickInside = false; p.isInteracting = false; });
-      initiatePopupSequence(selectionRect, selectedText);
+      showOpenButtonPopup(selectionRect, selectedText);
       return;
     }
   }
@@ -196,7 +216,7 @@ document.addEventListener('mouseup', (event) => {
         }
       }
 
-      initiatePopupSequence(selectionRect, selectedText);
+      showOpenButtonPopup(selectionRect, selectedText);
     }
   } else {
     // No text selected anywhere. logic for closing is handled in mousedown (outside click)
@@ -210,11 +230,61 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     const selectedText = selection.toString().trim();
     if (selectedText.length > 0) {
       const rect = selection.getRangeAt(0).getBoundingClientRect();
+      // For manual trigger, we can skip the Open button and just show the popup.
       initiatePopupSequence(rect, selectedText);
     }
   }
 });
 
+// --- NEW: Function to show intermediate 'Open' button ---
+function showOpenButtonPopup(rect, selectedText) {
+  const popupContainer = document.createElement('div');
+  popupContainer.style.all = 'initial';
+  popupContainer.style.position = 'fixed';
+  popupContainer.style.top = '0';
+  popupContainer.style.left = '0';
+  popupContainer.style.width = '0';
+  popupContainer.style.height = '0';
+  popupContainer.style.zIndex = (baseZIndex + activePopups.length).toString();
+  popupContainer.style.pointerEvents = 'none';
+
+  const shadow = popupContainer.attachShadow({ mode: 'open' });
+
+  const styleTag = document.createElement('style');
+  styleTag.textContent = popupStyles;
+  shadow.appendChild(styleTag);
+
+  const openBtn = document.createElement('button');
+  openBtn.id = 'ai-open-button-popup';
+  openBtn.textContent = 'Open';
+
+  // Position it a bit above the selection if possible
+  const topPos = rect.top >= 40 ? rect.top - 40 : rect.bottom + 10;
+  openBtn.style.left = `${rect.left}px`;
+  openBtn.style.top = `${topPos}px`;
+
+  openBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    removePopupInstance(instance);
+    initiatePopupSequence(rect, selectedText);
+  });
+
+  shadow.appendChild(openBtn);
+  document.documentElement.appendChild(popupContainer);
+
+  const instance = {
+    container: popupContainer,
+    popup: openBtn,
+    shadow: shadow,
+    isInteracting: false,
+    isClickInside: false,
+    messages: [],
+    sourceText: selectedText // prevents duplicate triggers
+  };
+
+  activePopups.push(instance);
+  return instance;
+}
 
 // --- NEW: Helper to start the popup logic (extracted from mouseup) ---
 function initiatePopupSequence(rect, selectedText) {
@@ -238,6 +308,10 @@ function initiatePopupSequence(rect, selectedText) {
       // Verify instance still exists (user might have closed it)
       if (!activePopups.includes(popupInstance)) return;
 
+      if (chrome.runtime.lastError) {
+        response = { error: chrome.runtime.lastError.message };
+      }
+
       const popupEl = popupInstance.popup;
 
       if (response && response.models && response.models.length > 0) {
@@ -249,7 +323,7 @@ function initiatePopupSequence(rect, selectedText) {
         const errorHtml = `<span style="color:red;">Error: ${response.error}</span> <button id="${errorId}-retry" class="ai-popup-retry-btn" style="background:#4db6ac; color:white; border:none; border-radius:3px; cursor:pointer; padding:2px 6px; font-size:11px; margin-left:5px;">Reload</button>`;
         
         // Temporarily put error in messages to render it
-        instance.messages = [
+        popupInstance.messages = [
            { role: 'assistant', content: errorHtml, isError: true }
         ];
         renderMessages(popupInstance);
@@ -282,7 +356,7 @@ function initiatePopupSequence(rect, selectedText) {
 
         renderMessages(popupInstance);
 
-        const modelName = response.models.find(m => m.id === response.defaultModelId)?.name || 'Unknown Model';
+        const modelName = response && response.models ? (response.models.find(m => m.id === response.defaultModelId)?.name || 'Unknown Model') : 'Unknown Model';
         createActionButtons(popupInstance, selectedText, definitionText, modelName, response.promptName);
       }
       adjustPopupPosition(popupInstance, rect);
@@ -484,6 +558,10 @@ function retryMessage(instance, messageIndex) {
     (response) => {
       if (!activePopups.includes(instance)) return;
 
+      if (chrome.runtime.lastError) {
+        response = { error: chrome.runtime.lastError.message };
+      }
+
       if (response && !response.error) {
         instance.messages[messageIndex] = { role: 'assistant', content: response.definition, isError: false, needsRetry: false };
       } else {
@@ -608,6 +686,10 @@ function redefineWithModelAndPrompt(instance, word, modelId, promptContent) {
         // Remove the temporary thinking indicator
         instance.messages = instance.messages.filter(m => !m.isThinking);
 
+        if (chrome.runtime.lastError) {
+          response = { error: chrome.runtime.lastError.message };
+        }
+
         // 1. Re-create selectors
         if (response && response.models && response.models.length > 0) {
           createSelectors(instance, response.models, response.customPrompts, modelId, promptContent, word, response.defaultPromptId);
@@ -636,7 +718,7 @@ function redefineWithModelAndPrompt(instance, word, modelId, promptContent) {
         } else {
           // Update the definition
           const definitionText = response ? response.definition : "Error resolving definition";
-          const modelName = response.models.find(m => m.id === modelId)?.name || 'Unknown Model';
+          const modelName = response && response.models ? (response.models.find(m => m.id === modelId)?.name || 'Unknown Model') : 'Unknown Model';
           
           if (response && response.usedPrompt) {
              // Instead of wiping the array, rebuild/modify the existing messages.
