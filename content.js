@@ -333,8 +333,13 @@ function initiatePopupSequence(rect, selectedText) {
           if (popupInstance.popup) {
             const retryBtn = popupInstance.popup.querySelector(`#${errorId}-retry`);
             if (retryBtn) {
-              retryBtn.addEventListener('click', () => {
-                performInitialFetch();
+              retryBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                e.target.textContent = "Working...";
+                e.target.style.opacity = "0.7";
+                e.target.style.cursor = "wait";
+                setTimeout(() => performInitialFetch(), 150);
               });
             }
           }
@@ -713,8 +718,13 @@ function redefineWithModelAndPrompt(instance, word, modelId, promptContent) {
             if (popup) {
               const retryBtn = popup.querySelector(`#${errorId}-retry`);
               if (retryBtn) {
-                retryBtn.addEventListener('click', () => {
-                  performRedefineFetch();
+                retryBtn.addEventListener('click', (e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  e.target.textContent = "Working...";
+                  e.target.style.opacity = "0.7";
+                  e.target.style.cursor = "wait";
+                  setTimeout(() => performRedefineFetch(), 150);
                 });
               }
             }
@@ -1068,10 +1078,17 @@ function createFollowupInput(instance, word) {
             if (lastMsg && lastMsg.errorId) {
               const retryBtn = popup.querySelector(`#${lastMsg.errorId}-retry`);
               if (retryBtn) {
-                retryBtn.addEventListener('click', () => {
-                   // Pop off the error
-                   instance.messages.pop();
-                   performFetch();
+                retryBtn.addEventListener('click', (e) => {
+                   e.preventDefault();
+                   e.stopPropagation();
+                   e.target.textContent = "Working...";
+                   e.target.style.opacity = "0.7";
+                   e.target.style.cursor = "wait";
+                   setTimeout(() => {
+                     // Pop off the error
+                     instance.messages.pop();
+                     performFetch();
+                   }, 150);
                 });
               }
             }
