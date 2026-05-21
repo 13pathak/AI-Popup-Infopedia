@@ -483,13 +483,17 @@ function renderMessages(instance) {
         formattedContent = formattedContent.replace(/\n/g, '<br>');
       }
 
-      if (index === 0 && instance.messages.length <= 2 && !msg.isError && msg.role !== 'user') {
-        // If it's the very first main definition (and no user prompt is shown), don't prefix with You:/AI:
+      if (msg.role === 'user') return; // Hide user prompts
+
+      const isMainDefinition = (index === 0 || index === 1) && instance.messages.length <= 2;
+
+      if (isMainDefinition && !msg.isError) {
+        // If it's the very first main definition, don't prefix with AI:
         contentWrapper.insertAdjacentHTML('beforeend', `<div>${formattedContent}</div>`);
       } else {
-        // Conversational flow UI
-        const roleName = msg.role === 'user' ? 'You' : 'AI';
-        const color = msg.role === 'user' ? '#90caf9' : '#a5d6a7';
+        // Conversational flow UI for follow-ups
+        const roleName = 'AI';
+        const color = '#a5d6a7';
         
         let html = '';
         if (msg.needsRetry) {
