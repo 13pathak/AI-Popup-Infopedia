@@ -77,8 +77,8 @@ const popupStyles = `
     opacity: 0.8;
   }
 
-  /* SPEECH BUTTON */
-  #ai-popup-speak-btn {
+  /* SPEECH & PDF BUTTONS */
+  #ai-popup-speak-btn, #ai-popup-pdf-btn {
     font-size: 18px; /* Slightly larger icon */
     color: #4db6ac;
     cursor: pointer;
@@ -87,7 +87,7 @@ const popupStyles = `
     justify-content: center;
     flex-shrink: 0;
   }
-  #ai-popup-speak-btn:hover {
+  #ai-popup-speak-btn:hover, #ai-popup-pdf-btn:hover {
     color: #80cbc4;
   }
 
@@ -457,8 +457,13 @@ function showPopup(x, y, content) {
     shadow: shadow,
     isInteracting: false,
     isClickInside: false,
-    messages: []
+    messages: [],
+    showUserQuestions: false // Default to false
   };
+
+  chrome.storage.sync.get({ showUserQuestions: false }, (data) => {
+    instance.showUserQuestions = data.showUserQuestions;
+  });
 
   activePopups.push(instance);
   return instance;
@@ -488,7 +493,7 @@ function renderMessages(instance) {
         formattedContent = formattedContent.replace(/\n/g, '<br>');
       }
 
-      if (msg.role === 'user') return; // Hide user prompts
+      if (msg.role === 'user' && !instance.showUserQuestions) return; // Hide user prompts unless setting is true
 
       const isMainDefinition = (index === 0 || index === 1) && instance.messages.length <= 2;
 
@@ -497,8 +502,8 @@ function renderMessages(instance) {
         contentWrapper.insertAdjacentHTML('beforeend', `<div>${formattedContent}</div>`);
       } else {
         // Conversational flow UI for follow-ups
-        const roleName = 'AI';
-        const color = '#a5d6a7';
+        const roleName = msg.role === 'user' ? 'You' : 'AI';
+        const color = msg.role === 'user' ? '#90caf9' : '#a5d6a7';
         
         let html = '';
         if (msg.needsRetry) {
@@ -830,6 +835,16 @@ function createActionButtons(instance, word, definition, modelName, promptName) 
       toggleSpeech(instance, definition);
     };
 
+    // --- NEW: PDF BUTTON ---
+    const pdfButton = document.createElement('span');
+    pdfButton.id = 'ai-popup-pdf-btn';
+    pdfButton.innerHTML = '📄'; // PDF icon
+    pdfButton.title = 'Save conversation as PDF';
+    pdfButton.onclick = (e) => {
+      e.stopPropagation();
+      saveConversationAsPdf(instance);
+    };
+
     // 2. Create list selector
     const listSelector = document.createElement('select');
     listSelector.style.cssText = `
@@ -954,6 +969,7 @@ function createActionButtons(instance, word, definition, modelName, promptName) 
     // 4. Add the new controls directly to the container
     // 4. Add the new controls directly to the container
     actionsContainer.appendChild(speakButton); // Add speaker first
+    actionsContainer.appendChild(pdfButton); // Add PDF button next
     actionsContainer.appendChild(listSelector);
     actionsContainer.appendChild(finalSaveButton);
   });
@@ -1193,4 +1209,42 @@ function adjustPopupPosition(instance, selectionRect) {
   popup.style.top = '20px';
   popup.style.right = '20px';
   popup.style.left = 'auto'; // Clear out the previously set left property
+}
+
+// --- NEW: Save Conversation as PDF ---
+function saveConversationAsPdf(instance) {
+  let html = `<!DOCTYPE html><html><head><title>Conversation Backup</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; max-width: 800px; margin: auto; line-height: 1.6; }
+    .message { margin-bottom: 20px; padding: 15px; border-radius: 8px; }
+    .user { background-color: #e3f2fd; border-left: 4px solid #1976d2; }
+    .ai { background-color: #f5f5f5; border-left: 4px solid #4caf50; }
+    .role { font-weight: bold; margin-bottom: 8px; font-size: 1.1em; }
+    .title { text-align: center; color: #333; margin-bottom: 30px; border-bottom: 2px solid #ccc; padding-bottom: 10px; }
+    @media print {
+      body { max-width: 100%; padding: 0; }
+      .message { page-break-inside: avoid; }
+    }
+  </style>
+  </head><body>
+  <h2 class="title">AI Conversation Transcript</h2>`;
+
+  instance.messages.forEach(msg => {
+    if (msg.isThinking || msg.isError || msg.needsRetry) return;
+    const roleName = msg.role === 'user' ? 'You' : 'AI';
+    const className = msg.role === 'user' ? 'user' : 'ai';
+    let content = msg.displayContent || msg.content || "";
+    let formattedContent = String(content);
+    
+    if (msg.role !== 'user') {
+      formattedContent = formattedContent.replace(/\\*\\*(.*?)\\*\\*/g, '<strong>$1</strong>');
+      formattedContent = formattedContent.replace(/\\n/g, '<br>');
+    }
+    
+    html += `<div class="message ${className}"><div class="role">${roleName}</div><div>${formattedContent}</div></div>`;
+  });
+
+  html += `<script>window.onload = function() { setTimeout(function() { window.print(); }, 500); }</script></body></html>`;
+  
+  chrome.runtime.sendMessage({ type: "openPdfTab", htmlContent: html });
 }

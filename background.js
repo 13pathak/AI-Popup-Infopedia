@@ -143,6 +143,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  // --- Case 2.5: Open PDF Tab ---
+  if (request.type === "openPdfTab") {
+    chrome.tabs.create({ url: "data:text/html;charset=utf-8," + encodeURIComponent(request.htmlContent) });
+    return true;
+  }
+
   // --- Case 3: Get all word lists ---
   if (request.type === "getWordLists") {
     // --- UPDATED: Now also get the lastUsedListId ---
@@ -305,7 +311,7 @@ chrome.downloads.onChanged.addListener((delta) => {
 function triggerBackup(type = "Auto") {
   // 1. Fetch all data to backup
   chrome.storage.local.get(['history', 'wordLists'], (localData) => {
-    chrome.storage.sync.get(['models', 'customPrompts', 'defaultModelId', 'defaultPromptId', 'ankiSettings', 'ttsSettings', 'backupReminderFrequency', 'backupSubfolder'], (syncData) => {
+    chrome.storage.sync.get(['models', 'customPrompts', 'defaultModelId', 'defaultPromptId', 'ankiSettings', 'ttsSettings', 'backupReminderFrequency', 'backupSubfolder', 'followupCustomMessage', 'showUserQuestions'], (syncData) => {
 
       const backupData = {
         history: localData.history || [],
@@ -318,6 +324,8 @@ function triggerBackup(type = "Auto") {
         ttsSettings: syncData.ttsSettings,
         backupReminderFrequency: syncData.backupReminderFrequency,
         backupSubfolder: syncData.backupSubfolder,
+        followupCustomMessage: syncData.followupCustomMessage,
+        showUserQuestions: syncData.showUserQuestions,
         exportedAt: new Date().toISOString(),
         backupType: type,
         version: "1.1"

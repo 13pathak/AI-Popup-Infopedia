@@ -311,7 +311,8 @@ function saveDefaultPromptId(promptId) {
 
 function saveFollowupSettings() {
   const customMessage = document.getElementById('followup-custom-message').value;
-  chrome.storage.sync.set({ followupCustomMessage: customMessage }, () => {
+  const showUserQuestions = document.getElementById('show-user-questions-checkbox').checked;
+  chrome.storage.sync.set({ followupCustomMessage: customMessage, showUserQuestions: showUserQuestions }, () => {
     const statusEl = document.getElementById('followup-status');
     statusEl.textContent = 'Follow-up settings saved successfully!';
     statusEl.style.color = '#5cb85c';
@@ -322,9 +323,12 @@ function saveFollowupSettings() {
 }
 
 function loadFollowupSettings() {
-  chrome.storage.sync.get(['followupCustomMessage'], (data) => {
+  chrome.storage.sync.get(['followupCustomMessage', 'showUserQuestions'], (data) => {
     if (data.followupCustomMessage !== undefined) {
       document.getElementById('followup-custom-message').value = data.followupCustomMessage;
+    }
+    if (data.showUserQuestions !== undefined) {
+      document.getElementById('show-user-questions-checkbox').checked = data.showUserQuestions;
     }
   });
 }
@@ -1845,7 +1849,7 @@ function restoreBackup() {
       if (restoredCount > 0) {
         chrome.storage.local.set(dataToSave, () => {
           // Also check for sync settings if any
-          const syncKeys = ['models', 'customPrompts', 'defaultModelId', 'defaultPromptId', 'ttsSettings', 'ankiSettings', 'backupReminderFrequency', 'backupSubfolder'];
+          const syncKeys = ['models', 'customPrompts', 'defaultModelId', 'defaultPromptId', 'ttsSettings', 'ankiSettings', 'backupReminderFrequency', 'backupSubfolder', 'followupCustomMessage', 'showUserQuestions'];
           const syncData = {};
           let syncCount = 0;
           for (const key of syncKeys) {
