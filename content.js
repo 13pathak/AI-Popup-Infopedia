@@ -77,8 +77,8 @@ const popupStyles = `
     opacity: 0.8;
   }
 
-  /* SPEECH & PDF BUTTONS */
-  #ai-popup-speak-btn, #ai-popup-pdf-btn {
+  /* SPEECH, PDF & PIN BUTTONS */
+  #ai-popup-speak-btn, #ai-popup-pdf-btn, #ai-popup-pin-btn {
     font-size: 18px; /* Slightly larger icon */
     color: #4db6ac;
     cursor: pointer;
@@ -87,7 +87,7 @@ const popupStyles = `
     justify-content: center;
     flex-shrink: 0;
   }
-  #ai-popup-speak-btn:hover, #ai-popup-pdf-btn:hover {
+  #ai-popup-speak-btn:hover, #ai-popup-pdf-btn:hover, #ai-popup-pin-btn:hover {
     color: #80cbc4;
   }
 
@@ -845,6 +845,22 @@ function createActionButtons(instance, word, definition, modelName, promptName) 
       saveConversationAsPdf(instance);
     };
 
+    // --- NEW: PIN BUTTON ---
+    const pinButton = document.createElement('span');
+    pinButton.id = 'ai-popup-pin-btn';
+    pinButton.innerHTML = '📌'; // Pin icon
+    pinButton.title = 'Pin conversation';
+    if (instance.isPinned) {
+      pinButton.style.opacity = '0.5';
+      pinButton.style.color = '#80cbc4';
+    }
+    pinButton.onclick = (e) => {
+      e.stopPropagation();
+      instance.isPinned = !instance.isPinned;
+      pinButton.style.opacity = instance.isPinned ? '0.5' : '1';
+      pinButton.style.color = instance.isPinned ? '#80cbc4' : '#4db6ac';
+    };
+
     // 2. Create list selector
     const listSelector = document.createElement('select');
     listSelector.style.cssText = `
@@ -970,6 +986,7 @@ function createActionButtons(instance, word, definition, modelName, promptName) 
     // 4. Add the new controls directly to the container
     actionsContainer.appendChild(speakButton); // Add speaker first
     actionsContainer.appendChild(pdfButton); // Add PDF button next
+    actionsContainer.appendChild(pinButton); // Add Pin button next
     actionsContainer.appendChild(listSelector);
     actionsContainer.appendChild(finalSaveButton);
   });
@@ -1118,11 +1135,16 @@ function createFollowupInput(instance, word) {
 
 // --- Updated remove functions ---
 function removeAllPopups() {
-  activePopups.forEach(instance => {
-    if (instance.container) instance.container.remove();
+  activePopups = activePopups.filter(instance => {
+    if (!instance.isPinned) {
+      if (instance.container) instance.container.remove();
+      return false; // Remove from array
+    }
+    return true; // Keep in array
   });
-  activePopups = [];
-  window.speechSynthesis.cancel();
+  if (activePopups.length === 0) {
+    window.speechSynthesis.cancel();
+  }
 }
 
 function removeLastPopup() {
