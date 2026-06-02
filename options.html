@@ -4,58 +4,60 @@
 <head>
     <meta charset="UTF-8">
     <title>AI Helper Settings</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg-color: #282c34;
-            /* Dark background */
-            --text-color: #abb2bf;
-            /* Light grey text */
-            --primary-color: #61afef;
-            /* Blue accent */
-            --secondary-color: #98c379;
-            /* Green for success */
-            --danger-color: #e06c75;
-            /* Red for danger */
-            --border-color: #3e4451;
-            /* Slightly lighter dark border */
-            --input-bg: #353b45;
-            /* Input background */
-            --button-bg: #4a505c;
-            /* Default button background */
-            --button-hover-bg: #5c6370;
-            /* Default button hover */
-            --spacing-unit: 10px;
+            --bg-color: #0F172A;
+            --card-bg: #1E293B;
+            --text-color: #F8FAFC;
+            --text-muted: #94A3B8;
+            --primary-color: #3B82F6;
+            --secondary-color: #10B981;
+            --danger-color: #EF4444;
+            --border-color: #334155;
+            --input-bg: #0F172A;
+            --button-bg: #334155;
+            --button-hover-bg: #475569;
+            --spacing-unit: 12px;
         }
 
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            padding: var(--spacing-unit);
-            width: 450px;
-            /* Slightly wider to accommodate larger fonts */
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            padding: calc(var(--spacing-unit) * 2);
+            max-width: 800px;
+            margin: 0 auto;
             background-color: var(--bg-color);
             color: var(--text-color);
-            margin: 0;
             font-size: 15px;
-            /* Increased base font size */
+            line-height: 1.5;
         }
 
         h2 {
-            color: var(--primary-color);
+            color: var(--text-color);
             margin-top: 0;
-            margin-bottom: var(--spacing-unit);
-            font-size: 1.4em;
-            /* Slightly larger heading */
+            margin-bottom: calc(var(--spacing-unit) * 2);
+            font-size: 1.8em;
+            font-weight: 600;
+            letter-spacing: -0.02em;
+        }
+
+        h3, h4 {
+            color: var(--text-color);
+            margin-top: 0;
+            font-weight: 600;
+            letter-spacing: -0.01em;
         }
 
         div {
-            margin-bottom: calc(var(--spacing-unit) * 1.5);
+            margin-bottom: var(--spacing-unit);
         }
 
         label {
             display: block;
             margin-bottom: calc(var(--spacing-unit) / 2);
-            font-weight: bold;
+            font-weight: 500;
             color: var(--text-color);
+            font-size: 0.95em;
         }
 
         input[type="text"],
@@ -63,15 +65,15 @@
         textarea,
         select {
             width: 100%;
-            padding: 8px;
-            /* Increased padding */
+            padding: 10px 12px;
             box-sizing: border-box;
             background-color: var(--input-bg);
             border: 1px solid var(--border-color);
-            border-radius: 4px;
+            border-radius: 8px;
             color: var(--text-color);
             font-size: 1em;
-            /* Larger font inside inputs */
+            font-family: inherit;
+            transition: all 0.2s ease;
         }
 
         input[type="text"]:focus,
@@ -80,7 +82,7 @@
         select:focus {
             outline: none;
             border-color: var(--primary-color);
-            box-shadow: 0 0 0 2px rgba(97, 175, 239, 0.3);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
         }
 
         textarea {
@@ -88,94 +90,144 @@
             min-height: 100px;
         }
 
-        /* Taller text area */
         small {
-            color: #888;
-            font-size: 0.9em;
+            color: var(--text-muted);
+            font-size: 0.85em;
+            display: inline-block;
+            margin-top: 4px;
         }
 
-        /* Slightly larger small text */
         button {
-            padding: 8px 12px;
+            padding: 8px 16px;
             cursor: pointer;
             border: none;
-            border-radius: 4px;
+            border-radius: 8px;
             background-color: var(--button-bg);
             color: white;
-            transition: background-color 0.2s ease;
+            font-weight: 500;
+            font-family: inherit;
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
         }
 
         button:hover {
             background-color: var(--button-hover-bg);
+            transform: translateY(-1px);
+        }
+
+        button:active {
+            transform: translateY(0);
         }
 
         #status,
-        #anki-status-global {
-            margin-top: 10px;
-            font-weight: bold;
+        #anki-status-global,
+        #anki-status,
+        #io-status,
+        #io-status-all,
+        #followup-status {
+            margin-top: 12px;
+            font-weight: 500;
             min-height: 1em;
-        }
-
-        #anki-status {
-            margin-top: 10px;
-            font-weight: bold;
-            min-height: 1em;
+            font-size: 0.9em;
+            color: var(--secondary-color);
         }
 
         /* --- TAB STYLES --- */
         .tab-nav {
             display: flex;
-            border-bottom: 1px solid var(--border-color);
-            margin-bottom: var(--spacing-unit) * 2;
+            gap: 8px;
+            border-bottom: 2px solid var(--border-color);
+            margin-bottom: calc(var(--spacing-unit) * 3);
+            padding-bottom: 12px;
+            overflow-x: auto;
+            scrollbar-width: none;
+        }
+
+        .tab-nav::-webkit-scrollbar {
+            display: none;
         }
 
         .tab-button {
-            padding: 10px 15px;
+            padding: 8px 16px;
             cursor: pointer;
             border: none;
             background-color: transparent;
-            font-size: 1em;
-            border-bottom: 3px solid transparent;
-            color: var(--text-color);
-            transition: border-color 0.2s ease, color 0.2s ease;
+            font-size: 0.95em;
+            font-weight: 500;
+            color: var(--text-muted);
+            border-radius: 8px;
+            transition: all 0.2s ease;
+            white-space: nowrap;
         }
 
         .tab-button.active {
-            border-bottom: 3px solid var(--primary-color);
-            font-weight: bold;
+            background-color: rgba(59, 130, 246, 0.1);
             color: var(--primary-color);
+            font-weight: 600;
         }
 
         .tab-button:hover:not(.active) {
-            color: var(--primary-color);
+            background-color: rgba(255, 255, 255, 0.05);
+            color: var(--text-color);
         }
 
         .tab-content {
             display: none;
-            /* Hidden by default */
+            background-color: var(--card-bg);
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            border: 1px solid var(--border-color);
         }
 
         .tab-content.active {
             display: block;
-            /* Shown when active */
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(5px); }
+            to { opacity: 1; transform: translateY(0); }
         }
 
         /* --- HISTORY STYLES --- */
         #history-list {
-            max-height: 400px;
+            max-height: 500px;
             overflow-y: auto;
-            /* Changed to scroll */
             border: 1px solid var(--border-color);
-            padding: var(--spacing-unit);
-            border-radius: 4px;
+            padding: 0;
+            border-radius: 8px;
+            background-color: var(--bg-color);
+        }
+
+        #history-list::-webkit-scrollbar {
+            width: 8px;
+        }
+        #history-list::-webkit-scrollbar-track {
+            background: var(--bg-color);
+            border-radius: 8px;
+        }
+        #history-list::-webkit-scrollbar-thumb {
+            background: var(--border-color);
+            border-radius: 8px;
+        }
+        #history-list::-webkit-scrollbar-thumb:hover {
+            background: var(--button-hover-bg);
         }
 
         .history-item {
             border-bottom: 1px solid var(--border-color);
-            padding: 10px 5px;
-            padding-right: 95px;
-            /* --- Increased padding for new button --- */
+            padding: 16px;
+            padding-right: 110px;
             position: relative;
+            transition: background-color 0.2s ease;
+        }
+
+        .history-item:hover {
+            background-color: rgba(255, 255, 255, 0.02);
         }
 
         .history-item:last-child {
@@ -183,338 +235,283 @@
         }
 
         .history-word {
-            font-weight: bold;
-            font-size: 1.1em;
-            margin-bottom: 5px;
+            font-weight: 600;
+            font-size: 1.15em;
+            margin-bottom: 8px;
+            color: var(--primary-color);
         }
 
         .history-definition {
             font-size: 0.95em;
-            line-height: 1.4;
+            line-height: 1.5;
+            color: var(--text-muted);
         }
 
-        .delete-item-btn {
-            position: absolute;
-            top: 10px;
-            right: 8px;
-            background: none;
-            border: none;
-            font-size: 1.1em;
-            cursor: pointer;
-            color: #aaa;
-            padding: 2px 8px;
-            border-radius: 4px;
-            line-height: 1;
-        }
-
-        .delete-item-btn:hover {
-            color: #d9534f;
-            background-color: #444;
-        }
-
-        .edit-item-btn {
-            position: absolute;
-            top: 10px;
-            right: 38px;
-            background: none;
-            border: none;
-            font-size: 1.1em;
-            cursor: pointer;
-            color: #aaa;
-            padding: 2px 8px;
-            border-radius: 4px;
-            line-height: 1;
-        }
-
-        .edit-item-btn:hover {
-            color: #337ab7;
-            background-color: #444;
-        }
-
-        /* --- NEW ANKI BUTTON STYLE --- */
-        .anki-item-btn {
-            position: absolute;
-            top: 10px;
-            right: 68px;
-            /* Positioned to the left of the edit button */
-            background: none;
-            border: none;
-            font-size: 1.1em;
-            font-weight: bold;
-            cursor: pointer;
-            color: #aaa;
-            padding: 2px 8px;
-            border-radius: 4px;
-            line-height: 1;
-        }
-
-        .anki-item-btn:hover {
-            color: #61afef;
-            /* Anki blue */
-            background-color: #444;
-        }
-
-        .anki-item-btn:disabled {
-            cursor: default;
-            color: #5cb85c;
-            /* Green for success */
-        }
-
-        /* --- END ANKI STYLE --- */
-
-        /* --- NEW: Star/Favorite Button --- */
+        /* Common Icon Button Style */
+        .icon-btn,
+        .delete-item-btn,
+        .edit-item-btn,
+        .anki-item-btn,
         .star-item-btn {
             position: absolute;
-            top: 10px;
-            right: 98px;
             background: none;
             border: none;
             font-size: 1.2em;
             cursor: pointer;
-            color: #aaa;
-            padding: 2px 8px;
-            border-radius: 4px;
+            color: var(--text-muted);
+            padding: 4px;
+            border-radius: 6px;
             line-height: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
         }
 
+        .icon-btn:hover,
+        .delete-item-btn:hover,
+        .edit-item-btn:hover,
+        .anki-item-btn:hover:not(:disabled),
         .star-item-btn:hover {
-            color: #f0ad4e;
-            background-color: #444;
+            background-color: var(--border-color);
+            transform: scale(1.05);
         }
 
-        .star-item-btn.favorited {
-            color: #f0ad4e;
-        }
+        .delete-item-btn { top: 16px; right: 12px; }
+        .delete-item-btn:hover { color: var(--danger-color); }
 
-        /* --- NEW: Bulk Selection Checkbox --- */
+        .edit-item-btn { top: 16px; right: 44px; }
+        .edit-item-btn:hover { color: var(--primary-color); }
+
+        .anki-item-btn { top: 16px; right: 76px; font-weight: bold; }
+        .anki-item-btn:hover:not(:disabled) { color: var(--primary-color); }
+        .anki-item-btn:disabled { color: var(--secondary-color); cursor: default; transform: none; background: none; }
+
+        .star-item-btn { top: 16px; right: 108px; }
+        .star-item-btn:hover { color: #F59E0B; }
+        .star-item-btn.favorited { color: #F59E0B; }
+
+        /* --- BULK SELECTION --- */
         .bulk-checkbox {
             position: absolute;
             top: 50%;
-            left: 10px;
+            left: 16px;
             transform: translateY(-50%);
             width: 18px;
             height: 18px;
             cursor: pointer;
             display: none;
+            accent-color: var(--primary-color);
         }
 
-        .bulk-mode .bulk-checkbox {
-            display: block;
-        }
-
-        .bulk-mode .history-item {
-            padding-left: 40px;
-        }
-
+        .bulk-mode .bulk-checkbox { display: block; }
+        .bulk-mode .history-item { padding-left: 50px; }
         .history-item.selected {
-            background-color: rgba(97, 175, 239, 0.15);
+            background-color: rgba(59, 130, 246, 0.08);
             border-left: 3px solid var(--primary-color);
         }
 
-        /* --- END NEW STYLES --- */
-
-
+        /* --- EDITING HISTORY ITEMS --- */
         .history-item-editing {
-            padding-right: 5px;
+            padding-right: 16px;
         }
 
         .edit-word-input {
-            width: 100%;
-            padding: 5px;
-            box-sizing: border-box;
-            font-size: 1.1em;
-            font-weight: bold;
-            margin-bottom: 8px;
+            margin-bottom: 12px;
+            font-size: 1.15em;
+            font-weight: 600;
         }
 
         .edit-list-selector {
-            width: 100%;
-            margin-bottom: 8px;
-            font-size: 0.9em;
+            margin-bottom: 12px;
         }
 
         .edit-definition-textarea {
-            width: 100%;
-            min-height: 100px;
-            resize: vertical;
-            padding: 5px;
-            box-sizing: border-box;
-            font-size: 0.95em;
-            line-height: 1.4;
+            margin-bottom: 12px;
         }
 
         .edit-actions {
-            margin-top: var(--spacing-unit);
+            display: flex;
+            gap: 8px;
         }
 
-        .edit-actions button {
-            margin-right: var(--spacing-unit) / 2;
-            padding: 5px 10px;
-        }
+        .save-edit-btn { background-color: var(--secondary-color); }
+        .save-edit-btn:hover { background-color: #059669; }
 
-        .save-edit-btn {
-            background-color: var(--secondary-color);
-            color: white;
-            border: none;
-        }
-
-        .save-edit-btn:hover {
-            background-color: color-mix(in srgb, var(--secondary-color) 80%, black);
-        }
-
-        .cancel-edit-btn {
-            background-color: var(--button-bg);
-            color: white;
-            border: none;
-        }
-
-        .cancel-edit-btn:hover {
-            background-color: var(--button-hover-bg);
-        }
-
-        /* --- NEW: Model List Styles --- */
-        #models-list {
-            margin-top: var(--spacing-unit) * 1.5;
-        }
-
-        .model-item {
+        /* --- MODEL SELECTION / FORMS --- */
+        #model-selection-container {
             display: flex;
             align-items: center;
-            justify-content: space-between;
-            padding: 10px;
-            border: 1px solid var(--border-color);
-            border-radius: 4px;
-            margin-bottom: 8px;
+            gap: 10px;
+            flex-wrap: wrap;
         }
 
-        .model-item.default-model {
-            border-left: 4px solid #5cb85c;
-            padding-left: 7px;
-        }
-
-        .model-name {
-            font-weight: bold;
-        }
-
-        .model-name .default-indicator {
-            /* This class is not used in options.js, but good to have */
-            font-weight: normal;
-            color: #5cb85c;
-            margin-left: 8px;
-            font-size: 0.9em;
-        }
-
-        .model-actions button {
-            font-size: 0.85em;
-            padding: 4px 8px;
-            margin-left: 5px;
-        }
-
-        #model-selection-container {
-            gap: var(--spacing-unit);
-            /* Spacing between select and buttons */
-        }
-
-        #model-selection-container button {
-            flex-shrink: 0;
-            /* Prevent buttons from shrinking */
-        }
+        #model-selection-container select { flex-grow: 1; min-width: 200px; }
+        #model-selection-container button { padding: 10px 14px; }
 
         #model-form-container {
-            padding: var(--spacing-unit) * 1.5;
+            padding: 20px;
+            background-color: var(--bg-color);
             border: 1px solid var(--border-color);
-            border-radius: 5px;
-            margin-top: var(--spacing-unit) * 1.5;
+            border-radius: 8px;
+            margin-top: 20px;
+            animation: fadeIn 0.3s ease;
         }
 
         #model-form-container h3 {
-            margin-top: 0;
-            color: var(--primary-color);
+            color: var(--text-color);
         }
 
         #model-form-actions {
-            margin-top: var(--spacing-unit) * 1.5;
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
         }
 
-        #add-model-btn {
-            background-color: var(--secondary-color);
-            color: white;
-            border: none;
+        #add-model-btn { background-color: var(--secondary-color); }
+        #add-model-btn:hover { background-color: #059669; }
+
+        #save-model-btn { background-color: var(--primary-color); }
+        
+        /* --- IMPORT/EXPORT & LIST MANAGEMENT --- */
+        .management-card {
+            margin-top: 24px;
+            padding-top: 24px;
+            border-top: 1px solid var(--border-color);
         }
 
-        #add-model-btn:hover {
-            background-color: color-mix(in srgb, var(--secondary-color) 80%, black);
+        .management-card h3 {
+            color: var(--text-color);
+            font-size: 1.2em;
         }
 
-        /* --- NEW: Import/Export Styles --- */
-        #history-io {
-            margin-top: var(--spacing-unit) * 2;
-            padding: var(--spacing-unit);
-            border: 1px solid var(--border-color);
-            border-radius: 4px;
-        }
-
+        .management-card button,
         #history-io button,
         #history-io-all button {
+            margin-right: 8px;
+            margin-bottom: 8px;
             background-color: var(--primary-color);
-            margin-right: 10px;
-            margin-bottom: 5px;
-            /* Add margin for wrapping */
         }
+        
+        #history-io-all button { background-color: var(--button-bg); }
 
-        #history-io-all button {
-            background-color: var(--button-bg);
-        }
-
-        #io-status,
-        #io-status-all {
-            margin-top: 10px;
-            font-size: 0.9em;
-        }
-
-        #clear-history {
-            background-color: var(--danger-color);
-            color: white;
-            border: none;
-        }
-
-        #clear-list-history {
-            background-color: var(--danger-color);
-        }
-
-        /* --- NEW: List Management Styles --- */
-        #list-management {
-            margin-top: var(--spacing-unit) * 2;
-            padding: var(--spacing-unit);
+        #list-management, #history-filters, #flashcard-stats {
+            margin-bottom: 20px;
+            padding: 16px;
             border: 1px solid var(--border-color);
-            border-radius: 4px;
-            background-color: var(--input-bg);
+            border-radius: 8px;
+            background-color: var(--bg-color);
         }
-
-        #list-management h4 {
-            margin-top: 0;
-            color: var(--primary-color);
+        
+        #history-filters {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            flex-wrap: wrap;
         }
 
         #list-controls {
             display: flex;
-            gap: 10px;
+            gap: 8px;
             align-items: center;
+            flex-wrap: wrap;
         }
 
-        /* --- END NEW --- */
+        #bulk-actions-bar {
+            margin: 16px 0;
+            padding: 12px 16px;
+            background-color: var(--border-color);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+
+        #bulk-actions-bar label { margin: 0; font-weight: 600; display: flex; align-items: center; gap: 8px;}
+        #bulk-actions-bar input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--primary-color); }
+        
+        .danger-btn,
+        #clear-history,
+        #bulk-delete-btn { background-color: var(--danger-color); }
+        .danger-btn:hover,
+        #clear-history:hover,
+        #bulk-delete-btn:hover { background-color: #DC2626; }
+
+        /* --- FLASHCARDS --- */
+        #flashcard-container {
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            min-height: 350px;
+            padding: 30px;
+            text-align: center;
+            background-color: var(--bg-color);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        #flashcard-front h3 {
+            font-size: 2.5em;
+            color: var(--primary-color);
+            margin-bottom: 10px;
+            word-break: break-word;
+        }
+
+        #flashcard-back {
+            margin: 24px 0;
+            padding: 24px;
+            background-color: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            text-align: left;
+            font-size: 1.1em;
+            color: var(--text-color);
+        }
+
+        #show-answer-btn {
+            background-color: var(--primary-color);
+            padding: 14px 32px;
+            font-size: 1.1em;
+            font-weight: 600;
+            margin: 0 auto;
+        }
+
+        #rating-buttons {
+            display: flex;
+            justify-content: center;
+            gap: 12px;
+            margin-top: 24px;
+            flex-wrap: wrap;
+        }
+
+        .rating-btn { padding: 12px 24px; font-weight: 600; flex: 1; min-width: 80px;}
+        .rating-btn[data-rating="1"] { background-color: var(--danger-color); }
+        .rating-btn[data-rating="2"] { background-color: #F59E0B; }
+        .rating-btn[data-rating="3"] { background-color: var(--secondary-color); }
+        .rating-btn[data-rating="4"] { background-color: var(--primary-color); }
+
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            margin-top: 8px;
+        }
+        .checkbox-label input { width: 16px; height: 16px; accent-color: var(--primary-color); }
     </style>
 </head>
 
 <body>
 
-    <button class="tab-button" data-tab="settings-content">Settings</button>
-    <button class="tab-button" data-tab="history-content">History</button>
-    <button class="tab-button" data-tab="anki-content">Anki</button>
-    <button class="tab-button" data-tab="flashcards-content">Flashcards</button>
-    <button class="tab-button" data-tab="reminder-content">Backup</button>
-    <button class="tab-button" data-tab="prompts-content">Prompts</button>
-    <button class="tab-button" data-tab="tts-content">Text-to-Speech</button>
+    <div class="tab-nav">
+        <button class="tab-button" data-tab="settings-content">Settings</button>
+        <button class="tab-button" data-tab="history-content">History</button>
+        <button class="tab-button" data-tab="anki-content">Anki</button>
+        <button class="tab-button" data-tab="flashcards-content">Flashcards</button>
+        <button class="tab-button" data-tab="reminder-content">Backup</button>
+        <button class="tab-button" data-tab="prompts-content">Prompts</button>
+        <button class="tab-button" data-tab="tts-content">Text-to-Speech</button>
     </div>
 
     <div id="status-global"></div>
