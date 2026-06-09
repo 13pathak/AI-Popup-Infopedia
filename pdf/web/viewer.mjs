@@ -13505,21 +13505,8 @@ initCom(PDFViewerApplication);
     if (!file) {
       return;
     }
-    try {
-      const viewerOrigin = new URL(window.location.href).origin || "null";
-      if (HOSTED_VIEWER_ORIGINS.includes(viewerOrigin)) {
-        return;
-      }
-      const fileOrigin = new URL(file, window.location.href).origin;
-      if (fileOrigin !== viewerOrigin) {
-        throw new Error("file origin does not match viewer's");
-      }
-    } catch (ex) {
-      PDFViewerApplication._documentError("pdfjs-loading-error", {
-        message: ex.message
-      });
-      throw ex;
-    }
+    // BYPASS ORIGIN CHECK FOR LOCAL FILES
+    return;
   };
 }
 function webViewerPageRender({

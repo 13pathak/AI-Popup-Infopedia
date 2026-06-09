@@ -22,7 +22,8 @@
   "host_permissions": [
     "https://generativelanguage.googleapis.com/",
     "http://localhost:11434/",
-    "http://localhost:8765/"
+    "http://localhost:8765/",
+    "<all_urls>"
   ],
   "background": {
     "service_worker": "background.js"
