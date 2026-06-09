@@ -9,7 +9,8 @@
     "alarms",
     "downloads",
     "tabs",
-    "webNavigation"
+    "webNavigation",
+    "webRequest"
   ],
   "commands": {
     "trigger-popup": {

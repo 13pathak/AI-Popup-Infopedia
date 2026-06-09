@@ -392,9 +392,30 @@ chrome.webNavigation.onBeforeNavigate.addListener((details) => {
   if (url.includes(chrome.runtime.id) && url.includes('/pdf/web/viewer.html')) return;
   try {
     const urlObj = new URL(url);
-    if (urlObj.pathname.toLowerCase().endsWith('.pdf')) {
+    const isPdfExt = urlObj.pathname.toLowerCase().endsWith('.pdf');
+    const isArxivPdf = urlObj.hostname === 'arxiv.org' && urlObj.pathname.startsWith('/pdf/');
+    
+    if (isPdfExt || isArxivPdf) {
       const viewerUrl = chrome.runtime.getURL('pdf/web/viewer.html?file=' + encodeURIComponent(url));
       chrome.tabs.update(details.tabId, { url: viewerUrl });
     }
   } catch (e) {}
 });
+
+// --- NEW: Intercept any URL that returns a PDF Content-Type ---
+chrome.webRequest.onHeadersReceived.addListener(
+  (details) => {
+    if (details.frameId !== 0) return;
+    const url = details.url;
+    if (url.includes(chrome.runtime.id) && url.includes('/pdf/web/viewer.html')) return;
+
+    const contentTypeHeader = details.responseHeaders.find(h => h.name.toLowerCase() === 'content-type');
+    if (contentTypeHeader && contentTypeHeader.value.toLowerCase().includes('application/pdf')) {
+      const viewerUrl = chrome.runtime.getURL('pdf/web/viewer.html?file=' + encodeURIComponent(url));
+      chrome.tabs.update(details.tabId, { url: viewerUrl });
+    }
+  },
+  { urls: ["<all_urls>"] },
+  ["responseHeaders"]
+);
+
