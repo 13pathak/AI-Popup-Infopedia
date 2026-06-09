@@ -26,6 +26,7 @@ document.addEventListener('DOMContentLoaded', () => {
       // --- NEW: Load Flashcard lists when tab is clicked ---
       if (tab.dataset.tab === "flashcards-content") {
         loadFlashcardLists();
+        loadStats(); // Load stats dashboard
       }
 
       // --- NEW: Load Reminder settings when tab is clicked ---
@@ -140,6 +141,23 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('.rating-btn').forEach(btn => {
     btn.addEventListener('click', (e) => rateFlashcard(parseInt(e.target.dataset.rating)));
   });
+
+  // --- NEW: PDF File Access Check ---
+  if (chrome.extension && chrome.extension.isAllowedFileSchemeAccess) {
+    chrome.extension.isAllowedFileSchemeAccess((isAllowed) => {
+      if (isAllowed) {
+        document.getElementById('file-access-success').style.display = 'block';
+        document.getElementById('file-access-warning').style.display = 'none';
+      } else {
+        document.getElementById('file-access-success').style.display = 'none';
+        document.getElementById('file-access-warning').style.display = 'block';
+      }
+    });
+  }
+  safeAddListener('open-extensions-page-btn', 'click', () => {
+    chrome.tabs.create({ url: 'chrome://extensions/?id=' + chrome.runtime.id });
+  });
+
   // --- NEW: Storage Listener for Real-time Backup Status ---
   chrome.storage.onChanged.addListener((changes, namespace) => {
     if (namespace === 'local') {
@@ -2711,3 +2729,75 @@ function rateFlashcard(rating) {
 }
 
 // Load flashcard lists when tab is clicked (handled by tab switching)
+
+// ---
+// --- NEW: STATS DASHBOARD
+// ---
+
+function loadStats() {
+  chrome.storage.local.get(['history'], (result) => {
+    const history = result.history || [];
+    
+    // 1. Calculate Simple Metrics
+    const totalWords = history.length;
+    const favorites = history.filter(item => item.favorite === true).length;
+    
+    const now = Date.now();
+    const dueCards = history.filter(item => (item.nextReview || 0) <= now).length;
+    
+    // Estimate total reviews (if we don't have exact counts, we can estimate based on intervals)
+    // For now, let's just count how many items have an interval set (meaning they've been reviewed at least once)
+    const totalReviews = history.filter(item => item.interval > 0).length;
+
+    document.getElementById('stat-total-words').textContent = totalWords;
+    document.getElementById('stat-favorites').textContent = favorites;
+    document.getElementById('stat-due-cards').textContent = dueCards;
+    document.getElementById('stat-total-reviews').textContent = totalReviews;
+
+    // 2. Render Heatmap (90 Days)
+    const heatmapGrid = document.getElementById('heatmap-grid');
+    heatmapGrid.innerHTML = '';
+    
+    const daysToRender = 90;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0); // Start of today
+
+    // Map timestamps to days
+    const activityMap = new Map();
+    history.forEach(item => {
+      // Activity counts both when a word was added (item.timestamp) AND when it was reviewed (item.lastReviewed)
+      const datesToLog = [item.timestamp];
+      if (item.lastReviewed) datesToLog.push(item.lastReviewed);
+
+      datesToLog.forEach(ts => {
+        if (!ts) return;
+        const d = new Date(ts);
+        d.setHours(0, 0, 0, 0);
+        const dayDiff = Math.floor((today.getTime() - d.getTime()) / (1000 * 60 * 60 * 24));
+        if (dayDiff >= 0 && dayDiff < daysToRender) {
+          activityMap.set(dayDiff, (activityMap.get(dayDiff) || 0) + 1);
+        }
+      });
+    });
+
+    // Determine grid layout (13 weeks = 91 days, we'll render exactly 90 cells)
+    // CSS grid is set to column flow.
+    for (let i = daysToRender - 1; i >= 0; i--) {
+      const cell = document.createElement('div');
+      cell.className = 'heatmap-cell';
+      
+      const count = activityMap.get(i) || 0;
+      if (count > 0 && count <= 2) cell.dataset.level = "1";
+      else if (count > 2 && count <= 5) cell.dataset.level = "2";
+      else if (count > 5 && count <= 10) cell.dataset.level = "3";
+      else if (count > 10) cell.dataset.level = "4";
+
+      // Tooltip with date and count
+      const cellDate = new Date(today.getTime() - (i * 24 * 60 * 60 * 1000));
+      const dateStr = cellDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      cell.title = `${count} interactions on ${dateStr}`;
+
+      heatmapGrid.appendChild(cell);
+    }
+  });
+}

@@ -384,3 +384,17 @@ function triggerBackup(type = "Auto") {
     });
   });
 }
+
+// --- NEW: Intercept PDF URLs and redirect to custom PDF.js viewer ---
+chrome.webNavigation.onBeforeNavigate.addListener((details) => {
+  if (details.frameId !== 0) return;
+  const url = details.url;
+  if (url.includes(chrome.runtime.id) && url.includes('/pdf/web/viewer.html')) return;
+  try {
+    const urlObj = new URL(url);
+    if (urlObj.pathname.toLowerCase().endsWith('.pdf')) {
+      const viewerUrl = chrome.runtime.getURL('pdf/web/viewer.html?file=' + encodeURIComponent(url));
+      chrome.tabs.update(details.tabId, { url: viewerUrl });
+    }
+  } catch (e) {}
+});

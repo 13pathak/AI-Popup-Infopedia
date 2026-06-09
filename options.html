@@ -248,6 +248,74 @@
         }
 
         /* Common Icon Button Style */
+        
+        /* --- STATS DASHBOARD STYLES --- */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+
+        .stat-card {
+            background-color: var(--input-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 1.8em;
+            font-weight: 600;
+            color: var(--primary-color);
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            font-size: 0.85em;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .heatmap-container {
+            background-color: var(--input-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 25px;
+            overflow-x: auto;
+        }
+
+        .heatmap-grid {
+            display: grid;
+            grid-template-rows: repeat(7, 12px);
+            grid-auto-flow: column;
+            grid-auto-columns: 12px;
+            gap: 4px;
+            align-items: center;
+            justify-content: center;
+            margin-top: 10px;
+        }
+
+        .heatmap-cell {
+            width: 12px;
+            height: 12px;
+            border-radius: 3px;
+            background-color: var(--button-bg);
+            transition: transform 0.1s;
+        }
+
+        .heatmap-cell:hover {
+            transform: scale(1.2);
+        }
+
+        .heatmap-cell[data-level="1"] { background-color: #0e4429; }
+        .heatmap-cell[data-level="2"] { background-color: #006d32; }
+        .heatmap-cell[data-level="3"] { background-color: #26a641; }
+        .heatmap-cell[data-level="4"] { background-color: #39d353; }
+
         .icon-btn,
         .delete-item-btn,
         .edit-item-btn,
@@ -596,6 +664,22 @@
             <div id="followup-status" style="margin-top: 10px; font-weight: bold; min-height: 1em;"></div>
         </div>
 
+        <div id="pdf-settings-container"
+            style="margin-top: 30px; padding-top: 20px; border-top: 1px solid var(--border-color);">
+            <h3 style="color: var(--primary-color); margin-top: 0;">PDF Support</h3>
+            <p style="margin-bottom: 10px;">The AI Popup Infopedia supports reading and translating PDFs using a built-in viewer.</p>
+            <div id="file-access-warning" style="display: none; background-color: rgba(239, 68, 68, 0.1); border: 1px solid var(--danger-color); padding: 15px; border-radius: 8px;">
+                <h4 style="color: var(--danger-color); margin-top: 0; margin-bottom: 5px;">Local PDF Access is Disabled</h4>
+                <p style="margin: 0; font-size: 0.9em;">To use the AI Popup on PDFs saved to your computer (file:// URLs), you must allow file access in Chrome.</p>
+                <button id="open-extensions-page-btn" style="margin-top: 10px; background-color: var(--danger-color);">Open Extension Settings</button>
+                <p style="margin: 5px 0 0 0; font-size: 0.8em; color: var(--text-muted);">Enable the toggle for <strong>"Allow access to file URLs"</strong>.</p>
+            </div>
+            <div id="file-access-success" style="display: none; background-color: rgba(16, 185, 129, 0.1); border: 1px solid var(--secondary-color); padding: 15px; border-radius: 8px;">
+                <h4 style="color: var(--secondary-color); margin-top: 0; margin-bottom: 5px;">Local PDF Access is Enabled</h4>
+                <p style="margin: 0; font-size: 0.9em;">You can now use the AI Popup on local PDFs!</p>
+            </div>
+        </div>
+
         <div id="status"></div>
     </div>
 
@@ -731,10 +815,49 @@
 
     <!-- --- NEW FLASHCARDS TAB CONTENT --- -->
     <div id="flashcards-content" class="tab-content">
-        <h2>Flashcard Review</h2>
-        <p>Review your saved words with spaced repetition. Cards due for review will appear here.</p>
+        <h2>Flashcards & Stats</h2>
+        <p style="margin-bottom: 20px;">Review your saved words and track your learning progress.</p>
 
-        <div id="flashcard-controls" style="margin-bottom: 20px; display: flex; gap: 10px; align-items: center;">
+        <!-- --- NEW: Stats Dashboard --- -->
+        <div class="dashboard-grid">
+            <div class="stat-card">
+                <div class="stat-value" id="stat-total-words">0</div>
+                <div class="stat-label">Total Words</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="stat-favorites">0</div>
+                <div class="stat-label">Favorites ⭐</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="stat-due-cards">0</div>
+                <div class="stat-label">Cards Due</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="stat-total-reviews">0</div>
+                <div class="stat-label">Total Reviews</div>
+            </div>
+        </div>
+
+        <div class="heatmap-container">
+            <h4 style="margin-bottom: 5px; text-align: center;">Activity (Last 90 Days)</h4>
+            <div class="heatmap-grid" id="heatmap-grid">
+                <!-- Heatmap cells will be generated here -->
+            </div>
+            <div style="text-align: center; margin-top: 10px; font-size: 0.8em; color: var(--text-muted);">
+                <span>Less</span>
+                <span class="heatmap-cell" style="display:inline-block; margin: 0 2px;"></span>
+                <span class="heatmap-cell" data-level="1" style="display:inline-block; margin: 0 2px;"></span>
+                <span class="heatmap-cell" data-level="2" style="display:inline-block; margin: 0 2px;"></span>
+                <span class="heatmap-cell" data-level="3" style="display:inline-block; margin: 0 2px;"></span>
+                <span class="heatmap-cell" data-level="4" style="display:inline-block; margin: 0 2px;"></span>
+                <span>More</span>
+            </div>
+        </div>
+        <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 25px 0;">
+
+        <!-- Flashcards Setup -->
+        <div id="flashcard-setup"
+            style="margin-bottom: 20px; padding: 15px; background-color: var(--input-bg); border-radius: 4px; display: flex; gap: 10px; align-items: center;">
             <select id="flashcard-list-select" style="flex-grow: 1;">
                 <option value="all">All Lists</option>
             </select>
