@@ -405,7 +405,9 @@ chrome.webNavigation.onBeforeNavigate.addListener((details) => {
 // --- NEW: Intercept any URL that returns a PDF Content-Type ---
 chrome.webRequest.onHeadersReceived.addListener(
   (details) => {
-    if (details.frameId !== 0) return;
+    // ONLY intercept main frame navigations. Ignore xmlhttprequest/fetch from pdf.js
+    if (details.type !== 'main_frame') return;
+    
     const url = details.url;
     if (url.includes(chrome.runtime.id) && url.includes('/pdf/web/viewer.html')) return;
 
