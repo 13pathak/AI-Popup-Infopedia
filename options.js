@@ -129,14 +129,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
   safeAddListener('toggle-bulk-mode', 'click', toggleBulkMode);
   safeAddListener('select-all-checkbox', 'change', toggleSelectAll);
-  document.getElementById('bulk-delete-btn').addEventListener('click', bulkDelete);
-  document.getElementById('bulk-move-btn').addEventListener('click', bulkMove);
-  document.getElementById('bulk-anki-btn').addEventListener('click', bulkExportToAnki);
+  safeAddListener('bulk-delete-btn', 'click', bulkDelete);
+  safeAddListener('bulk-move-btn', 'click', bulkMove);
+  safeAddListener('bulk-anki-btn', 'click', bulkExportToAnki);
 
   // --- NEW: Flashcard Event Listeners ---
-  document.getElementById('start-review-btn').addEventListener('click', startFlashcardReview);
-  document.getElementById('show-answer-btn').addEventListener('click', showFlashcardAnswer);
-  document.getElementById('review-again-btn').addEventListener('click', startFlashcardReview);
+  safeAddListener('start-review-btn', 'click', startFlashcardReview);
+  safeAddListener('show-answer-btn', 'click', showFlashcardAnswer);
+  safeAddListener('review-again-btn', 'click', startFlashcardReview);
   document.querySelectorAll('.rating-btn').forEach(btn => {
     btn.addEventListener('click', (e) => rateFlashcard(parseInt(e.target.dataset.rating)));
   });
@@ -519,7 +519,6 @@ function loadLists() {
       deleteBtn.disabled = false;
 
       // --- NEW: Show and update clear list button ---
-      const selectedListName = listSelect.options[listSelect.selectedIndex]?.text || lists[0].name;
       clearListBtn.textContent = `Clear Selected List`;
       clearListBtn.style.display = 'inline-block';
       // Buttons will be enabled/disabled later based on selection
@@ -685,7 +684,7 @@ function loadHistory(listId) {
         itemElement.dataset.timestamp = item.timestamp;
         itemElement.dataset.listId = item.listId; // Add listId to the element
 
-        let formattedDefinition = item.definition
+        let formattedDefinition = escapeHTML(item.definition)
           .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
           .replace(/\n/g, '<br>');
 
@@ -902,7 +901,7 @@ function handleSaveClick(event) {
 // --- handleCancelClick ---
 function handleCancelClick(event) {
   // Simply reload the current list's history to discard changes
-  loadHistory(document.getElementById('list-select').value);
+  applyFilters();
 }
 
 // --- updateHistoryItem ---
@@ -923,7 +922,7 @@ function updateHistoryItem(timestamp, newWord, newDefinition, newListId) {
     });
 
     chrome.storage.local.set({ history: newHistory }, () => {
-      loadHistory(document.getElementById('list-select').value);
+      applyFilters();
     });
   });
 }
@@ -1058,7 +1057,7 @@ function exportHistory() {
     }
 
     // --- REVISED HEADERS: Include all fields including flashcard progress ---
-    const headers = ['timestamp', 'word', 'definition', 'listName', 'modelName', 'sourceUrl', 'sourceTitle', 'favorite', 'nextReview', 'interval', 'lastReviewed'];
+    const headers = ['timestamp', 'word', 'definition', 'listName', 'modelName', 'promptName', 'sourceUrl', 'sourceTitle', 'favorite', 'nextReview', 'interval', 'lastReviewed'];
     const csvRows = [
       headers.join(','),
       ...historyToExport.map(item => [
@@ -1067,6 +1066,7 @@ function exportHistory() {
         escapeCSV(item.definition),
         escapeCSV(listIdToNameMap[item.listId] || 'Unlisted'),
         escapeCSV(item.modelName || ''),
+        escapeCSV(item.promptName || ''),
         escapeCSV(item.sourceUrl || ''),
         escapeCSV(item.sourceTitle || ''),
         escapeCSV(item.favorite ? 'true' : 'false'),
@@ -1116,7 +1116,7 @@ function exportAllHistory() {
       listIdToNameMap[list.id] = list.name;
     });
 
-    const headers = ['timestamp', 'word', 'definition', 'listName', 'modelName', 'sourceUrl', 'sourceTitle', 'favorite', 'nextReview', 'interval', 'lastReviewed'];
+    const headers = ['timestamp', 'word', 'definition', 'listName', 'modelName', 'promptName', 'sourceUrl', 'sourceTitle', 'favorite', 'nextReview', 'interval', 'lastReviewed'];
     const csvRows = [
       headers.join(','),
       ...allHistory.map(item => [
@@ -1125,6 +1125,7 @@ function exportAllHistory() {
         escapeCSV(item.definition),
         escapeCSV(listIdToNameMap[item.listId] || 'Unlisted'),
         escapeCSV(item.modelName || ''),
+        escapeCSV(item.promptName || ''),
         escapeCSV(item.sourceUrl || ''),
         escapeCSV(item.sourceTitle || ''),
         escapeCSV(item.favorite ? 'true' : 'false'),
@@ -1238,6 +1239,7 @@ function importHistory(event) {
     const defIndex = headers.indexOf('definition');
     const listNameIndex = headers.indexOf('listName');
     const modelNameIndex = headers.indexOf('modelName');
+    const promptNameIndex = headers.indexOf('promptName');
     const sourceUrlIndex = headers.indexOf('sourceUrl');
     const sourceTitleIndex = headers.indexOf('sourceTitle');
     const favoriteIndex = headers.indexOf('favorite');
@@ -1270,6 +1272,9 @@ function importHistory(event) {
         }
         if (modelNameIndex !== -1 && fields[modelNameIndex]) {
           newItem.modelName = fields[modelNameIndex];
+        }
+        if (promptNameIndex !== -1 && fields[promptNameIndex]) {
+          newItem.promptName = fields[promptNameIndex];
         }
         if (sourceUrlIndex !== -1 && fields[sourceUrlIndex]) {
           newItem.sourceUrl = fields[sourceUrlIndex];
@@ -1798,7 +1803,7 @@ function restoreBackup() {
       // Update: The requirement is to restore history, lists, settings.
       // Let's iterate over keys and save them to storage.
 
-      const keysToRestore = ['history', 'lists', 'wordLists', 'settings', 'models', 'customPrompts', 'ttsSettings', 'ankiSettings'];
+      const keysToRestore = ['history', 'wordLists', 'lists'];
       const dataToSave = {};
       let restoredCount = 0;
 
@@ -2291,7 +2296,7 @@ function renderFilteredHistory(history) {
       itemElement.dataset.timestamp = item.timestamp;
       itemElement.dataset.listId = item.listId;
 
-      let formattedDefinition = item.definition
+      let formattedDefinition = escapeHTML(item.definition)
         .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
         .replace(/\n/g, '<br>');
 

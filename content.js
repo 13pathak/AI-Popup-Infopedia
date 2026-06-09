@@ -488,7 +488,7 @@ function renderMessages(instance) {
       formattedContent = String(formattedContent);
       
       // Only format markdown if it's not an already HTML styled error/thinking message
-      if (!msg.isError && !msg.isThinking && !msg.needsRetry) {
+      if (!msg.isError && !msg.isThinking && !msg.needsRetry && !msg.isStatus) {
         formattedContent = formattedContent.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
         formattedContent = formattedContent.replace(/\n/g, '<br>');
       }
@@ -549,7 +549,7 @@ function renderMessages(instance) {
 
 // Temporary compatibility function
 function updatePopupContent(instance, content) {
-  instance.messages = [{ role: 'assistant', content: content, isError: true }];
+  instance.messages = [{ role: 'assistant', content: content, isStatus: true }];
   renderMessages(instance);
 }
 
@@ -983,7 +983,6 @@ function createActionButtons(instance, word, definition, modelName, promptName) 
     });
 
     // 4. Add the new controls directly to the container
-    // 4. Add the new controls directly to the container
     actionsContainer.appendChild(speakButton); // Add speaker first
     actionsContainer.appendChild(pdfButton); // Add PDF button next
     actionsContainer.appendChild(pinButton); // Add Pin button next
@@ -1149,8 +1148,14 @@ function removeAllPopups() {
 
 function removeLastPopup() {
   if (activePopups.length === 0) return;
-  const lastInstance = activePopups.pop();
-  if (lastInstance.container) lastInstance.container.remove();
+  // Find the last non-pinned popup from the end
+  for (let i = activePopups.length - 1; i >= 0; i--) {
+    if (!activePopups[i].isPinned) {
+      const instance = activePopups.splice(i, 1)[0];
+      if (instance.container) instance.container.remove();
+      break;
+    }
+  }
   if (activePopups.length === 0) {
     window.speechSynthesis.cancel();
   }
@@ -1167,16 +1172,15 @@ function removePopupInstance(instance) {
   }
 }
 
-// --- Text-to-Speech Logic (Scope: Global but controlled per button) ---
-let isSpeaking = false;
+// --- Text-to-Speech Logic (per-instance speaking state) ---
 
 function toggleSpeech(instance, text) {
   const popup = instance.popup;
   const btn = popup.querySelector('#ai-popup-speak-btn'); // Only controls THIS popup's button
 
-  if (isSpeaking) {
+  if (instance.isSpeaking) {
     window.speechSynthesis.cancel();
-    isSpeaking = false;
+    instance.isSpeaking = false;
     if (btn) btn.innerHTML = '🔊';
     // Reset all buttons just in case? Or just the active one?
     // Let's reset all check to simple state
@@ -1203,18 +1207,18 @@ function toggleSpeech(instance, text) {
       }
 
       utterance.onend = () => {
-        isSpeaking = false;
+        instance.isSpeaking = false;
         if (btn) btn.innerHTML = '🔊';
       };
 
       utterance.onerror = (e) => {
         console.error("Speech error", e);
-        isSpeaking = false;
+        instance.isSpeaking = false;
         if (btn) btn.innerHTML = '🔊';
       };
 
       window.speechSynthesis.speak(utterance);
-      isSpeaking = true;
+      instance.isSpeaking = true;
       if (btn) btn.innerHTML = '⏹'; // Stop icon
     });
   }
@@ -1259,8 +1263,8 @@ function saveConversationAsPdf(instance) {
     let formattedContent = String(content);
     
     if (msg.role !== 'user') {
-      formattedContent = formattedContent.replace(/\\*\\*(.*?)\\*\\*/g, '<strong>$1</strong>');
-      formattedContent = formattedContent.replace(/\\n/g, '<br>');
+      formattedContent = formattedContent.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+      formattedContent = formattedContent.replace(/\n/g, '<br>');
     }
     
     html += `<div class="message ${className}"><div class="role">${roleName}</div><div>${formattedContent}</div></div>`;

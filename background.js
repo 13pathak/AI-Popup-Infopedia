@@ -62,7 +62,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
       }
 
-      const prompt = promptTemplate.replace('{word}', word);
+      const prompt = promptTemplate.replaceAll('{word}', word);
 
       // Sanitize the messages array for strict API compatibility
       let safeMessagesText = [];
@@ -107,7 +107,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           if (contentType && contentType.includes("application/json")) {
             const errorData = await response.json();
             console.error("API Error Details (JSON):", errorData);
-            errorMsg = errorData.error || errorMsg;
+            errorMsg = (typeof errorData.error === 'string' ? errorData.error : errorData.error?.message) || errorMsg;
           } else {
             const errorText = await response.text();
             console.error("API Error Details (Text):", errorText);
@@ -187,14 +187,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // --- NEW: Case 5: Check Backup manually (from Options) ---
   if (request.type === "checkBackupReminder") {
     performAutoBackupCheck();
-    return true;
   }
 
   // --- NEW: Case 6: Force Manual Backup ---
   if (request.type === "manualBackup" || request.type === "testBackup") {
     // Force a backup regardless of time
     triggerBackup("Manual");
-    return true;
   }
 
 });
