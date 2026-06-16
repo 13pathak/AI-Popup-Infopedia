@@ -232,9 +232,41 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       const rect = selection.getRangeAt(0).getBoundingClientRect();
       // For manual trigger, we can skip the Open button and just show the popup.
       initiatePopupSequence(rect, selectedText);
+    } else {
+      // NEW: Trigger empty popup for questioning when no text is selected
+      initiateEmptyPopupSequence();
     }
   }
 });
+
+function initiateEmptyPopupSequence() {
+  const popupInstance = showPopup(0, 0, "Initializing...");
+  popupInstance.sourceText = ""; 
+  popupInstance.sourceWord = "Custom Question";
+
+  chrome.storage.sync.get(['models', 'defaultModelId', 'customPrompts', 'defaultPromptId'], (data) => {
+    if (!activePopups.includes(popupInstance)) return;
+    
+    popupInstance.messages = [
+      { role: 'assistant', content: "Hi! What would you like to ask?" }
+    ];
+    renderMessages(popupInstance);
+    
+    if (data.models && data.models.length > 0) {
+      createSelectors(popupInstance, data.models, data.customPrompts, data.defaultModelId, null, "Custom Question", data.defaultPromptId);
+    }
+    
+    const defaultModelName = data.models ? (data.models.find(m => m.id === data.defaultModelId)?.name || 'Unknown Model') : 'Unknown Model';
+    createActionButtons(popupInstance, "Custom Question", "Conversation started from hotkey.", defaultModelName, "Default");
+    
+    adjustPopupPosition(popupInstance, null);
+    
+    setTimeout(() => {
+      const input = popupInstance.popup.querySelector('#ai-popup-followup-input');
+      if (input) input.focus();
+    }, 100);
+  });
+}
 
 // --- NEW: Function to show intermediate 'Open' button ---
 function showOpenButtonPopup(rect, selectedText) {
@@ -950,14 +982,27 @@ function createActionButtons(instance, word, definition, modelName, promptName) 
       ev.stopPropagation();
       const selectedListId = listSelector.value;
 
-      // --- REMOVED: Deselect text ---
-      // window.getSelection().removeAllRanges();
+      let wordToSave = word;
+      let definitionToSave = definition;
+
+      // If this was started from an empty hotkey popup, use the actual conversation instead of dummy text
+      if (word === "Custom Question") {
+        let foundUserMsg = false;
+        for (let i = 0; i < instance.messages.length; i++) {
+          if (instance.messages[i].role === 'user') {
+            wordToSave = instance.messages[i].displayContent || instance.messages[i].content;
+            foundUserMsg = true;
+          } else if (foundUserMsg && instance.messages[i].role === 'assistant' && !instance.messages[i].isThinking && !instance.messages[i].isError) {
+            definitionToSave = instance.messages[i].content;
+          }
+        }
+      }
 
       // Send message to background to save with listId
       chrome.runtime.sendMessage({
         type: "saveToHistory",
-        word: word,
-        definition: definition,
+        word: wordToSave,
+        definition: definitionToSave,
         listId: selectedListId,
         modelName: modelName,
         promptName: promptName,

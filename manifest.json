@@ -17,7 +17,7 @@
       "suggested_key": {
         "default": "Ctrl+Shift+Y"
       },
-      "description": "Trigger AI Popup for selected text"
+      "description": "Trigger AI Popup"
     }
   },
   "host_permissions": [
