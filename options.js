@@ -43,6 +43,11 @@ document.addEventListener('DOMContentLoaded', () => {
       if (tab.dataset.tab === "tts-content") {
         loadTTSSettings();
       }
+      
+      // --- NEW: Load STT Settings when tab is clicked ---
+      if (tab.dataset.tab === "stt-content") {
+        loadSTTSettings();
+      }
     });
   });
 
@@ -122,6 +127,15 @@ document.addEventListener('DOMContentLoaded', () => {
   safeAddListener('tts-rate-range', 'input', (e) => {
     const valSpan = document.getElementById('tts-rate-value');
     if (valSpan) valSpan.textContent = e.target.value;
+  });
+
+  // --- STT Event Listeners ---
+  safeAddListener('stt-save-btn', 'click', saveSTTSettings);
+  safeAddListener('stt-engine-select', 'change', (e) => {
+    const apiSettings = document.getElementById('stt-api-settings');
+    if (apiSettings) {
+      apiSettings.style.display = e.target.value === 'api' ? 'block' : 'none';
+    }
   });
 
   safeAddListener('history-search', 'input', debounce(applyFilters, 300));
@@ -2798,6 +2812,78 @@ function loadStats() {
       cell.title = `${count} interactions on ${dateStr}`;
 
       heatmapGrid.appendChild(cell);
+    }
+  });
+}
+
+// --- STT Settings ---
+function loadSTTSettings() {
+  chrome.storage.sync.get({
+    sttEngine: 'native',
+    sttApiKey: '',
+    sttApiUrl: 'https://api.openai.com/v1/audio/transcriptions',
+    sttModel: 'whisper-1',
+    sttCustomHeaders: '',
+    sttCustomFormData: ''
+  }, (items) => {
+    const engineSelect = document.getElementById('stt-engine-select');
+    if (engineSelect) {
+      engineSelect.value = items.sttEngine;
+      // Trigger change to update visibility
+      engineSelect.dispatchEvent(new Event('change'));
+    }
+    const apiKeyInput = document.getElementById('stt-api-key');
+    if (apiKeyInput) apiKeyInput.value = items.sttApiKey;
+
+    const apiUrlInput = document.getElementById('stt-api-url');
+    if (apiUrlInput) apiUrlInput.value = items.sttApiUrl;
+
+    const modelInput = document.getElementById('stt-model');
+    if (modelInput) modelInput.value = items.sttModel;
+    
+    const headersInput = document.getElementById('stt-custom-headers');
+    if (headersInput) headersInput.value = items.sttCustomHeaders;
+
+    const formDataInput = document.getElementById('stt-custom-formdata');
+    if (formDataInput) formDataInput.value = items.sttCustomFormData;
+  });
+}
+
+function saveSTTSettings() {
+  const engine = document.getElementById('stt-engine-select')?.value || 'native';
+  const apiKey = document.getElementById('stt-api-key')?.value || '';
+  const apiUrl = document.getElementById('stt-api-url')?.value || '';
+  const model = document.getElementById('stt-model')?.value || '';
+  const customHeaders = document.getElementById('stt-custom-headers')?.value || '';
+  const customFormData = document.getElementById('stt-custom-formdata')?.value || '';
+
+  // Basic JSON validation before saving
+  try {
+    if (customHeaders.trim()) JSON.parse(customHeaders);
+    if (customFormData.trim()) JSON.parse(customFormData);
+  } catch (e) {
+    const statusEl = document.getElementById('stt-status');
+    if (statusEl) {
+      statusEl.textContent = 'Error: Invalid JSON format in Custom Headers or Form Data.';
+      statusEl.style.color = '#d9534f';
+      setTimeout(() => { statusEl.textContent = ''; }, 3000);
+    }
+    return; // Don't save if invalid JSON
+  }
+
+  chrome.storage.sync.set({
+    sttEngine: engine,
+    sttApiKey: apiKey,
+    sttApiUrl: apiUrl,
+    sttModel: model,
+    sttCustomHeaders: customHeaders,
+    sttCustomFormData: customFormData
+  }, () => {
+    const statusEl = document.getElementById('stt-status');
+    if (statusEl) {
+      statusEl.textContent = 'Settings saved successfully!';
+      statusEl.style.color = 'var(--secondary-color)';
+      setTimeout(() => { statusEl.textContent = ''; }, 3000);
     }
   });
 }

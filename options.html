@@ -580,6 +580,7 @@
         <button class="tab-button" data-tab="reminder-content">Backup</button>
         <button class="tab-button" data-tab="prompts-content">Prompts</button>
         <button class="tab-button" data-tab="tts-content">Text-to-Speech</button>
+        <button class="tab-button" data-tab="stt-content">Speech-to-Text</button>
     </div>
 
     <div id="status-global"></div>
@@ -1024,6 +1025,54 @@
             <button id="tts-save-btn" style="background-color: var(--secondary-color);">Save Settings</button>
         </div>
         <div id="tts-status" style="margin-top: 10px; font-weight: bold; min-height: 1em;"></div>
+    </div>
+
+    <!-- --- NEW STT TAB CONTENT --- -->
+    <div id="stt-content" class="tab-content">
+        <h2>Speech-to-Text Settings</h2>
+        <p>Configure the speech recognition engine used for typing by speaking.</p>
+
+        <div class="form-group">
+            <label for="stt-engine-select">Select Engine:</label>
+            <select id="stt-engine-select"
+                style="width: 100%; padding: 8px; margin-top: 5px; background: #333; color: #fff; border: 1px solid #555;">
+                <option value="native">Chrome Native (Free)</option>
+                <option value="api">API-Based (e.g., Whisper)</option>
+            </select>
+        </div>
+
+        <div id="stt-api-settings" style="display: none; margin-top: 20px;">
+            <div class="form-group">
+                <label for="stt-api-key">API Key (optional if using custom headers):</label>
+                <input type="password" id="stt-api-key" placeholder="sk-..."
+                    style="width: 100%; padding: 8px; margin-top: 5px; background: #333; color: #fff; border: 1px solid #555;">
+            </div>
+            <div class="form-group" style="margin-top: 10px;">
+                <label for="stt-api-url">API URL:</label>
+                <input type="text" id="stt-api-url" placeholder="https://api.openai.com/v1/audio/transcriptions"
+                    style="width: 100%; padding: 8px; margin-top: 5px; background: #333; color: #fff; border: 1px solid #555;">
+            </div>
+            <div class="form-group" style="margin-top: 10px;">
+                <label for="stt-model">Model Name:</label>
+                <input type="text" id="stt-model" placeholder="whisper-1"
+                    style="width: 100%; padding: 8px; margin-top: 5px; background: #333; color: #fff; border: 1px solid #555;">
+            </div>
+            <div class="form-group" style="margin-top: 10px;">
+                <label for="stt-custom-headers">Custom Headers (JSON format, e.g., {"api-subscription-key": "..."}):</label>
+                <textarea id="stt-custom-headers" placeholder='{ "Authorization": "Bearer YOUR_KEY" }'
+                    style="width: 100%; padding: 8px; margin-top: 5px; background: #333; color: #fff; border: 1px solid #555; height: 60px; font-family: monospace;"></textarea>
+            </div>
+            <div class="form-group" style="margin-top: 10px;">
+                <label for="stt-custom-formdata">Additional Form Data (JSON format, e.g., {"mode": "transcribe"}):</label>
+                <textarea id="stt-custom-formdata" placeholder='{ "mode": "transcribe" }'
+                    style="width: 100%; padding: 8px; margin-top: 5px; background: #333; color: #fff; border: 1px solid #555; height: 60px; font-family: monospace;"></textarea>
+            </div>
+        </div>
+
+        <div style="margin-top: 30px;">
+            <button id="stt-save-btn" style="background-color: var(--secondary-color);">Save Settings</button>
+        </div>
+        <div id="stt-status" style="margin-top: 10px; font-weight: bold; min-height: 1em;"></div>
     </div>
 
     <script src="options.js"></script>

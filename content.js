@@ -131,6 +131,38 @@ const popupStyles = `
     background: #62c3b8;
   }
 
+  /* --- NEW: Follow-up Mic Button --- */
+  .ai-popup-followup-mic {
+    background: #444;
+    color: #eee;
+    border: 1px solid #666;
+    border-radius: 4px;
+    padding: 6px 10px;
+    cursor: pointer;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+  }
+
+  .ai-popup-followup-mic:hover {
+    background: #555;
+  }
+
+  .ai-popup-followup-mic.recording {
+    background: #e53935;
+    color: #fff;
+    border-color: #e53935;
+    animation: ai-popup-pulse 1.5s infinite;
+  }
+
+  @keyframes ai-popup-pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+    100% { transform: scale(1); }
+  }
+
   /* --- NEW: Open Button Popup --- */
   #ai-open-button-popup {
     position: fixed;
@@ -1063,7 +1095,13 @@ function createFollowupInput(instance, word) {
   sendBtn.className = 'ai-popup-followup-send';
   sendBtn.textContent = 'Send';
 
+  const micBtn = document.createElement('button');
+  micBtn.className = 'ai-popup-followup-mic';
+  micBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>';
+  micBtn.title = 'Type by speaking';
+
   container.appendChild(input);
+  container.appendChild(micBtn);
   container.appendChild(sendBtn);
   popup.appendChild(container);
 
@@ -1081,8 +1119,186 @@ function createFollowupInput(instance, word) {
     }
   });
 
+  // --- Speech Recognition Logic ---
+  let isRecording = false;
+  let activeMediaRecorder = null;
+  let audioChunks = [];
+  let nativeRecognition = null;
+  
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (SpeechRecognition) {
+    nativeRecognition = new SpeechRecognition();
+    nativeRecognition.continuous = true;
+    nativeRecognition.interimResults = true;
+    
+    nativeRecognition.onstart = () => {
+      isRecording = true;
+      micBtn.classList.add('recording');
+      instance.isInteracting = true;
+    };
+    
+    nativeRecognition.onend = () => {
+      isRecording = false;
+      micBtn.classList.remove('recording');
+      setTimeout(() => { instance.isInteracting = false; }, 200);
+      input.focus();
+    };
+    
+    nativeRecognition.onerror = (e) => {
+      console.error('Speech recognition error:', e.error);
+      isRecording = false;
+      micBtn.classList.remove('recording');
+    };
+    
+    nativeRecognition.onresult = (e) => {
+      let finalTranscript = '';
+      for (let i = e.resultIndex; i < e.results.length; ++i) {
+        if (e.results[i].isFinal) {
+          finalTranscript += e.results[i][0].transcript;
+        }
+      }
+      if (finalTranscript) {
+        const currentValue = input.value;
+        input.value = currentValue ? currentValue + ' ' + finalTranscript : finalTranscript;
+      }
+    };
+  }
+
+  async function startApiRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      activeMediaRecorder = new MediaRecorder(stream);
+      audioChunks = [];
+      
+      activeMediaRecorder.ondataavailable = e => {
+        if (e.data.size > 0) audioChunks.push(e.data);
+      };
+      
+      activeMediaRecorder.onstart = () => {
+        isRecording = true;
+        micBtn.classList.add('recording');
+        instance.isInteracting = true;
+      };
+      
+      activeMediaRecorder.onstop = async () => {
+        isRecording = false;
+        micBtn.classList.remove('recording');
+        micBtn.style.opacity = '0.5'; // Visual feedback for processing
+        
+        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+        
+        // Stop all tracks to release mic
+        stream.getTracks().forEach(track => track.stop());
+        
+        // Fetch settings and process
+        chrome.storage.sync.get({
+          sttApiKey: '',
+          sttApiUrl: 'https://api.openai.com/v1/audio/transcriptions',
+          sttModel: 'whisper-1',
+          sttCustomHeaders: '',
+          sttCustomFormData: ''
+        }, async (settings) => {
+          // If custom headers are provided, we don't strictly require sttApiKey 
+          // because the API key might be inside the custom JSON.
+          if (!settings.sttApiKey && !settings.sttCustomHeaders) {
+            alert("Speech-to-Text API Key is not configured.");
+            micBtn.style.opacity = '1';
+            return;
+          }
+          
+          const formData = new FormData();
+          formData.append('file', audioBlob, 'audio.wav');
+          formData.append('model', settings.sttModel);
+          
+          if (settings.sttCustomFormData) {
+            try {
+              const customData = JSON.parse(settings.sttCustomFormData);
+              for (const [key, value] of Object.entries(customData)) {
+                formData.append(key, value);
+              }
+            } catch(e) {
+              console.error("Invalid custom form data JSON", e);
+            }
+          }
+          
+          try {
+            let headers = { 'Authorization': `Bearer ${settings.sttApiKey}` };
+            if (settings.sttCustomHeaders) {
+              try {
+                headers = JSON.parse(settings.sttCustomHeaders);
+              } catch(e) {
+                console.error("Invalid custom headers JSON", e);
+              }
+            }
+
+            const response = await fetch(settings.sttApiUrl, {
+              method: 'POST',
+              headers: headers,
+              body: formData
+            });
+            
+            if (!response.ok) {
+              const err = await response.text();
+              throw new Error(`API Error: ${response.status} ${err}`);
+            }
+            
+            const data = await response.json();
+            // Sarvam might return text differently or in a different field. Usually it's data.transcript or data.text
+            // Let's handle both
+            const transcribedText = data.text || data.transcript || data.transcription || '';
+            if (transcribedText) {
+              const currentValue = input.value;
+              input.value = currentValue ? currentValue + ' ' + transcribedText : transcribedText;
+            }
+          } catch (error) {
+            console.error("STT API Error:", error);
+            alert("Failed to transcribe audio.");
+          } finally {
+            micBtn.style.opacity = '1';
+            input.focus();
+            setTimeout(() => { instance.isInteracting = false; }, 200);
+          }
+        });
+      };
+      
+      activeMediaRecorder.start();
+    } catch (err) {
+      console.error("Microphone access denied:", err);
+      alert("Microphone access denied or unavailable.");
+    }
+  }
+
+  micBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    
+    if (isRecording) {
+      if (activeMediaRecorder && activeMediaRecorder.state !== 'inactive') {
+        activeMediaRecorder.stop();
+      } else if (nativeRecognition) {
+        nativeRecognition.stop();
+      }
+      return;
+    }
+    
+    chrome.storage.sync.get({ sttEngine: 'native' }, (items) => {
+      if (items.sttEngine === 'api') {
+        startApiRecording();
+      } else {
+        if (nativeRecognition) {
+          nativeRecognition.start();
+        } else {
+          alert("Native speech recognition is not supported in this browser.");
+        }
+      }
+    });
+  });
+
   sendBtn.addEventListener('click', (e) => {
     e.stopPropagation();
+    if (isRecording) {
+      if (activeMediaRecorder && activeMediaRecorder.state !== 'inactive') activeMediaRecorder.stop();
+      if (nativeRecognition) nativeRecognition.stop();
+    }
     submitFollowup();
   });
 

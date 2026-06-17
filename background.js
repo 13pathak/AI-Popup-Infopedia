@@ -309,7 +309,7 @@ chrome.downloads.onChanged.addListener((delta) => {
 function triggerBackup(type = "Auto") {
   // 1. Fetch all data to backup
   chrome.storage.local.get(['history', 'wordLists'], (localData) => {
-    chrome.storage.sync.get(['models', 'customPrompts', 'defaultModelId', 'defaultPromptId', 'ankiSettings', 'ttsSettings', 'backupReminderFrequency', 'backupSubfolder', 'followupCustomMessage', 'showUserQuestions'], (syncData) => {
+    chrome.storage.sync.get(['models', 'customPrompts', 'defaultModelId', 'defaultPromptId', 'ankiSettings', 'ttsSettings', 'backupReminderFrequency', 'backupSubfolder', 'followupCustomMessage', 'showUserQuestions', 'sttEngine', 'sttApiKey', 'sttApiUrl', 'sttModel', 'sttCustomHeaders', 'sttCustomFormData'], (syncData) => {
 
       const backupData = {
         history: localData.history || [],
@@ -320,6 +320,12 @@ function triggerBackup(type = "Auto") {
         defaultPromptId: syncData.defaultPromptId,
         ankiSettings: syncData.ankiSettings,
         ttsSettings: syncData.ttsSettings,
+        sttEngine: syncData.sttEngine,
+        sttApiKey: syncData.sttApiKey,
+        sttApiUrl: syncData.sttApiUrl,
+        sttModel: syncData.sttModel,
+        sttCustomHeaders: syncData.sttCustomHeaders,
+        sttCustomFormData: syncData.sttCustomFormData,
         backupReminderFrequency: syncData.backupReminderFrequency,
         backupSubfolder: syncData.backupSubfolder,
         followupCustomMessage: syncData.followupCustomMessage,
