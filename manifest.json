@@ -58,8 +58,7 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "pdf/*",
-        "content.js"
+        "pdf/*"
       ],
       "matches": [
         "<all_urls>"

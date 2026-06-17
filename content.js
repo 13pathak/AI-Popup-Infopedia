@@ -553,6 +553,12 @@ function renderMessages(instance) {
       
       // Only format markdown if it's not an already HTML styled error/thinking message
       if (!msg.isError && !msg.isThinking && !msg.needsRetry && !msg.isStatus) {
+        // Escape HTML characters to prevent XSS
+        formattedContent = formattedContent.replace(/&/g, '&amp;')
+                                           .replace(/</g, '&lt;')
+                                           .replace(/>/g, '&gt;')
+                                           .replace(/"/g, '&quot;')
+                                           .replace(/'/g, '&#039;');
         formattedContent = formattedContent.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
         formattedContent = formattedContent.replace(/\n/g, '<br>');
       }
