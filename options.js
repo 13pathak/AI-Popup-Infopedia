@@ -1886,7 +1886,7 @@ function restoreBackup() {
       if (restoredCount > 0) {
         chrome.storage.local.set(dataToSave, () => {
           // Also check for sync settings if any
-          const syncKeys = ['models', 'customPrompts', 'defaultModelId', 'defaultPromptId', 'ttsSettings', 'ankiSettings', 'backupReminderFrequency', 'backupSubfolder', 'followupCustomMessage', 'showUserQuestions'];
+          const syncKeys = ['models', 'customPrompts', 'defaultModelId', 'defaultPromptId', 'ttsSettings', 'ankiSettings', 'backupReminderFrequency', 'backupSubfolder', 'followupCustomMessage', 'showUserQuestions', 'sttEngine', 'sttApiKey', 'sttApiUrl', 'sttModel', 'sttCustomHeaders', 'sttCustomFormData'];
           const syncData = {};
           let syncCount = 0;
           for (const key of syncKeys) {
