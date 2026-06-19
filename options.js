@@ -547,6 +547,7 @@ function loadLists() {
       clearListBtn.style.display = 'none'; // Hide button
       loadHistory(null); // Load history with no list ID
     } else {
+      // Buttons get fine-tuned below based on the current selection.
       renameBtn.disabled = false;
       deleteBtn.disabled = false;
 
@@ -555,6 +556,15 @@ function loadLists() {
       clearListBtn.style.display = 'inline-block';
       // Buttons will be enabled/disabled later based on selection
     }
+
+    // --- NEW: "All Lists" pseudo-option ---
+    // Lets the user see every saved item, INCLUDING items whose listId is null
+    // (e.g. imported from an old backup or CSV without a list). Without this,
+    // unlisted items are unreachable through the UI.
+    const allOption = document.createElement('option');
+    allOption.value = "__all_lists__";
+    allOption.textContent = "🗂 All Lists";
+    listSelect.appendChild(allOption);
 
     lists.forEach(list => {
       const option = document.createElement('option');
@@ -575,23 +585,23 @@ function loadLists() {
       listSelect.value = currentVal;
     }
 
-    // --- NEW: Handle "Create New List" selection logic here ---
-    // But since this is inside loadLists, we should attach the listener OUTSIDE/ONCE.
-    // However, options.js attaches 'change' listener to applyFilters().
-    // We need to intercept that specific value in the change listener or wrap it.
-    // Let's modify the change listener in DOMContentLoaded!
-    // Wait, modifying DOMContentLoaded is separate. Here we ensure the option exists.
-
     // --- NEW: Disable/Enable move buttons based on selection ---
-    const selectedIndex = listSelect.selectedIndex;
-    // ... (rest of logic)
+    // Guard against the pseudo-options (All Lists / Create New) so moving only
+    // applies to a real list.
+    const selectedVal = listSelect.value;
+    const isRealListSelected = !!selectedVal &&
+      selectedVal !== "__all_lists__" &&
+      selectedVal !== "__create_new__";
+    const selectedIndex = isRealListSelected
+      ? lists.findIndex(l => l.id === selectedVal)
+      : -1;
     const listCount = lists.length;
-    moveUpBtn.disabled = selectedIndex <= 0;
-    moveDownBtn.disabled = selectedIndex >= listCount - 1 || listCount <= 1;
+    moveUpBtn.disabled = !isRealListSelected || selectedIndex <= 0;
+    moveDownBtn.disabled = !isRealListSelected || selectedIndex >= listCount - 1 || listCount <= 1;
 
     // --- NEW: Update clear list button text on change ---
     if (lists.length > 0) {
-      clearListBtn.textContent = `Clear Selected List`;
+      clearListBtn.textContent = isRealListSelected ? `Clear Selected List` : `Clear Selected List`;
     }
 
     // Load history for the currently selected list with filters
@@ -617,7 +627,7 @@ function addList() {
 function renameList() {
   const listSelect = document.getElementById('list-select');
   const listId = listSelect.value;
-  if (!listId) return;
+  if (!listId || listId === "__all_lists__" || listId === "__create_new__") return;
 
   const currentName = listSelect.options[listSelect.selectedIndex].text;
   const newName = prompt("Enter the new name for the list:", currentName);
@@ -638,7 +648,7 @@ function renameList() {
 function deleteList() {
   const listSelect = document.getElementById('list-select');
   const listId = listSelect.value;
-  if (!listId) {
+  if (!listId || listId === "__all_lists__" || listId === "__create_new__") {
     alert("No list selected.");
     return;
   }
@@ -664,7 +674,7 @@ function deleteList() {
 function moveList(direction) {
   const listSelect = document.getElementById('list-select');
   const selectedId = listSelect.value;
-  if (!selectedId) return;
+  if (!selectedId || selectedId === "__all_lists__" || selectedId === "__create_new__") return;
 
   chrome.storage.local.get({ wordLists: [] }, (data) => {
     let lists = data.wordLists;
@@ -829,6 +839,19 @@ function handleEditClick(event) {
   editControlsContainer.className = 'edit-controls'; // For potential future styling
 
   chrome.storage.local.get({ wordLists: [] }, (data) => {
+    // --- NEW: Sentinel option representing "no list" (null listId) ---
+    // Without this, editing an unlisted item silently snaps it to the first
+    // real list on save because <select> has no matching option.
+    const unlistedOption = document.createElement('option');
+    unlistedOption.value = "__unlisted__";
+    unlistedOption.textContent = "(Unlisted / No list)";
+    unlistedOption.style.color = "#aaa";
+    unlistedOption.style.fontStyle = "italic";
+    if (!currentListId) {
+      unlistedOption.selected = true;
+    }
+    listSelector.appendChild(unlistedOption);
+
     data.wordLists.forEach(list => {
       const option = document.createElement('option');
       option.value = list.id;
@@ -845,6 +868,9 @@ function handleEditClick(event) {
     createOption.textContent = "+ Create New List...";
     createOption.style.color = "lightgreen";
     listSelector.appendChild(createOption);
+
+    // If for some reason no option ended up selected (defensive), default to Unlisted.
+    if (!listSelector.value) listSelector.value = "__unlisted__";
 
     // Add change listener for creation
     listSelector.addEventListener('change', (e) => {
@@ -947,7 +973,7 @@ function updateHistoryItem(timestamp, newWord, newDefinition, newListId) {
           ...item,
           word: newWord,
           definition: newDefinition,
-          listId: newListId // Update the listId
+          listId: newListId === "__unlisted__" ? null : newListId // Update the listId
         };
       }
       return item;
@@ -998,7 +1024,8 @@ function clearListHistory() {
   const listId = listSelect.value;
   const listName = listSelect.options[listSelect.selectedIndex]?.text;
 
-  if (!listId) return;
+  // Ignore the "+ Create New List..." pseudo-option.
+  if (!listId || listId === "__create_new__") return;
 
   if (confirm(`Are you sure you want to clear all words from the "${listName}" list? This cannot be undone.`)) {
     chrome.storage.local.get(['history'], (result) => {
@@ -1064,8 +1091,8 @@ function exportHistory() {
   const selectedListId = listSelect.value;
   const selectedListName = listSelect.options[listSelect.selectedIndex]?.text;
 
-  if (!selectedListId) {
-    updateIOStatus("No list selected to export.", "error");
+  if (!selectedListId || selectedListId === "__create_new__") {
+    updateIOStatus("No valid list selected to export.", "error");
     return;
   }
 
@@ -1957,12 +1984,14 @@ function loadPrompts() {
         promptEl.style.transition = 'background-color 0.2s, transform 0.2s';
 
         // --- NEW: Drag and Drop Logic ---
+        // Use the prompt's stable id (not its position) so reordering is
+        // resilient to the displayed list being stale.
         promptEl.draggable = true;
-        promptEl.dataset.index = index;
+        promptEl.dataset.promptId = prompt.id;
 
         promptEl.addEventListener('dragstart', (e) => {
           e.dataTransfer.effectAllowed = 'move';
-          e.dataTransfer.setData('text/plain', index);
+          e.dataTransfer.setData('text/plain', prompt.id);
           promptEl.style.opacity = '0.4';
           promptEl.classList.add('dragging');
         });
@@ -2037,17 +2066,28 @@ function loadPrompts() {
         promptEl.addEventListener('drop', (e) => {
           e.stopPropagation();
           e.preventDefault();
-          const fromIndex = parseInt(e.dataTransfer.getData('text/plain'));
-          const toIndex = index;
-          if (fromIndex !== toIndex) {
-            const movedPrompt = prompts[fromIndex];
-            prompts.splice(fromIndex, 1);
-            prompts.splice(toIndex, 0, movedPrompt);
-            chrome.storage.sync.set({ customPrompts: prompts }, () => {
+          const draggedId = e.dataTransfer.getData('text/plain');
+          const targetId = prompt.id;
+          if (!draggedId || draggedId === targetId) {
+            return false;
+          }
+
+          // Re-fetch the freshest list from storage so we don't reorder a stale
+          // copy if the data changed since this UI was rendered.
+          chrome.storage.sync.get({ customPrompts: [] }, (data) => {
+            const freshPrompts = data.customPrompts || [];
+            const fromIndex = freshPrompts.findIndex(p => p.id === draggedId);
+            const toIndex = freshPrompts.findIndex(p => p.id === targetId);
+            if (fromIndex === -1 || toIndex === -1 || fromIndex === toIndex) {
+              return; // nothing to move (or ids no longer present)
+            }
+            const [movedPrompt] = freshPrompts.splice(fromIndex, 1);
+            freshPrompts.splice(toIndex, 0, movedPrompt);
+            chrome.storage.sync.set({ customPrompts: freshPrompts }, () => {
               loadPrompts();
               loadDefaultPromptSelect();
             });
-          }
+          });
           return false;
         });
 
@@ -2261,19 +2301,32 @@ function applyFilters() {
   const favoritesOnly = document.getElementById('favorites-only').checked;
   const listId = document.getElementById('list-select').value;
 
+  // Resolve the effective list filter:
+  //   __all_lists__  -> show every item (including ones whose listId is null)
+  //   __create_new__ -> shouldn't reach here; treat as "no specific list"
+  //   real id        -> only items in that list
+  //   empty          -> no lists exist; show nothing
+  const showAllLists = listId === "__all_lists__";
+  const isRealListId = !!listId && !showAllLists && listId !== "__create_new__";
+
   chrome.storage.local.get(['history'], (result) => {
     let history = result.history || [];
 
     // Filter by list first
-    if (listId) {
+    if (showAllLists) {
+      // No list filter — keep everything (incl. null/unlisted items).
+    } else if (isRealListId) {
       history = history.filter(item => item.listId === listId);
+    } else {
+      // No usable selection: nothing to show.
+      history = [];
     }
 
-    // Filter by search query
+    // Filter by search query (guard against missing fields)
     if (searchQuery) {
       history = history.filter(item =>
-        item.word.toLowerCase().includes(searchQuery) ||
-        item.definition.toLowerCase().includes(searchQuery)
+        (item.word && item.word.toLowerCase().includes(searchQuery)) ||
+        (item.definition && item.definition.toLowerCase().includes(searchQuery))
       );
     }
 
@@ -2713,6 +2766,13 @@ function rateFlashcard(rating) {
   } else {
     newInterval = currentInterval * 2.5; // More than double
   }
+
+  // Clamp the interval so "Hard" can't decay toward zero (card stuck due
+  // forever) and "Easy" can't grow unbounded (card vanishes for years).
+  const MIN_INTERVAL = 1 * 60 * 1000;                 // 1 minute floor
+  const MAX_INTERVAL = 180 * 24 * 60 * 60 * 1000;     // ~6 months ceiling
+  if (newInterval < MIN_INTERVAL) newInterval = MIN_INTERVAL;
+  if (newInterval > MAX_INTERVAL) newInterval = MAX_INTERVAL;
 
   const nextReview = Date.now() + newInterval;
 

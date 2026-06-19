@@ -1400,6 +1400,18 @@ function createFollowupInput(instance, word) {
 
 
 // --- Updated remove functions ---
+// Helper: safely stop any in-flight speech without throwing on pages where the
+// SpeechSynthesis API is unavailable.
+function stopSpeechSafely() {
+  try {
+    if (typeof window !== 'undefined' && window.speechSynthesis && typeof window.speechSynthesis.cancel === 'function') {
+      window.speechSynthesis.cancel();
+    }
+  } catch (e) {
+    console.warn("speechSynthesis.cancel failed:", e);
+  }
+}
+
 function removeAllPopups() {
   activePopups = activePopups.filter(instance => {
     if (!instance.isPinned) {
@@ -1409,7 +1421,7 @@ function removeAllPopups() {
     return true; // Keep in array
   });
   if (activePopups.length === 0) {
-    window.speechSynthesis.cancel();
+    stopSpeechSafely();
   }
 }
 
@@ -1424,7 +1436,7 @@ function removeLastPopup() {
     }
   }
   if (activePopups.length === 0) {
-    window.speechSynthesis.cancel();
+    stopSpeechSafely();
   }
 }
 
@@ -1435,7 +1447,7 @@ function removePopupInstance(instance) {
     if (instance.container) instance.container.remove();
   }
   if (activePopups.length === 0) {
-    window.speechSynthesis.cancel();
+    stopSpeechSafely();
   }
 }
 
@@ -1506,6 +1518,17 @@ function adjustPopupPosition(instance, selectionRect) {
 
 // --- NEW: Save Conversation as PDF ---
 function saveConversationAsPdf(instance) {
+  // Escape user/AI text before it is placed into the printable HTML so that
+  // untrusted content cannot inject markup or script into the PDF page.
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
   let html = `<!DOCTYPE html><html><head><title>Conversation Backup</title>
   <style>
     body { font-family: sans-serif; padding: 20px; max-width: 800px; margin: auto; line-height: 1.6; }
@@ -1526,18 +1549,20 @@ function saveConversationAsPdf(instance) {
     if (msg.isThinking || msg.isError || msg.needsRetry) return;
     const roleName = msg.role === 'user' ? 'You' : 'AI';
     const className = msg.role === 'user' ? 'user' : 'ai';
-    let content = msg.displayContent || msg.content || "";
-    let formattedContent = String(content);
-    
+    const content = msg.displayContent || msg.content || "";
+
+    // ALWAYS escape first, then apply our own (safe) markdown transformations.
+    let formattedContent = escapeHtml(content);
+
     if (msg.role !== 'user') {
       formattedContent = formattedContent.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
       formattedContent = formattedContent.replace(/\n/g, '<br>');
     }
-    
-    html += `<div class="message ${className}"><div class="role">${roleName}</div><div>${formattedContent}</div></div>`;
+
+    html += `<div class="message ${className}"><div class="role">${escapeHtml(roleName)}</div><div>${formattedContent}</div></div>`;
   });
 
   html += `<script>window.onload = function() { setTimeout(function() { window.print(); }, 500); }</script></body></html>`;
-  
+
   chrome.runtime.sendMessage({ type: "openPdfTab", htmlContent: html });
 }

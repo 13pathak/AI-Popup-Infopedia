@@ -9,7 +9,15 @@ chrome.commands.onCommand.addListener((command) => {
     // Send message to the active tab to trigger the popup
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       if (tabs.length > 0) {
-        chrome.tabs.sendMessage(tabs[0].id, { type: "triggerPopup" });
+        // Use a callback so we can detect failures (e.g. on chrome:// pages,
+        // the Web Store, the extension's own options page, or PDF viewer
+        // pages where the content script is not injected).
+        chrome.tabs.sendMessage(tabs[0].id, { type: "triggerPopup" }, () => {
+          if (chrome.runtime.lastError) {
+            // Content script not reachable on this tab.
+            console.warn("triggerPopup could not be delivered:", chrome.runtime.lastError.message);
+          }
+        });
       }
     });
   }
@@ -306,6 +314,18 @@ chrome.downloads.onChanged.addListener((delta) => {
   }
 });
 
+// --- NEW: Unicode-safe Base64 encoder (replaces deprecated unescape/encodeURIComponent combo) ---
+// Works in service workers where `unescape` is being phased out.
+function base64EncodeUtf8(str) {
+  const bytes = new TextEncoder().encode(str);
+  let binary = '';
+  const chunkSize = 0x8000; // Avoid call-stack overflow on large strings
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
 function triggerBackup(type = "Auto") {
   // 1. Fetch all data to backup
   chrome.storage.local.get(['history', 'wordLists'], (localData) => {
@@ -337,8 +357,8 @@ function triggerBackup(type = "Auto") {
 
       // 2. Create Data URI (Base64) - Service Worker safe
       const jsonString = JSON.stringify(backupData, null, 2);
-      // Encode properly to handle Unicode characters if any
-      const base64Content = btoa(unescape(encodeURIComponent(jsonString)));
+      // Encode properly to handle Unicode characters without the deprecated `unescape`.
+      const base64Content = base64EncodeUtf8(jsonString);
       const url = `data:application/json;base64,${base64Content}`;
 
       // 3. Determine Filename
@@ -346,52 +366,78 @@ function triggerBackup(type = "Auto") {
       const timestamp = new Date().getTime(); // ensure uniqueness
       const defaultFilename = `infopedia_backup_${dateStr}_${timestamp}.json`;
 
-      // 4. Check Subfolder setting
-      chrome.storage.sync.get({ backupSubfolder: '' }, (settings) => {
-        let finalPath = defaultFilename;
-        if (settings.backupSubfolder && settings.backupSubfolder.trim()) {
-          // Allow simple subfolder organization
-          const folder = settings.backupSubfolder.trim().replace(/[<>:"/\\|?*]/g, ''); // sanitize info
-          if (folder) {
-            finalPath = `${folder}/${defaultFilename}`;
-          }
+      // 4. Check Subfolder setting (already fetched above in syncData)
+      let finalPath = defaultFilename;
+      if (syncData.backupSubfolder && syncData.backupSubfolder.trim()) {
+        // Allow simple subfolder organization
+        const folder = syncData.backupSubfolder.trim().replace(/[<>:"/\\|?*]/g, ''); // sanitize
+        if (folder) {
+          finalPath = `${folder}/${defaultFilename}`;
+        }
+      }
+
+      try {
+        if (!chrome.downloads || !chrome.downloads.download) {
+          throw new Error("chrome.downloads API is not available. Check permissions.");
         }
 
-        try {
-          if (!chrome.downloads || !chrome.downloads.download) {
-            throw new Error("chrome.downloads API is not available. Check permissions.");
+        // 5. Download
+        chrome.downloads.download({
+          url: url,
+          filename: finalPath,
+          saveAs: false, // Attempt to save automatically without prompt
+          conflictAction: 'uniquify'
+        }, (downloadId) => {
+          if (chrome.runtime.lastError) {
+            console.error("Auto-Backup Start Failed:", chrome.runtime.lastError);
+            chrome.storage.local.set({ lastBackupError: chrome.runtime.lastError.message });
+          } else {
+            console.log("Auto-Backup Started. ID:", downloadId);
+            // --- CHANGED: Don't set success yet. Set "Pending". ---
+            chrome.storage.local.set({
+              pendingBackupId: downloadId,
+              pendingBackupType: type,
+              lastBackupError: null // clear previous errors
+            });
           }
-
-          // 5. Download
-          chrome.downloads.download({
-            url: url,
-            filename: finalPath,
-            saveAs: false, // Attempt to save automatically without prompt
-            conflictAction: 'uniquify'
-          }, (downloadId) => {
-            if (chrome.runtime.lastError) {
-              console.error("Auto-Backup Start Failed:", chrome.runtime.lastError);
-              chrome.storage.local.set({ lastBackupError: chrome.runtime.lastError.message });
-            } else {
-              console.log("Auto-Backup Started. ID:", downloadId);
-              // --- CHANGED: Don't set success yet. Set "Pending". ---
-              chrome.storage.local.set({
-                pendingBackupId: downloadId,
-                pendingBackupType: type,
-                lastBackupError: null // clear previous errors
-              });
-            }
-          });
-        } catch (err) {
-          console.error("Backup Exception:", err);
-          chrome.storage.local.set({ lastBackupError: err.message });
-        }
-      });
+        });
+      } catch (err) {
+        console.error("Backup Exception:", err);
+        chrome.storage.local.set({ lastBackupError: err.message });
+      }
     });
   });
 }
 
 // --- NEW: Intercept PDF URLs and redirect to custom PDF.js viewer ---
+// Track tabs that we have already redirected for the current navigation so the
+// webNavigation and webRequest listeners don't double-redirect the same URL.
+// Map of tabId -> original URL that was redirected to the viewer.
+const redirectedTabs = new Map();
+const REDIRECT_TTL_MS = 10000; // forget the entry after 10s as a safety net
+
+function markRedirected(tabId, originalUrl) {
+  redirectedTabs.set(tabId, originalUrl);
+  setTimeout(() => {
+    // Only clear if it still points at this URL (avoid clearing a newer entry)
+    if (redirectedTabs.get(tabId) === originalUrl) {
+      redirectedTabs.delete(tabId);
+    }
+  }, REDIRECT_TTL_MS);
+}
+
+function isAlreadyRedirected(tabId, url) {
+  return redirectedTabs.get(tabId) === url;
+}
+
+// Common helper that performs the actual redirect once.
+function redirectToPdfViewer(tabId, originalUrl) {
+  if (isAlreadyRedirected(tabId, originalUrl)) return; // dedupe across listeners
+  markRedirected(tabId, originalUrl);
+  const viewerUrl = chrome.runtime.getURL('pdf/web/viewer.html?file=' + encodeURIComponent(originalUrl));
+  chrome.tabs.update(tabId, { url: viewerUrl });
+}
+
 chrome.webNavigation.onBeforeNavigate.addListener((details) => {
   if (details.frameId !== 0) return;
   const url = details.url;
@@ -399,11 +445,12 @@ chrome.webNavigation.onBeforeNavigate.addListener((details) => {
   try {
     const urlObj = new URL(url);
     const isPdfExt = urlObj.pathname.toLowerCase().endsWith('.pdf');
-    const isArxivPdf = urlObj.hostname === 'arxiv.org' && urlObj.pathname.startsWith('/pdf/');
-    
+    // Match arxiv.org and its subdomains (e.g. www.arxiv.org, export.arxiv.org).
+    const isArxivPdf = (urlObj.hostname === 'arxiv.org' || urlObj.hostname.endsWith('.arxiv.org')) &&
+                       (urlObj.pathname === '/pdf/' || urlObj.pathname.startsWith('/pdf/'));
+
     if (isPdfExt || isArxivPdf) {
-      const viewerUrl = chrome.runtime.getURL('pdf/web/viewer.html?file=' + encodeURIComponent(url));
-      chrome.tabs.update(details.tabId, { url: viewerUrl });
+      redirectToPdfViewer(details.tabId, url);
     }
   } catch (e) {}
 });
@@ -413,14 +460,14 @@ chrome.webRequest.onHeadersReceived.addListener(
   (details) => {
     // ONLY intercept main frame navigations. Ignore xmlhttprequest/fetch from pdf.js
     if (details.type !== 'main_frame') return;
-    
+
     const url = details.url;
     if (url.includes(chrome.runtime.id) && url.includes('/pdf/web/viewer.html')) return;
+    if (isAlreadyRedirected(details.tabId, url)) return; // dedupe with webNavigation listener
 
     const contentTypeHeader = details.responseHeaders.find(h => h.name.toLowerCase() === 'content-type');
     if (contentTypeHeader && contentTypeHeader.value.toLowerCase().includes('application/pdf')) {
-      const viewerUrl = chrome.runtime.getURL('pdf/web/viewer.html?file=' + encodeURIComponent(url));
-      chrome.tabs.update(details.tabId, { url: viewerUrl });
+      redirectToPdfViewer(details.tabId, url);
     }
   },
   { urls: ["<all_urls>"] },
