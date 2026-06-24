@@ -258,15 +258,36 @@ document.addEventListener('mouseup', (event) => {
 // --- NEW: Message Listener for activation ---
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.type === "triggerPopup") {
-    const selection = window.getSelection();
-    const selectedText = selection.toString().trim();
-    if (selectedText.length > 0) {
-      const rect = selection.getRangeAt(0).getBoundingClientRect();
-      // For manual trigger, we can skip the Open button and just show the popup.
-      initiatePopupSequence(rect, selectedText);
+    let shouldHandle = false;
+
+    if (document.hasFocus()) {
+      if (document.activeElement && document.activeElement.tagName === 'IFRAME') {
+        // Focus is inside a child iframe. The child will handle it.
+        shouldHandle = false;
+      } else {
+        // This frame is the actually focused frame.
+        shouldHandle = true;
+      }
     } else {
-      // NEW: Trigger empty popup for questioning when no text is selected
-      initiateEmptyPopupSequence();
+      if (window === window.top) {
+        // Top frame without focus. Acts as fallback if NO frame has focus.
+        shouldHandle = true;
+      } else {
+        shouldHandle = false;
+      }
+    }
+
+    if (shouldHandle) {
+      const selection = window.getSelection();
+      const selectedText = selection.toString().trim();
+      if (selectedText.length > 0) {
+        const rect = selection.getRangeAt(0).getBoundingClientRect();
+        // For manual trigger, we can skip the Open button and just show the popup.
+        initiatePopupSequence(rect, selectedText);
+      } else {
+        // NEW: Trigger empty popup for questioning when no text is selected
+        initiateEmptyPopupSequence();
+      }
     }
   }
 });
