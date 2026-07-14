@@ -636,6 +636,20 @@
                 popup opens.</small>
         </div>
 
+        <div id="hallucination-guard-container" style="margin-top: 30px; padding-top: 20px; border-top: 1px solid var(--border-color);">
+            <h3 style="color: var(--primary-color); margin-top: 0;">Hallucination Guard (Advanced)</h3>
+            <p style="margin-bottom: 15px;">Enable a secondary model to verify the output of the primary model to reduce hallucinations. This will use extra API credits/tokens.</p>
+            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 15px;">
+                <input type="checkbox" id="enable-hallucination-guard" style="width: auto;">
+                <label for="enable-hallucination-guard" style="margin-bottom: 0;">Enable Hallucination Guard</label>
+            </div>
+            <div>
+                <label for="verification-model-select">Verification Model</label>
+                <select id="verification-model-select" style="width: 100%;"></select>
+                <small>Select the model to act as the fact-checker. We recommend using a different provider than your default model.</small>
+            </div>
+        </div>
+
         <div id="global-io-container"
             style="margin-top: 30px; padding-top: 20px; border-top: 1px solid var(--border-color);">
             <h3 style="color: var(--primary-color); margin-top: 0;">Models & Prompts Import/Export</h3>

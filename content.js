@@ -448,6 +448,13 @@ function initiatePopupSequence(rect, selectedText) {
 
         const modelName = response && response.models ? (response.models.find(m => m.id === response.defaultModelId)?.name || 'Unknown Model') : 'Unknown Model';
         createActionButtons(popupInstance, selectedText, definitionText, modelName, response.promptName);
+        
+        // --- NEW: Trigger Hallucination Verification ---
+        chrome.storage.sync.get(['enableHallucinationGuard'], (guardData) => {
+          if (guardData.enableHallucinationGuard) {
+             triggerVerification(popupInstance, selectedText, definitionText);
+          }
+        });
       }
       adjustPopupPosition(popupInstance, rect);
     });
@@ -1380,6 +1387,15 @@ function createFollowupInput(instance, word) {
 
         if (response && !response.error) {
           instance.messages.push({ role: 'assistant', content: response.definition });
+          
+          // --- NEW: Trigger Hallucination Verification ---
+          chrome.storage.sync.get(['enableHallucinationGuard'], (guardData) => {
+            if (guardData.enableHallucinationGuard) {
+               const userMsgs = instance.messages.filter(m => m.role === 'user');
+               const lastUserMsg = userMsgs.length > 0 ? userMsgs[userMsgs.length - 1].content : word;
+               triggerVerification(instance, lastUserMsg, response.definition);
+            }
+          });
         } else {
           // Add error message with retry button to history
           const errorId = 'error-' + Date.now();
@@ -1586,4 +1602,93 @@ function saveConversationAsPdf(instance) {
   html += `<script>window.onload = function() { setTimeout(function() { window.print(); }, 500); }</script></body></html>`;
 
   chrome.runtime.sendMessage({ type: "openPdfTab", htmlContent: html });
+}
+
+// --- NEW: Hallucination Verification UI Logic ---
+function triggerVerification(popupInstance, originalPrompt, aiResponse) {
+  if (!popupInstance || !popupInstance.popup) return;
+  const contentWrapper = popupInstance.popup.querySelector('#ai-popup-content');
+  if (!contentWrapper) return;
+  
+  const verifyId = 'verify-' + Date.now();
+  const indicator = document.createElement('div');
+  indicator.id = verifyId;
+  indicator.style.marginTop = '12px';
+  indicator.style.padding = '8px';
+  indicator.style.borderRadius = '6px';
+  indicator.style.backgroundColor = 'rgba(59, 130, 246, 0.1)';
+  indicator.style.borderLeft = '3px solid #3b82f6';
+  indicator.style.fontSize = '12px';
+  indicator.style.color = 'inherit';
+  indicator.innerHTML = `🛡️ <span style="opacity:0.8;">Verifying response...</span>`;
+  
+  contentWrapper.appendChild(indicator);
+  
+  if (contentWrapper.scrollHeight > contentWrapper.clientHeight) {
+     contentWrapper.scrollTop = contentWrapper.scrollHeight;
+  }
+
+  chrome.runtime.sendMessage({ 
+    type: "verifyAiResponse", 
+    originalPrompt: originalPrompt, 
+    aiResponse: aiResponse 
+  }, (response) => {
+    if (!activePopups.includes(popupInstance)) return;
+    
+    const indEl = popupInstance.popup.querySelector(`#${verifyId}`);
+    if (!indEl) return;
+    
+    if (chrome.runtime.lastError || !response || response.error) {
+      indEl.style.backgroundColor = 'rgba(100, 116, 139, 0.1)';
+      indEl.style.borderLeftColor = '#64748b';
+      indEl.innerHTML = `🛡️ <span style="opacity:0.7">Verification failed or unavailable.</span>`;
+      return;
+    }
+    
+    let detailsHtml = '';
+    if (response.result && response.result.reasoning) {
+       detailsHtml = `<a href="#" id="${verifyId}-toggle" style="margin-left: 10px; font-size: 11px; text-decoration: underline; color: inherit; opacity: 0.7;">View reasoning</a>
+       <div style="margin-top: 8px; font-size: 11px; color: inherit; opacity: 0.9; border-top: 1px solid rgba(128,128,128,0.3); padding-top: 6px; display: none;" id="${verifyId}-details"><strong>Reasoning:</strong> ${response.result.reasoning}</div>`;
+    }
+
+    if (response.result && response.result.is_hallucinating) {
+      indEl.style.backgroundColor = 'rgba(239, 68, 68, 0.1)';
+      indEl.style.borderLeftColor = '#ef4444';
+      
+      let correctionsHtml = '<ul style="margin:5px 0 0 20px; padding:0;">';
+      if (Array.isArray(response.result.corrections)) {
+         response.result.corrections.forEach(c => { correctionsHtml += `<li style="margin-bottom:3px;">${c}</li>`; });
+      }
+      correctionsHtml += '</ul>';
+      
+      indEl.innerHTML = `⚠️ <strong style="color:#ef4444;">Hallucination Detected</strong>${detailsHtml}<div>${correctionsHtml}</div>`;
+    } else {
+      indEl.style.backgroundColor = 'rgba(16, 185, 129, 0.1)';
+      indEl.style.borderLeftColor = '#10b981';
+      indEl.innerHTML = `🛡️ <strong style="color:#10b981;">Verified</strong> <span style="opacity:0.8">- No hallucinations detected.</span>${detailsHtml}`;
+    }
+    
+    // Attach event listener for toggle
+    const toggleBtn = popupInstance.popup.querySelector(`#${verifyId}-toggle`);
+    const detailsDiv = popupInstance.popup.querySelector(`#${verifyId}-details`);
+    if (toggleBtn && detailsDiv) {
+      toggleBtn.addEventListener('click', (e) => {
+         e.preventDefault();
+         if (detailsDiv.style.display === 'none') {
+            detailsDiv.style.display = 'block';
+            toggleBtn.textContent = 'Hide reasoning';
+         } else {
+            detailsDiv.style.display = 'none';
+            toggleBtn.textContent = 'View reasoning';
+         }
+         if (contentWrapper.scrollHeight > contentWrapper.clientHeight) {
+            contentWrapper.scrollTop = contentWrapper.scrollHeight;
+         }
+      });
+    }
+    
+    if (contentWrapper.scrollHeight > contentWrapper.clientHeight) {
+       contentWrapper.scrollTop = contentWrapper.scrollHeight;
+    }
+  });
 }

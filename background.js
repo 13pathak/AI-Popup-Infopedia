@@ -203,6 +203,79 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     triggerBackup("Manual");
   }
 
+  // --- Case 7: Verify AI Response ---
+  if (request.type === "verifyAiResponse") {
+    chrome.storage.sync.get(['models', 'verificationModelId'], async (data) => {
+      const { models, verificationModelId } = data;
+      if (!models || !verificationModelId) {
+        sendResponse({ error: "Verification model not configured." });
+        return;
+      }
+      
+      const modelToUse = models.find(m => m.id === verificationModelId);
+      if (!modelToUse) {
+        sendResponse({ error: "Verification model not found." });
+        return;
+      }
+      
+      const { endpointUrl, modelName, apiKey } = modelToUse;
+      const { originalPrompt, aiResponse } = request;
+      
+      const verificationPrompt = `You are a strict factual verification system. Review the following original prompt and AI response. Identify any hallucinations, fabricated facts, or logical errors. Output your response as a raw JSON object with this exact structure: {"is_hallucinating": boolean, "reasoning": "brief explanation", "corrections": ["string"]}. Do not include markdown formatting or any other text.\n\nOriginal Prompt: ${originalPrompt}\n\nAI Response: ${aiResponse}`;
+
+      const payload = {
+        "model": modelName,
+        "messages": [{ role: "user", content: verificationPrompt }],
+        "stream": false
+      };
+      
+      const headers = { 'Content-Type': 'application/json' };
+      if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+      
+      try {
+        const response = await fetch(endpointUrl, {
+          method: 'POST',
+          headers: headers,
+          body: JSON.stringify(payload)
+        });
+        
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const result = await response.json();
+        let content = '';
+        
+        if (result.choices && result.choices.length > 0 && result.choices[0].message) {
+           content = result.choices[0].message.content;
+        } else if (result.message && result.message.content) {
+           content = result.message.content;
+        } else if (result.response) {
+           content = result.response;
+        } else {
+           throw new Error("Unexpected API response structure.");
+        }
+        
+        content = content.replace(/```json/gi, '').replace(/```/g, '').trim();
+        let verificationResult;
+        try {
+          verificationResult = JSON.parse(content);
+        } catch(e) {
+          console.error("Failed to parse verification JSON:", content);
+          sendResponse({ error: "Failed to parse verification result." });
+          return;
+        }
+        
+        sendResponse({ success: true, result: verificationResult });
+        
+      } catch (error) {
+        console.error("Verification API Error:", error);
+        sendResponse({ error: error.message });
+      }
+    });
+    return true; // async
+  }
+
 });
 
 // --- UPDATED to accept source URL and title ---

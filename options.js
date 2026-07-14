@@ -58,6 +58,7 @@ document.addEventListener('DOMContentLoaded', () => {
   loadAnkiSettings(); // Load saved Anki settings on page load
   loadReminderSettings(); // Load saved Reminder settings on page load
   loadFollowupSettings(); // Load follow-up custom message
+  loadHallucinationGuardSettings(); // Load Hallucination Guard settings
 
   // Helper helper to safely add listeners
   function safeAddListener(id, event, handler) {
@@ -78,6 +79,8 @@ document.addEventListener('DOMContentLoaded', () => {
   safeAddListener('default-prompt-select', 'change', (e) => saveDefaultPromptId(e.target.value));
   safeAddListener('cancel-model-btn', 'click', hideModelForm);
   safeAddListener('save-followup-settings-btn', 'click', saveFollowupSettings);
+  safeAddListener('enable-hallucination-guard', 'change', saveHallucinationGuardSettings);
+  safeAddListener('verification-model-select', 'change', saveHallucinationGuardSettings);
 
   safeAddListener('export-history', 'click', exportHistory);
   safeAddListener('import-history', 'click', () => document.getElementById('import-file-input').click());
@@ -284,6 +287,53 @@ function loadModels() {
         selectEl.appendChild(option);
       });
     }
+  });
+}
+
+function loadHallucinationGuardSettings() {
+  chrome.storage.sync.get(['enableHallucinationGuard', 'verificationModelId', 'models'], (data) => {
+    const enableGuard = data.enableHallucinationGuard || false;
+    const verificationModelId = data.verificationModelId;
+    const models = data.models || [];
+    
+    document.getElementById('enable-hallucination-guard').checked = enableGuard;
+    
+    const verificationSelect = document.getElementById('verification-model-select');
+    verificationSelect.innerHTML = '';
+    
+    if (models.length === 0) {
+      const option = document.createElement('option');
+      option.value = '';
+      option.textContent = 'No models available';
+      verificationSelect.appendChild(option);
+      verificationSelect.disabled = true;
+    } else {
+      verificationSelect.disabled = false;
+      models.forEach(model => {
+        const option = document.createElement('option');
+        option.value = model.id;
+        option.textContent = model.name;
+        if (model.id === verificationModelId) {
+          option.selected = true;
+        }
+        verificationSelect.appendChild(option);
+      });
+      // If no valid verification model is selected, select the first one and save
+      if (!verificationModelId && models.length > 0) {
+        verificationSelect.value = models[0].id;
+        saveHallucinationGuardSettings();
+      }
+    }
+  });
+}
+
+function saveHallucinationGuardSettings() {
+  const enableGuard = document.getElementById('enable-hallucination-guard').checked;
+  const verificationModelId = document.getElementById('verification-model-select').value;
+  
+  chrome.storage.sync.set({ 
+    enableHallucinationGuard: enableGuard,
+    verificationModelId: verificationModelId
   });
 }
 
