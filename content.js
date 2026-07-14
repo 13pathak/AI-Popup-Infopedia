@@ -871,6 +871,13 @@ function redefineWithModelAndPrompt(instance, word, modelId, promptContent) {
 
           // Re-create the save button after model change
           createActionButtons(instance, word, definitionText, modelName, response.promptName);
+
+          // --- NEW: Trigger Hallucination Verification for Redefined Fetch ---
+          chrome.storage.sync.get(['enableHallucinationGuard'], (guardData) => {
+            if (guardData.enableHallucinationGuard) {
+               triggerVerification(instance, word, definitionText);
+            }
+          });
         }
 
         // Reset the flag
