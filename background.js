@@ -109,13 +109,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         if (!response.ok) {
           // --- NEW: ROBUST ERROR HANDLING ---
           // Handle errors that might be plain text OR json
-          let errorMsg = response.statusText;
+          let errorMsg = response.statusText || `HTTP error ${response.status}`;
           const contentType = response.headers.get("content-type");
 
           if (contentType && contentType.includes("application/json")) {
             const errorData = await response.json();
             console.error("API Error Details (JSON):", errorData);
-            errorMsg = (typeof errorData.error === 'string' ? errorData.error : errorData.error?.message) || errorMsg;
+            errorMsg = (typeof errorData.error === 'string' ? errorData.error : errorData.error?.message) || errorData.message || errorData.detail || (Object.keys(errorData).length > 0 ? JSON.stringify(errorData) : null) || errorMsg;
           } else {
             const errorText = await response.text();
             console.error("API Error Details (Text):", errorText);
