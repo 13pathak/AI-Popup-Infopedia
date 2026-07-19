@@ -982,10 +982,12 @@ function handleEditClick(event) {
     }
     listSelector.appendChild(unlistedOption);
 
-    data.wordLists.forEach(list => {
+    const sortedList = getSortedTreeLists(data.wordLists);
+    sortedList.forEach(list => {
       const option = document.createElement('option');
       option.value = list.id;
-      option.textContent = list.name;
+      const indent = list.depth > 0 ? '&nbsp;&nbsp;'.repeat(list.depth) + '↳ ' : '';
+      option.innerHTML = indent + list.name;
       if (list.id === currentListId) {
         option.selected = true;
       }
@@ -1018,10 +1020,13 @@ function handleEditClick(event) {
               // Re-populate this specific selector!
               // We need to clear and re-add options.
               listSelector.innerHTML = '';
-              lists.forEach(l => {
+              listSelector.appendChild(unlistedOption);
+              const newSortedList = getSortedTreeLists(lists);
+              newSortedList.forEach(l => {
                 const opt = document.createElement('option');
                 opt.value = l.id;
-                opt.textContent = l.name;
+                const indent = l.depth > 0 ? '&nbsp;&nbsp;'.repeat(l.depth) + '↳ ' : '';
+                opt.innerHTML = indent + l.name;
                 if (l.id === newList.id) opt.selected = true;
                 listSelector.appendChild(opt);
               });
