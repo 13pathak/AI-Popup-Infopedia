@@ -568,10 +568,34 @@ function updateGlobalIOStatus(message, type = 'info') {
   statusEl.style.color = type === 'error' ? '#d9534f' : (type === 'success' ? '#5cb85c' : '#eee');
 
   setTimeout(() => {
-    statusEl.textContent = '';
   }, 5000);
 }
 
+// --- NEW: Helper to build a sorted tree array ---
+function getSortedTreeLists(lists) {
+  const listMap = {};
+  lists.forEach(l => {
+    l.children = [];
+    listMap[l.id] = l;
+  });
+
+  const roots = [];
+  lists.forEach(l => {
+    if (l.parentId && listMap[l.parentId]) {
+      listMap[l.parentId].children.push(l);
+    } else {
+      roots.push(l);
+    }
+  });
+
+  const sortedList = [];
+  function traverse(node, depth) {
+    sortedList.push({ ...node, depth });
+    node.children.forEach(child => traverse(child, depth + 1));
+  }
+  roots.forEach(root => traverse(root, 0));
+  return sortedList;
+}
 
 // ---
 // --- LIST MANAGEMENT FUNCTIONS
