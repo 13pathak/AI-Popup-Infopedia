@@ -96,8 +96,7 @@ document.addEventListener('DOMContentLoaded', () => {
   safeAddListener('add-sub-list-btn', 'click', addSubList);
   safeAddListener('rename-list-btn', 'click', renameList);
   safeAddListener('delete-list-btn', 'click', deleteList);
-  safeAddListener('move-list-up-btn', 'click', () => moveList('up'));
-  safeAddListener('move-list-down-btn', 'click', () => moveList('down'));
+  safeAddListener('reorder-lists-btn', 'click', openReorderModal);
 
   safeAddListener('export-all-history', 'click', exportAllHistory);
   safeAddListener('import-all-history', 'click', () => document.getElementById('import-file-input').click());
@@ -749,38 +748,11 @@ function loadLists() {
         addList();
       } else {
         applyFilters();
-        
-        // Re-run the button enabling logic when selection changes
-        const selectedVal = document.getElementById('list-select').value;
-        const isRealListSelected = !!selectedVal && selectedVal !== "__all_lists__" && selectedVal !== "__create_new__";
-        const selectedIndex = isRealListSelected ? lists.findIndex(l => l.id === selectedVal) : -1;
-        const listCount = lists.length;
-        document.getElementById('move-list-up-btn').disabled = !isRealListSelected || selectedIndex <= 0;
-        document.getElementById('move-list-down-btn').disabled = !isRealListSelected || selectedIndex >= listCount - 1 || listCount <= 1;
       }
     }, { showAllLists: true, showCreateNew: true });
     
     listSelect.id = 'list-select';
     container.appendChild(listSelect);
-
-    // --- NEW: Disable/Enable move buttons based on selection ---
-    // Guard against the pseudo-options (All Lists / Create New) so moving only
-    // applies to a real list.
-    const selectedVal = listSelect.value;
-    const isRealListSelected = !!selectedVal &&
-      selectedVal !== "__all_lists__" &&
-      selectedVal !== "__create_new__";
-    const selectedIndex = isRealListSelected
-      ? lists.findIndex(l => l.id === selectedVal)
-      : -1;
-    const listCount = lists.length;
-    moveUpBtn.disabled = !isRealListSelected || selectedIndex <= 0;
-    moveDownBtn.disabled = !isRealListSelected || selectedIndex >= listCount - 1 || listCount <= 1;
-
-    // --- NEW: Update clear list button text on change ---
-    if (lists.length > 0) {
-      clearListBtn.textContent = isRealListSelected ? `Clear Selected List` : `Clear Selected List`;
-    }
 
     // Load history for the currently selected list with filters
     applyFilters();
@@ -888,49 +860,121 @@ function deleteList() {
   });
 }
 
-// --- NEW: Function to move a list up or down ---
-function moveList(direction) {
-  const listSelect = document.getElementById('list-select');
-  const selectedId = listSelect.value;
-  if (!selectedId || selectedId === "__all_lists__" || selectedId === "__create_new__") return;
+// --- NEW: Drag and Drop Reordering Modal ---
+let reorderCurrentLists = [];
 
+function openReorderModal() {
+  const modal = document.getElementById('reorder-modal');
   chrome.storage.local.get({ wordLists: [] }, (data) => {
-    let lists = data.wordLists;
-    const listMap = {};
-    lists.forEach(l => { l.children = []; listMap[l.id] = l; });
-    const roots = [];
-    lists.forEach(l => {
-      if (l.parentId && listMap[l.parentId]) listMap[l.parentId].children.push(l);
-      else roots.push(l);
-    });
-
-    const target = listMap[selectedId];
-    if (!target) return;
-    
-    const siblings = target.parentId && listMap[target.parentId] ? listMap[target.parentId].children : roots;
-    const index = siblings.findIndex(l => l.id === selectedId);
-
-    if (direction === 'up' && index > 0) {
-      [siblings[index - 1], siblings[index]] = [siblings[index], siblings[index - 1]];
-    } else if (direction === 'down' && index < siblings.length - 1) {
-      [siblings[index + 1], siblings[index]] = [siblings[index], siblings[index + 1]];
-    } else {
-      return;
-    }
-
-    const newLists = [];
-    function traverse(node) {
-      const { children, ...cleanNode } = node;
-      newLists.push(cleanNode);
-      if (children) children.forEach(traverse);
-    }
-    roots.forEach(traverse);
-
-    chrome.storage.local.set({ wordLists: newLists }, () => {
-      loadLists();
-    });
+    reorderCurrentLists = data.wordLists;
+    renderReorderLists();
+    modal.style.display = 'flex';
   });
 }
+
+function renderReorderLists() {
+  const container = document.getElementById('reorder-list-container');
+  container.innerHTML = '';
+  
+  const sortedList = getSortedTreeLists(reorderCurrentLists);
+  
+  sortedList.forEach((list) => {
+    const item = document.createElement('div');
+    item.className = 'reorder-item';
+    item.draggable = true;
+    item.dataset.id = list.id;
+    
+    const indent = list.depth > 0 ? '&nbsp;&nbsp;'.repeat(list.depth * 2) + '↳ ' : '';
+    
+    const handle = document.createElement('div');
+    handle.className = 'drag-handle';
+    handle.innerHTML = '&#8942;&#8942;'; // :: icon
+    
+    const nameSpan = document.createElement('span');
+    nameSpan.innerHTML = indent + list.name;
+    
+    item.appendChild(handle);
+    item.appendChild(nameSpan);
+    
+    item.addEventListener('dragstart', handleDragStart);
+    item.addEventListener('dragover', handleDragOver);
+    item.addEventListener('dragenter', handleDragEnter);
+    item.addEventListener('dragleave', handleDragLeave);
+    item.addEventListener('drop', handleDrop);
+    item.addEventListener('dragend', handleDragEnd);
+    
+    container.appendChild(item);
+  });
+}
+
+let dragSrcEl = null;
+
+function handleDragStart(e) {
+  dragSrcEl = this;
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', this.dataset.id);
+  setTimeout(() => this.classList.add('dragging'), 0);
+}
+
+function handleDragOver(e) {
+  if (e.preventDefault) {
+    e.preventDefault();
+  }
+  e.dataTransfer.dropEffect = 'move';
+  return false;
+}
+
+function handleDragEnter(e) {
+  this.classList.add('over');
+}
+
+function handleDragLeave(e) {
+  this.classList.remove('over');
+}
+
+function handleDrop(e) {
+  if (e.stopPropagation) e.stopPropagation();
+
+  if (dragSrcEl !== this) {
+    const draggedId = dragSrcEl.dataset.id;
+    const targetId = this.dataset.id;
+    
+    const draggedOrigIndex = reorderCurrentLists.findIndex(l => l.id === draggedId);
+    const targetOrigIndex = reorderCurrentLists.findIndex(l => l.id === targetId);
+    
+    const [removed] = reorderCurrentLists.splice(draggedOrigIndex, 1);
+    const newTargetIndex = reorderCurrentLists.findIndex(l => l.id === targetId);
+    
+    if (draggedOrigIndex < targetOrigIndex) {
+      reorderCurrentLists.splice(newTargetIndex + 1, 0, removed);
+    } else {
+      reorderCurrentLists.splice(newTargetIndex, 0, removed);
+    }
+    
+    renderReorderLists();
+  }
+  return false;
+}
+
+function handleDragEnd(e) {
+  this.classList.remove('dragging');
+  const items = document.querySelectorAll('.reorder-item');
+  items.forEach(item => item.classList.remove('over'));
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  safeAddListener('reorder-cancel-btn', 'click', () => {
+    document.getElementById('reorder-modal').style.display = 'none';
+  });
+
+  safeAddListener('reorder-save-btn', 'click', () => {
+    chrome.storage.local.set({ wordLists: reorderCurrentLists }, () => {
+      document.getElementById('reorder-modal').style.display = 'none';
+      loadLists();
+      updateStatus('Lists reordered successfully', 'success');
+    });
+  });
+});
 
 
 // --- loadHistory ---

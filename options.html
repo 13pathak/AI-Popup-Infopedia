@@ -588,6 +588,32 @@
         .expand-toggle { cursor: pointer; display: inline-block; width: 20px; text-align: center; color: var(--text-muted); }
         .expand-toggle:hover { color: var(--text-color); }
         .indent-spacer { display: inline-block; width: 20px; }
+        /* --- Modal and Reorder Styles --- */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0, 0, 0, 0.6); display: flex;
+            align-items: center; justify-content: center; z-index: 10000;
+        }
+        .modal-content {
+            background: var(--card-bg); padding: 20px; border-radius: 8px;
+            width: 90%; box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            border: 1px solid var(--border-color);
+            max-height: 80vh; display: flex; flex-direction: column;
+        }
+        .reorder-container {
+            overflow-y: auto; flex-grow: 1; border: 1px solid var(--border-color);
+            border-radius: 4px; background: var(--bg-color); padding: 5px;
+        }
+        .reorder-item {
+            display: flex; align-items: center; padding: 10px; margin-bottom: 4px;
+            background: var(--card-bg); border: 1px solid var(--border-color);
+            border-radius: 4px; cursor: grab; user-select: none;
+        }
+        .reorder-item:active { cursor: grabbing; }
+        .reorder-item.dragging { opacity: 0.5; border: 1px dashed var(--primary-color); }
+        .drag-handle { margin-right: 10px; color: var(--text-muted); cursor: grab; }
+        .reorder-item.over { border-top: 2px solid var(--primary-color); }
+
     </style>
 </head>
 
@@ -751,10 +777,8 @@
                 <button id="rename-list-btn" title="Rename Selected List"
                     style="background-color: var(--primary-color);">&#9998;</button>
                 <button id="delete-list-btn" title="Delete Selected List">&#128465;</button>
-                <button id="move-list-up-btn" title="Move List Up"
-                    style="background-color: var(--button-bg);">&#9650;</button>
-                <button id="move-list-down-btn" title="Move List Down"
-                    style="background-color: var(--button-bg);">&#9660;</button>
+                <button id="reorder-lists-btn" title="Reorder Lists"
+                    style="background-color: var(--button-bg);">&#8645;</button>
             </div>
         </div>
 
@@ -1110,6 +1134,21 @@
             <button id="stt-save-btn" style="background-color: var(--secondary-color);">Save Settings</button>
         </div>
         <div id="stt-status" style="margin-top: 10px; font-weight: bold; min-height: 1em;"></div>
+    </div>
+
+    <!-- Modal for reordering lists -->
+    <div id="reorder-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-content" style="max-width: 500px;">
+            <h3>Reorder Lists</h3>
+            <p style="margin-bottom: 15px; font-size: 13px; color: #aaa;">Drag and drop to rearrange your folders and sub-folders.</p>
+            <div id="reorder-list-container" class="reorder-container">
+                <!-- List items will be injected here -->
+            </div>
+            <div class="modal-actions" style="margin-top: 20px; display: flex; gap: 10px; justify-content: flex-end;">
+                <button id="reorder-cancel-btn" style="background-color: #555;">Cancel</button>
+                <button id="reorder-save-btn" style="background-color: var(--secondary-color);">Save Order</button>
+            </div>
+        </div>
     </div>
 
     <script src="options.js"></script>
