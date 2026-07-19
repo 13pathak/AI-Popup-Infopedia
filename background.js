@@ -180,6 +180,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         const newList = { id: `list_${new Date().getTime()}`, name: listName.trim() };
+        if (request.parentId) {
+          newList.parentId = request.parentId;
+        }
         lists.push(newList);
 
         chrome.storage.local.set({ wordLists: lists }, () => {

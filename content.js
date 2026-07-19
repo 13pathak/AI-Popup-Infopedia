@@ -982,10 +982,34 @@ function createActionButtons(instance, word, definition, modelName, promptName) 
     // Helper to populate options
     function populateListOptions() {
       listSelector.innerHTML = '';
-      lists.forEach(list => {
+
+      const listMap = {};
+      lists.forEach(l => {
+        l.children = [];
+        listMap[l.id] = l;
+      });
+
+      const roots = [];
+      lists.forEach(l => {
+        if (l.parentId && listMap[l.parentId]) {
+          listMap[l.parentId].children.push(l);
+        } else {
+          roots.push(l);
+        }
+      });
+
+      const sortedList = [];
+      function traverse(node, depth) {
+        sortedList.push({ ...node, depth });
+        node.children.forEach(child => traverse(child, depth + 1));
+      }
+      roots.forEach(root => traverse(root, 0));
+
+      sortedList.forEach(list => {
         const option = document.createElement('option');
         option.value = list.id;
-        option.textContent = list.name;
+        const indent = list.depth > 0 ? '&nbsp;&nbsp;'.repeat(list.depth) + '↳ ' : '';
+        option.innerHTML = indent + list.name;
 
         // --- NEW: Check if this list was the last one used ---
         if (list.id === lastUsedListId) {

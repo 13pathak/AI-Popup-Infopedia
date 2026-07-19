@@ -93,6 +93,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
   safeAddListener('add-list-btn', 'click', addList);
+  safeAddListener('add-sub-list-btn', 'click', addSubList);
   safeAddListener('rename-list-btn', 'click', renameList);
   safeAddListener('delete-list-btn', 'click', deleteList);
   safeAddListener('move-list-up-btn', 'click', () => moveList('up'));
@@ -616,10 +617,34 @@ function loadLists() {
     allOption.textContent = "🗂 All Lists";
     listSelect.appendChild(allOption);
 
-    lists.forEach(list => {
+    // Helper to build a sorted tree array
+    const listMap = {};
+    lists.forEach(l => {
+      l.children = [];
+      listMap[l.id] = l;
+    });
+
+    const roots = [];
+    lists.forEach(l => {
+      if (l.parentId && listMap[l.parentId]) {
+        listMap[l.parentId].children.push(l);
+      } else {
+        roots.push(l);
+      }
+    });
+
+    const sortedList = [];
+    function traverse(node, depth) {
+      sortedList.push({ ...node, depth });
+      node.children.forEach(child => traverse(child, depth + 1));
+    }
+    roots.forEach(root => traverse(root, 0));
+
+    sortedList.forEach(list => {
       const option = document.createElement('option');
       option.value = list.id;
-      option.textContent = list.name;
+      const indent = list.depth > 0 ? '&nbsp;&nbsp;'.repeat(list.depth) + '↳ ' : '';
+      option.innerHTML = indent + list.name;
       listSelect.appendChild(option);
     });
 
@@ -674,6 +699,27 @@ function addList() {
   }
 }
 
+function addSubList() {
+  const listSelect = document.getElementById('list-select');
+  const parentId = listSelect.value;
+  if (!parentId || parentId === "__all_lists__" || parentId === "__create_new__") {
+    alert("Please select a valid parent list first.");
+    return;
+  }
+  const listName = prompt("Enter the name for the new sub-list:");
+  if (listName && listName.trim()) {
+    chrome.storage.local.get({ wordLists: [] }, (data) => {
+      const lists = data.wordLists;
+      const newList = { id: `list_${new Date().getTime()}`, name: listName.trim(), parentId: parentId };
+      lists.push(newList);
+      chrome.storage.local.set({ wordLists: lists }, () => {
+        updateStatus('Sub-list created!', 'success');
+        loadLists();
+      });
+    });
+  }
+}
+
 function renameList() {
   const listSelect = document.getElementById('list-select');
   const listId = listSelect.value;
@@ -710,13 +756,32 @@ function deleteList() {
       return;
     }
 
-    if (confirm("Are you sure you want to delete this list? Words in it will NOT be deleted but will become unlisted.")) {
-      const lists = data.wordLists.filter(list => list.id !== listId);
-      chrome.storage.local.set({ wordLists: lists }, () => {
-        updateStatus('List deleted.', 'success');
-        loadLists();
-      });
+    const targetList = data.wordLists.find(l => l.id === listId);
+    if (!targetList) return;
+
+    const input = prompt(`To confirm deletion of "${targetList.name}" and its sub-lists, please type its name exactly:`);
+    if (input !== targetList.name) {
+      alert("Name did not match. Deletion cancelled.");
+      return;
     }
+
+    const listsToDelete = new Set([listId]);
+    let added = true;
+    while (added) {
+      added = false;
+      for (const list of data.wordLists) {
+        if (list.parentId && listsToDelete.has(list.parentId) && !listsToDelete.has(list.id)) {
+          listsToDelete.add(list.id);
+          added = true;
+        }
+      }
+    }
+
+    const lists = data.wordLists.filter(list => !listsToDelete.has(list.id));
+    chrome.storage.local.set({ wordLists: lists }, () => {
+      updateStatus('List and sub-lists deleted.', 'success');
+      loadLists();
+    });
   });
 }
 
@@ -728,22 +793,37 @@ function moveList(direction) {
 
   chrome.storage.local.get({ wordLists: [] }, (data) => {
     let lists = data.wordLists;
-    const index = lists.findIndex(list => list.id === selectedId);
+    const listMap = {};
+    lists.forEach(l => { l.children = []; listMap[l.id] = l; });
+    const roots = [];
+    lists.forEach(l => {
+      if (l.parentId && listMap[l.parentId]) listMap[l.parentId].children.push(l);
+      else roots.push(l);
+    });
+
+    const target = listMap[selectedId];
+    if (!target) return;
+    
+    const siblings = target.parentId && listMap[target.parentId] ? listMap[target.parentId].children : roots;
+    const index = siblings.findIndex(l => l.id === selectedId);
 
     if (direction === 'up' && index > 0) {
-      // Swap with the element before it
-      [lists[index - 1], lists[index]] = [lists[index], lists[index - 1]];
-    } else if (direction === 'down' && index < lists.length - 1) {
-      // Swap with the element after it
-      [lists[index + 1], lists[index]] = [lists[index], lists[index + 1]];
+      [siblings[index - 1], siblings[index]] = [siblings[index], siblings[index - 1]];
+    } else if (direction === 'down' && index < siblings.length - 1) {
+      [siblings[index + 1], siblings[index]] = [siblings[index], siblings[index + 1]];
     } else {
-      return; // Can't move further
+      return;
     }
 
-    // Save the reordered list and reload the UI
-    chrome.storage.local.set({ wordLists: lists }, () => {
-      // We don't need to show a status message for this, the change is visual
-      // The `loadLists` function will preserve the selection and update the UI
+    const newLists = [];
+    function traverse(node) {
+      const { children, ...cleanNode } = node;
+      newLists.push(cleanNode);
+      if (children) children.forEach(traverse);
+    }
+    roots.forEach(traverse);
+
+    chrome.storage.local.set({ wordLists: newLists }, () => {
       loadLists();
     });
   });
