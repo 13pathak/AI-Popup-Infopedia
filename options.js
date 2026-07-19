@@ -962,17 +962,15 @@ function handleDragEnd(e) {
   items.forEach(item => item.classList.remove('over'));
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-  safeAddListener('reorder-cancel-btn', 'click', () => {
-    document.getElementById('reorder-modal').style.display = 'none';
-  });
+document.getElementById('reorder-cancel-btn')?.addEventListener('click', () => {
+  document.getElementById('reorder-modal').style.display = 'none';
+});
 
-  safeAddListener('reorder-save-btn', 'click', () => {
-    chrome.storage.local.set({ wordLists: reorderCurrentLists }, () => {
-      document.getElementById('reorder-modal').style.display = 'none';
-      loadLists();
-      updateStatus('Lists reordered successfully', 'success');
-    });
+document.getElementById('reorder-save-btn')?.addEventListener('click', () => {
+  chrome.storage.local.set({ wordLists: reorderCurrentLists }, () => {
+    document.getElementById('reorder-modal').style.display = 'none';
+    loadLists();
+    updateStatus('Lists reordered successfully', 'success');
   });
 });
 
