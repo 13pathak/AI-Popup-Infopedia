@@ -597,6 +597,141 @@ function getSortedTreeLists(lists) {
   return sortedList;
 }
 
+// --- NEW: Custom Dropdown Component ---
+function createCustomDropdown(lists, currentValue, onChange, options = {}) {
+  const container = document.createElement('div');
+  container.className = 'custom-select-container';
+
+  const selectBtn = document.createElement('div');
+  selectBtn.className = 'custom-select';
+  selectBtn.tabIndex = 0;
+  
+  const valueDisplay = document.createElement('span');
+  valueDisplay.className = 'custom-select-value';
+  valueDisplay.textContent = 'Select a list...';
+
+  const arrow = document.createElement('span');
+  arrow.textContent = '▼';
+  
+  selectBtn.append(valueDisplay, arrow);
+  
+  const optionsContainer = document.createElement('div');
+  optionsContainer.className = 'custom-options';
+
+  container.append(selectBtn, optionsContainer);
+
+  let selectedId = currentValue;
+  const expandedState = {}; 
+
+  const sortedList = getSortedTreeLists(lists);
+
+  const allItems = [];
+  if (options.showAllLists) allItems.push({ id: '__all_lists__', name: '🗂 All Lists', depth: 0 });
+  if (options.showUnlisted) allItems.push({ id: '__unlisted__', name: '(Unlisted / No list)', depth: 0, color: '#aaa', italic: true });
+  allItems.push(...sortedList);
+  if (options.showCreateNew) allItems.push({ id: '__create_new__', name: '+ Create New List...', depth: 0, color: 'lightgreen', isCreate: true });
+
+  function renderOptions() {
+    optionsContainer.innerHTML = '';
+    
+    allItems.forEach(item => {
+      let visible = true;
+      let curr = item;
+      while (curr && curr.parentId) {
+        if (!expandedState[curr.parentId]) {
+          visible = false;
+          break;
+        }
+        curr = allItems.find(i => i.id === curr.parentId);
+      }
+      
+      if (!visible) return;
+
+      const optEl = document.createElement('div');
+      optEl.className = 'custom-option';
+      if (item.id === selectedId) {
+        optEl.classList.add('selected');
+        valueDisplay.textContent = item.name;
+      }
+      if (item.color) optEl.style.color = item.color;
+      if (item.italic) optEl.style.fontStyle = 'italic';
+
+      for (let i = 0; i < (item.depth || 0); i++) {
+        const spacer = document.createElement('span');
+        spacer.className = 'indent-spacer';
+        optEl.appendChild(spacer);
+      }
+
+      const hasChildren = allItems.some(i => i.parentId === item.id);
+      if (hasChildren) {
+        const toggle = document.createElement('span');
+        toggle.className = 'expand-toggle';
+        toggle.textContent = expandedState[item.id] ? '▼' : '▶';
+        toggle.addEventListener('click', (e) => {
+          e.stopPropagation(); 
+          expandedState[item.id] = !expandedState[item.id];
+          renderOptions();
+        });
+        optEl.appendChild(toggle);
+      } else {
+        const spacer = document.createElement('span');
+        spacer.className = 'indent-spacer';
+        optEl.appendChild(spacer);
+      }
+
+      const textNode = document.createElement('span');
+      textNode.textContent = item.name;
+      optEl.appendChild(textNode);
+
+      optEl.addEventListener('click', (e) => {
+        e.stopPropagation();
+        selectedId = item.id;
+        valueDisplay.textContent = item.name;
+        optionsContainer.classList.remove('show');
+        if (onChange) onChange(selectedId);
+        renderOptions();
+      });
+
+      optionsContainer.appendChild(optEl);
+    });
+  }
+
+  let curr = allItems.find(i => i.id === selectedId);
+  while (curr && curr.parentId) {
+    expandedState[curr.parentId] = true;
+    curr = allItems.find(i => i.id === curr.parentId);
+  }
+  
+  if (!selectedId && allItems.length > 0) {
+    selectedId = allItems[0].id;
+    valueDisplay.textContent = allItems[0].name;
+  }
+
+  renderOptions();
+
+  selectBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    optionsContainer.classList.toggle('show');
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!container.contains(e.target)) {
+      optionsContainer.classList.remove('show');
+    }
+  });
+
+  Object.defineProperty(container, 'value', {
+    get: function() { return selectedId; },
+    set: function(val) { selectedId = val; renderOptions(); }
+  });
+  
+  container.getText = function() {
+    return valueDisplay.textContent;
+  };
+
+  return container;
+}
+
 // ---
 // --- LIST MANAGEMENT FUNCTIONS
 // ---
@@ -604,85 +739,29 @@ function getSortedTreeLists(lists) {
 function loadLists() {
   chrome.storage.local.get({ wordLists: [] }, (data) => {
     let lists = data.wordLists;
-    const listSelect = document.getElementById('list-select');
-    const renameBtn = document.getElementById('rename-list-btn');
-    const deleteBtn = document.getElementById('delete-list-btn');
-    const moveUpBtn = document.getElementById('move-list-up-btn');
-    const moveDownBtn = document.getElementById('move-list-down-btn');
-    const clearListBtn = document.getElementById('clear-list-history');
-    const currentVal = listSelect.value;
-    listSelect.innerHTML = '';
-
-    if (lists.length === 0) {
-      // --- NEW: Handle empty state ---
-      renameBtn.disabled = true;
-      deleteBtn.disabled = true;
-      moveUpBtn.disabled = true;
-      moveDownBtn.disabled = true;
-      clearListBtn.style.display = 'none'; // Hide button
-      loadHistory(null); // Load history with no list ID
-    } else {
-      // Buttons get fine-tuned below based on the current selection.
-      renameBtn.disabled = false;
-      deleteBtn.disabled = false;
-
-      // --- NEW: Show and update clear list button ---
-      clearListBtn.textContent = `Clear Selected List`;
-      clearListBtn.style.display = 'inline-block';
-      // Buttons will be enabled/disabled later based on selection
-    }
-
-    // --- NEW: "All Lists" pseudo-option ---
-    // Lets the user see every saved item, INCLUDING items whose listId is null
-    // (e.g. imported from an old backup or CSV without a list). Without this,
-    // unlisted items are unreachable through the UI.
-    const allOption = document.createElement('option');
-    allOption.value = "__all_lists__";
-    allOption.textContent = "🗂 All Lists";
-    listSelect.appendChild(allOption);
-
-    // Helper to build a sorted tree array
-    const listMap = {};
-    lists.forEach(l => {
-      l.children = [];
-      listMap[l.id] = l;
-    });
-
-    const roots = [];
-    lists.forEach(l => {
-      if (l.parentId && listMap[l.parentId]) {
-        listMap[l.parentId].children.push(l);
+    const container = document.getElementById('list-select-container');
+    const oldListSelect = document.getElementById('list-select');
+    const currentVal = oldListSelect ? oldListSelect.value : '__all_lists__';
+    
+    container.innerHTML = '';
+    const listSelect = createCustomDropdown(lists, currentVal, (val) => {
+      if (val === "__create_new__") {
+        addList();
       } else {
-        roots.push(l);
+        applyFilters();
+        
+        // Re-run the button enabling logic when selection changes
+        const selectedVal = document.getElementById('list-select').value;
+        const isRealListSelected = !!selectedVal && selectedVal !== "__all_lists__" && selectedVal !== "__create_new__";
+        const selectedIndex = isRealListSelected ? lists.findIndex(l => l.id === selectedVal) : -1;
+        const listCount = lists.length;
+        document.getElementById('move-list-up-btn').disabled = !isRealListSelected || selectedIndex <= 0;
+        document.getElementById('move-list-down-btn').disabled = !isRealListSelected || selectedIndex >= listCount - 1 || listCount <= 1;
       }
-    });
-
-    const sortedList = [];
-    function traverse(node, depth) {
-      sortedList.push({ ...node, depth });
-      node.children.forEach(child => traverse(child, depth + 1));
-    }
-    roots.forEach(root => traverse(root, 0));
-
-    sortedList.forEach(list => {
-      const option = document.createElement('option');
-      option.value = list.id;
-      const indent = list.depth > 0 ? '&nbsp;&nbsp;'.repeat(list.depth) + '↳ ' : '';
-      option.innerHTML = indent + list.name;
-      listSelect.appendChild(option);
-    });
-
-    // --- NEW: Add "Create New List" option ---
-    const createOption = document.createElement('option');
-    createOption.value = "__create_new__";
-    createOption.textContent = "+ Create New List...";
-    createOption.style.color = "#88ff88"; // Green tint
-    listSelect.appendChild(createOption);
-
-    // Try to re-select the previously selected list
-    if (currentVal && listSelect.querySelector(`option[value="${currentVal}"]`)) {
-      listSelect.value = currentVal;
-    }
+    }, { showAllLists: true, showCreateNew: true });
+    
+    listSelect.id = 'list-select';
+    container.appendChild(listSelect);
 
     // --- NEW: Disable/Enable move buttons based on selection ---
     // Guard against the pseudo-options (All Lists / Create New) so moving only
@@ -749,7 +828,7 @@ function renameList() {
   const listId = listSelect.value;
   if (!listId || listId === "__all_lists__" || listId === "__create_new__") return;
 
-  const currentName = listSelect.options[listSelect.selectedIndex].text;
+  const currentName = listSelect.getText();
   const newName = prompt("Enter the new name for the list:", currentName);
 
   if (newName && newName.trim() && newName.trim() !== currentName) {
@@ -996,86 +1075,37 @@ function handleEditClick(event) {
     // --- NEW: Sentinel option representing "no list" (null listId) ---
     // Without this, editing an unlisted item silently snaps it to the first
     // real list on save because <select> has no matching option.
-    const unlistedOption = document.createElement('option');
-    unlistedOption.value = "__unlisted__";
-    unlistedOption.textContent = "(Unlisted / No list)";
-    unlistedOption.style.color = "#aaa";
-    unlistedOption.style.fontStyle = "italic";
-    if (!currentListId) {
-      unlistedOption.selected = true;
-    }
-    listSelector.appendChild(unlistedOption);
-
-    const sortedList = getSortedTreeLists(data.wordLists);
-    sortedList.forEach(list => {
-      const option = document.createElement('option');
-      option.value = list.id;
-      const indent = list.depth > 0 ? '&nbsp;&nbsp;'.repeat(list.depth) + '↳ ' : '';
-      option.innerHTML = indent + list.name;
-      if (list.id === currentListId) {
-        option.selected = true;
+    // Remove old manual select creation and use createCustomDropdown
+    let listSelector;
+    
+    function recreateDropdown(listsToUse, currentVal) {
+      if (listSelector && listSelector.parentNode) {
+        listSelector.parentNode.removeChild(listSelector);
       }
-      listSelector.appendChild(option);
-    });
-
-    // --- NEW: Add Create List option ---
-    const createOption = document.createElement('option');
-    createOption.value = "__create_new__";
-    createOption.textContent = "+ Create New List...";
-    createOption.style.color = "lightgreen";
-    listSelector.appendChild(createOption);
-
-    // If for some reason no option ended up selected (defensive), default to Unlisted.
-    if (!listSelector.value) listSelector.value = "__unlisted__";
-
-    // Add change listener for creation
-    listSelector.addEventListener('change', (e) => {
-      if (e.target.value === "__create_new__") {
-        const newListName = prompt("Enter the name for the new list:");
-        if (newListName && newListName.trim()) {
-          // We need to manually add to storage here or reuse addList logic?
-          // Since we are in options.js, we can access storage directly.
-          chrome.storage.local.get({ wordLists: [] }, (data) => {
-            const lists = data.wordLists;
-            const newList = { id: `list_${new Date().getTime()}`, name: newListName.trim() };
-            lists.push(newList);
-            chrome.storage.local.set({ wordLists: lists }, () => {
-              updateStatus('List created!', 'success');
-              // Re-populate this specific selector!
-              // We need to clear and re-add options.
-              listSelector.innerHTML = '';
-              listSelector.appendChild(unlistedOption);
-              const newSortedList = getSortedTreeLists(lists);
-              newSortedList.forEach(l => {
-                const opt = document.createElement('option');
-                opt.value = l.id;
-                const indent = l.depth > 0 ? '&nbsp;&nbsp;'.repeat(l.depth) + '↳ ' : '';
-                opt.innerHTML = indent + l.name;
-                if (l.id === newList.id) opt.selected = true;
-                listSelector.appendChild(opt);
+      listSelector = createCustomDropdown(listsToUse, currentVal, (val) => {
+        if (val === "__create_new__") {
+          const newListName = prompt("Enter the name for the new list:");
+          if (newListName && newListName.trim()) {
+            chrome.storage.local.get({ wordLists: [] }, (data2) => {
+              const updatedLists = data2.wordLists;
+              const newList = { id: `list_${new Date().getTime()}`, name: newListName.trim() };
+              updatedLists.push(newList);
+              chrome.storage.local.set({ wordLists: updatedLists }, () => {
+                updateStatus('List created!', 'success');
+                recreateDropdown(updatedLists, newList.id);
               });
-              // Add create option again
-              listSelector.appendChild(createOption);
-              listSelector.value = newList.id; // Select new one
-
-              // Also refresh the main list in background? 
-              // loadLists() would refresh the MAIN UI but might disrupt the editing flow?
-              // Yes, loadLists clears history list. We should NOT call loadLists here.
-              // But we should probably update the main dropdown silently?
-              // For now, let's just make sure the editing works. 
-              // The main dropdown will be outdated until page refresh or manual interaction.
-              // That's acceptable for this localized context.
             });
-          });
-        } else {
-          // Revert to currentListId (original one) or try to find what was selected?
-          // Simplest is to set value back to currentListId
-          listSelector.value = currentListId;
+          } else {
+            // Revert value
+            listSelector.value = currentListId || '__unlisted__';
+          }
         }
-      }
-    });
-
-    editControlsContainer.appendChild(listSelector); // Add selector to container
+      }, { showUnlisted: true, showCreateNew: true });
+      listSelector.classList.add('edit-list-selector');
+      editControlsContainer.appendChild(listSelector);
+    }
+    
+    recreateDropdown(data.wordLists, currentListId || '__unlisted__');
   });
 
   const editDefinitionTextarea = document.createElement('textarea');
@@ -1181,7 +1211,7 @@ function clearAllHistory() {
 function clearListHistory() {
   const listSelect = document.getElementById('list-select');
   const listId = listSelect.value;
-  const listName = listSelect.options[listSelect.selectedIndex]?.text;
+  const listName = listSelect.getText();
 
   // Ignore the "+ Create New List..." pseudo-option.
   if (!listId || listId === "__create_new__") return;

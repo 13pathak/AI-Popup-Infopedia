@@ -567,6 +567,27 @@
             margin-top: 8px;
         }
         .checkbox-label input { width: 16px; height: 16px; accent-color: var(--primary-color); }
+        .custom-select-container { position: relative; flex-grow: 1; }
+        .custom-select {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 10px; background-color: var(--input-bg);
+            border: 1px solid var(--border-color); border-radius: 4px;
+            cursor: pointer; user-select: none; color: var(--text-color);
+        }
+        .custom-select:focus { outline: none; border-color: var(--primary-color); }
+        .custom-options {
+            position: absolute; top: 100%; left: 0; right: 0;
+            background-color: var(--card-bg); border: 1px solid var(--border-color);
+            border-radius: 4px; margin-top: 4px; max-height: 300px; overflow-y: auto;
+            z-index: 1000; display: none; box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+        .custom-options.show { display: block; }
+        .custom-option { padding: 8px 12px; cursor: pointer; display: flex; align-items: center; }
+        .custom-option:hover { background-color: var(--hover-bg); }
+        .custom-option.selected { background-color: rgba(99, 102, 241, 0.2); }
+        .expand-toggle { cursor: pointer; display: inline-block; width: 20px; text-align: center; color: var(--text-muted); }
+        .expand-toggle:hover { color: var(--text-color); }
+        .indent-spacer { display: inline-block; width: 20px; }
     </style>
 </head>
 
@@ -722,7 +743,7 @@
         <div id="list-management">
             <h4>Manage & View Lists</h4>
             <div id="list-controls">
-                <select id="list-select" style="flex-grow: 1;"></select>
+                <div id="list-select-container" style="flex-grow: 1;"></div>
                 <button id="add-list-btn" title="Add New List"
                     style="background-color: var(--secondary-color);">&#43;</button>
                 <button id="add-sub-list-btn" title="Add Sub-List to Selected"

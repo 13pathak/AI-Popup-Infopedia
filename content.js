@@ -23,6 +23,31 @@ const popupStyles = `
     z-index: 1; /* z-index is now relative to its container */
   }
 
+  /* --- NEW: Styles for custom dropdown --- */
+  .custom-select-container { position: relative; flex-grow: 1; min-width: 150px; }
+  .custom-select {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 6px 10px; background-color: #444;
+      border: 1px solid #666; border-radius: 4px;
+      cursor: pointer; user-select: none; color: #eee;
+      font-size: 13px; font-family: sans-serif;
+  }
+  .custom-select:focus { outline: none; border-color: #888; }
+  .custom-options {
+      position: absolute; bottom: 100%; left: 0; right: 0;
+      background-color: #333; border: 1px solid #555;
+      border-radius: 4px; margin-bottom: 4px; max-height: 250px; overflow-y: auto;
+      z-index: 2000; display: none; box-shadow: 0 -4px 10px rgba(0,0,0,0.4);
+      font-size: 13px; font-family: sans-serif;
+  }
+  .custom-options.show { display: block; }
+  .custom-option { padding: 6px 10px; cursor: pointer; display: flex; align-items: center; }
+  .custom-option:hover { background-color: #555; }
+  .custom-option.selected { background-color: rgba(150, 150, 255, 0.2); }
+  .expand-toggle { cursor: pointer; display: inline-block; width: 16px; text-align: center; color: #aaa; font-size: 10px;}
+  .expand-toggle:hover { color: #eee; }
+  .indent-spacer { display: inline-block; width: 16px; }
+
   /* --- NEW: Styles for the model selector --- */
   /* --- NEW: Container for selectors --- */
   #ai-popup-selectors-container {
@@ -183,6 +208,159 @@ const popupStyles = `
     background-color: #62c3b8;
   }
 `;
+
+// --- NEW: Custom Dropdown Helpers ---
+function getSortedTreeLists(lists) {
+  const listMap = {};
+  lists.forEach(l => {
+    l.children = [];
+    listMap[l.id] = l;
+  });
+
+  const roots = [];
+  lists.forEach(l => {
+    if (l.parentId && listMap[l.parentId]) {
+      listMap[l.parentId].children.push(l);
+    } else {
+      roots.push(l);
+    }
+  });
+
+  const sortedList = [];
+  function traverse(node, depth) {
+    sortedList.push({ ...node, depth });
+    node.children.forEach(child => traverse(child, depth + 1));
+  }
+  roots.forEach(root => traverse(root, 0));
+  return sortedList;
+}
+
+function createCustomDropdown(lists, currentValue, onChange, options = {}) {
+  const container = document.createElement('div');
+  container.className = 'custom-select-container';
+
+  const selectBtn = document.createElement('div');
+  selectBtn.className = 'custom-select';
+  selectBtn.tabIndex = 0;
+  
+  const valueDisplay = document.createElement('span');
+  valueDisplay.className = 'custom-select-value';
+  valueDisplay.textContent = 'Select a list...';
+
+  const arrow = document.createElement('span');
+  arrow.textContent = '▼';
+  
+  selectBtn.append(valueDisplay, arrow);
+  
+  const optionsContainer = document.createElement('div');
+  optionsContainer.className = 'custom-options';
+
+  container.append(selectBtn, optionsContainer);
+
+  let selectedId = currentValue;
+  const expandedState = {}; 
+
+  const sortedList = getSortedTreeLists(lists);
+
+  const allItems = [];
+  if (options.showAllLists) allItems.push({ id: '__all_lists__', name: '🗂 All Lists', depth: 0 });
+  if (options.showUnlisted) allItems.push({ id: '__unlisted__', name: '(Unlisted / No list)', depth: 0, color: '#aaa', italic: true });
+  allItems.push(...sortedList);
+  if (options.showCreateNew) allItems.push({ id: '__create_new__', name: '+ Create New List...', depth: 0, color: 'lightgreen', isCreate: true });
+
+  function renderOptions() {
+    optionsContainer.innerHTML = '';
+    
+    allItems.forEach(item => {
+      let visible = true;
+      let curr = item;
+      while (curr && curr.parentId) {
+        if (!expandedState[curr.parentId]) {
+          visible = false;
+          break;
+        }
+        curr = allItems.find(i => i.id === curr.parentId);
+      }
+      
+      if (!visible) return;
+
+      const optEl = document.createElement('div');
+      optEl.className = 'custom-option';
+      if (item.id === selectedId) {
+        optEl.classList.add('selected');
+        valueDisplay.textContent = item.name;
+      }
+      if (item.color) optEl.style.color = item.color;
+      if (item.italic) optEl.style.fontStyle = 'italic';
+
+      for (let i = 0; i < (item.depth || 0); i++) {
+        const spacer = document.createElement('span');
+        spacer.className = 'indent-spacer';
+        optEl.appendChild(spacer);
+      }
+
+      const hasChildren = allItems.some(i => i.parentId === item.id);
+      if (hasChildren) {
+        const toggle = document.createElement('span');
+        toggle.className = 'expand-toggle';
+        toggle.textContent = expandedState[item.id] ? '▼' : '▶';
+        toggle.addEventListener('click', (e) => {
+          e.stopPropagation(); 
+          expandedState[item.id] = !expandedState[item.id];
+          renderOptions();
+        });
+        optEl.appendChild(toggle);
+      } else {
+        const spacer = document.createElement('span');
+        spacer.className = 'indent-spacer';
+        optEl.appendChild(spacer);
+      }
+
+      const textNode = document.createElement('span');
+      textNode.textContent = item.name;
+      optEl.appendChild(textNode);
+
+      optEl.addEventListener('click', (e) => {
+        e.stopPropagation();
+        selectedId = item.id;
+        valueDisplay.textContent = item.name;
+        optionsContainer.classList.remove('show');
+        if (onChange) onChange(selectedId);
+        renderOptions();
+      });
+
+      optionsContainer.appendChild(optEl);
+    });
+  }
+
+  let curr = allItems.find(i => i.id === selectedId);
+  while (curr && curr.parentId) {
+    expandedState[curr.parentId] = true;
+    curr = allItems.find(i => i.id === curr.parentId);
+  }
+  
+  if (!selectedId && allItems.length > 0) {
+    selectedId = allItems[0].id;
+    valueDisplay.textContent = allItems[0].name;
+  }
+
+  renderOptions();
+
+  selectBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    optionsContainer.classList.toggle('show');
+  });
+
+  // Adding document listener here won't work perfectly inside shadow root if we just listen on document,
+  // but we can listen on the shadow root document or window, we will fix this in populateListOptions.
+
+  Object.defineProperty(container, 'value', {
+    get: function() { return selectedId; },
+    set: function(val) { selectedId = val; renderOptions(); }
+  });
+
+  return container;
+}
 
 // --- Main mouseup listener ---
 document.addEventListener('mouseup', (event) => {
@@ -966,107 +1144,44 @@ function createActionButtons(instance, word, definition, modelName, promptName) 
       pinButton.style.color = instance.isPinned ? '#80cbc4' : '#4db6ac';
     };
 
-    // 2. Create list selector
-    const listSelector = document.createElement('select');
-    listSelector.style.cssText = `
-        flex-grow: 1;
-        background-color: #444;
-        color: #eee;
-        border: 1px solid #666;
-        border-radius: 4px;
-        padding: 5px;
-        font-family: sans-serif;
-        font-size: 13px;
-      `;
-
-    // Helper to populate options
-    function populateListOptions() {
-      listSelector.innerHTML = '';
-
-      const listMap = {};
-      lists.forEach(l => {
-        l.children = [];
-        listMap[l.id] = l;
-      });
-
-      const roots = [];
-      lists.forEach(l => {
-        if (l.parentId && listMap[l.parentId]) {
-          listMap[l.parentId].children.push(l);
-        } else {
-          roots.push(l);
-        }
-      });
-
-      const sortedList = [];
-      function traverse(node, depth) {
-        sortedList.push({ ...node, depth });
-        node.children.forEach(child => traverse(child, depth + 1));
+    // 2. Create list selector using Custom Dropdown Component
+    let listSelector;
+    function recreateDropdown(listsToUse, currentVal) {
+      if (listSelector && listSelector.parentNode) {
+        listSelector.parentNode.removeChild(listSelector);
       }
-      roots.forEach(root => traverse(root, 0));
-
-      sortedList.forEach(list => {
-        const option = document.createElement('option');
-        option.value = list.id;
-        const indent = list.depth > 0 ? '&nbsp;&nbsp;'.repeat(list.depth) + '↳ ' : '';
-        option.innerHTML = indent + list.name;
-
-        // --- NEW: Check if this list was the last one used ---
-        if (list.id === lastUsedListId) {
-          option.selected = true;
+      listSelector = createCustomDropdown(listsToUse, currentVal, (val) => {
+        if (val === "__create_new__") {
+          instance.isInteracting = true;
+          const newListName = prompt("Enter a name for the new list:");
+          instance.isInteracting = false;
+          if (newListName && newListName.trim()) {
+            chrome.runtime.sendMessage({ type: "createList", listName: newListName.trim() }, (response) => {
+              if (response && response.success) {
+                listsToUse.push(response.newList);
+                recreateDropdown(listsToUse, response.newList.id);
+              } else {
+                alert("Failed to create list: " + (response.error || "Unknown error"));
+                listSelector.value = (lastUsedListId || (listsToUse.length ? listsToUse[0].id : null));
+              }
+            });
+          } else {
+            listSelector.value = (lastUsedListId || (listsToUse.length ? listsToUse[0].id : null));
+          }
         }
-        // --- END NEW ---
+      }, { showCreateNew: true });
+      selectorsContainer.insertBefore(listSelector, selectorsContainer.children[1]);
 
-        listSelector.appendChild(option);
+      // Handle clicking outside custom dropdown (inside shadow root)
+      instance.container.shadowRoot.addEventListener('click', (e) => {
+        if (!listSelector.contains(e.target)) {
+          const optionsContainer = listSelector.querySelector('.custom-options');
+          if (optionsContainer) optionsContainer.classList.remove('show');
+        }
       });
-
-      // --- NEW: Add "Create New List" option ---
-      const createOption = document.createElement('option');
-      createOption.value = "__create_new__";
-      createOption.textContent = "+ Create New List...";
-      createOption.style.fontWeight = "bold";
-      createOption.style.color = "#88ff88"; // Light green to stand out
-      listSelector.appendChild(createOption);
     }
 
-    populateListOptions();
-
-    // Handle change event for creating new list
-    listSelector.addEventListener('change', (e) => {
-      if (e.target.value === "__create_new__") {
-        instance.isInteracting = true; // Prevent close while prompting
-        const newListName = prompt("Enter a name for the new list:");
-        instance.isInteracting = false;
-
-        if (newListName && newListName.trim()) {
-          // Send message to create list
-          chrome.runtime.sendMessage({ type: "createList", listName: newListName.trim() }, (response) => {
-            if (response && response.success) {
-              // Add to local lists array
-              lists.push(response.newList);
-              // Update lastUsedListId to the new list
-              // actually we can't update the variable 'lastUsedListId' effectively for the next run without re-fetching, 
-              // but for this UI instance we just select it.
-
-              // Refresh options
-              populateListOptions();
-              // Select the new list
-              listSelector.value = response.newList.id;
-            } else {
-              alert("Failed to create list: " + (response.error || "Unknown error"));
-              // Revert selection?
-              // Simple revert to first or previous is hard without state tracking,
-              // simpler to just re-populate which resets to default/lastUsed logic if possible,
-              // or just let it stay on "Create New List" (harmless).
-              populateListOptions();
-            }
-          });
-        } else {
-          // User cancelled or entered empty
-          populateListOptions(); // Reset
-        }
-      }
-    });
+    recreateDropdown(lists, lastUsedListId || (lists.length ? lists[0].id : null));
 
     // 4. Create the final "Save" button
     const finalSaveButton = document.createElement('button');
