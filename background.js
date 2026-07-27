@@ -177,7 +177,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               }
 
               // 3. Append to history and make next API call
-              safeMessagesText.push(data.choices[0].message); // Add the AI's tool request
+              safeMessagesText.push({
+                role: "assistant",
+                content: data.choices[0].message.content || "",
+                tool_calls: data.choices[0].message.tool_calls
+              }); // Safely add the AI's tool request
               safeMessagesText.push({
                 role: "tool",
                 tool_call_id: toolCall.id,
@@ -200,7 +204,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               });
               
               if (!nextResponse.ok) {
-                  throw new Error(`HTTP error on search pass: ${nextResponse.status}`);
+                  let errDetails = "";
+                  try {
+                    const errJson = await nextResponse.json();
+                    errDetails = (errJson.error && errJson.error.message) ? errJson.error.message : JSON.stringify(errJson);
+                  } catch (e) {
+                    errDetails = "Could not parse error details.";
+                  }
+                  throw new Error(`HTTP error on search pass: ${nextResponse.status} - ${errDetails}`);
               }
               
               data = await nextResponse.json();
