@@ -18,7 +18,7 @@ AI Popup Infopedia now supports **real-time web search grounding** through nativ
 - **Groq Recovery:** If a Groq model fails to parse a follow-up tool call, the extension retries with the retrieved search results and requests a normal text answer instead of showing an error.
 
 ### 🛡️ Smart Hallucination Guard Bypass
-When the primary model grounds its response with live web search results, the Hallucination Guard is **automatically bypassed** — preventing the verification model from falsely flagging accurate, real-time answers using its outdated static knowledge. A blue 🌐 **"Search Grounded"** indicator is shown instead. The guard continues to run normally for non-searched responses.
+When the primary model grounds its response with live web search results, the Hallucination Guard is **automatically bypassed**, preventing the verification model from falsely flagging accurate, real-time answers using its outdated static knowledge. A blue 🌐 **"Search Grounded"** indicator is shown instead. The guard continues to run normally for non-searched responses.
 
 ---
 
