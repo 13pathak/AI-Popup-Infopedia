@@ -196,6 +196,7 @@ function showModelForm(isEdit = false, model = {}) {
   document.getElementById('endpoint').value = model.endpointUrl || 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
   document.getElementById('modelName').value = model.modelName || 'gemini-1.5-flash-latest';
   document.getElementById('apiKey').value = model.apiKey || '';
+  document.getElementById('enableSearchGrounding').checked = model.enableSearchGrounding || false;
 
   document.getElementById('model-form-container').style.display = 'block';
   document.getElementById('model-selection-container').style.display = 'none';
@@ -212,6 +213,7 @@ function hideModelForm() {
   document.getElementById('endpoint').value = '';
   document.getElementById('modelName').value = '';
   document.getElementById('apiKey').value = '';
+  document.getElementById('enableSearchGrounding').checked = false;
 }
 
 function saveModel() {
@@ -221,7 +223,8 @@ function saveModel() {
     name: document.getElementById('configName').value.trim(),
     endpointUrl: document.getElementById('endpoint').value.trim(),
     modelName: document.getElementById('modelName').value.trim(),
-    apiKey: document.getElementById('apiKey').value.trim()
+    apiKey: document.getElementById('apiKey').value.trim(),
+    enableSearchGrounding: document.getElementById('enableSearchGrounding').checked
   };
 
   if (!newModelConfig.name || !newModelConfig.endpointUrl || !newModelConfig.modelName) {

@@ -87,6 +87,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         "stream": false
       };
 
+      if (modelToUse.enableSearchGrounding && modelName.toLowerCase().includes('gemini')) {
+        payload.tools = [{"type": "google_search"}];
+      }
+
       try {
         // --- THIS IS THE OPTIONAL FIX (HEADERS) ---
         // Create headers object
