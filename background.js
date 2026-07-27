@@ -145,6 +145,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         let data = await response.json();
         let aiText = "";
         let loopCount = 0;
+        let usedWebSearch = false;
         const maxLoops = 3;
 
         // The Orchestrator Loop
@@ -216,6 +217,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               
               data = await nextResponse.json();
               loopCount++;
+              usedWebSearch = true;
             } else if (toolCall.function.name === "web_search" && !tavilyApiKey) {
               throw new Error("AI tried to search the web, but no Tavily API Key is configured in settings.");
             } else {
@@ -234,7 +236,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           aiText = data.choices[0].message.content || "The AI reached maximum search depth or returned an empty response.";
         }
 
-        sendResponse({ definition: aiText, usedPrompt: prompt, models: models, defaultModelId: defaultModelId, customPrompts: customPrompts || [], defaultPromptId: defaultPromptId, promptName: promptName });
+        sendResponse({ definition: aiText, usedWebSearch: usedWebSearch, usedPrompt: prompt, models: models, defaultModelId: defaultModelId, customPrompts: customPrompts || [], defaultPromptId: defaultPromptId, promptName: promptName });
 
       } catch (error) {
         console.error("AI API call failed:", error);

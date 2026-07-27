@@ -627,10 +627,14 @@ function initiatePopupSequence(rect, selectedText) {
         const modelName = response && response.models ? (response.models.find(m => m.id === response.defaultModelId)?.name || 'Unknown Model') : 'Unknown Model';
         createActionButtons(popupInstance, selectedText, definitionText, modelName, response.promptName);
         
-        // --- NEW: Trigger Hallucination Verification ---
+        // --- NEW: Trigger Hallucination Verification (with Smart Bypass) ---
         chrome.storage.sync.get(['enableHallucinationGuard'], (guardData) => {
           if (guardData.enableHallucinationGuard) {
-             triggerVerification(popupInstance, selectedText, definitionText);
+            if (response && response.usedWebSearch) {
+              showSearchGroundedIndicator(popupInstance);
+            } else {
+              triggerVerification(popupInstance, selectedText, definitionText);
+            }
           }
         });
       }
@@ -1050,10 +1054,14 @@ function redefineWithModelAndPrompt(instance, word, modelId, promptContent) {
           // Re-create the save button after model change
           createActionButtons(instance, word, definitionText, modelName, response.promptName);
 
-          // --- NEW: Trigger Hallucination Verification for Redefined Fetch ---
+          // --- NEW: Trigger Hallucination Verification for Redefined Fetch (with Smart Bypass) ---
           chrome.storage.sync.get(['enableHallucinationGuard'], (guardData) => {
             if (guardData.enableHallucinationGuard) {
-               triggerVerification(instance, word, definitionText);
+              if (response && response.usedWebSearch) {
+                showSearchGroundedIndicator(instance);
+              } else {
+                triggerVerification(instance, word, definitionText);
+              }
             }
           });
         }
@@ -1534,12 +1542,16 @@ function createFollowupInput(instance, word) {
         if (response && !response.error) {
           instance.messages.push({ role: 'assistant', content: response.definition });
           
-          // --- NEW: Trigger Hallucination Verification ---
+          // --- NEW: Trigger Hallucination Verification (with Smart Bypass) ---
           chrome.storage.sync.get(['enableHallucinationGuard'], (guardData) => {
             if (guardData.enableHallucinationGuard) {
-               const userMsgs = instance.messages.filter(m => m.role === 'user');
-               const lastUserMsg = userMsgs.length > 0 ? userMsgs[userMsgs.length - 1].content : word;
-               triggerVerification(instance, lastUserMsg, response.definition);
+              if (response && response.usedWebSearch) {
+                showSearchGroundedIndicator(instance);
+              } else {
+                const userMsgs = instance.messages.filter(m => m.role === 'user');
+                const lastUserMsg = userMsgs.length > 0 ? userMsgs[userMsgs.length - 1].content : word;
+                triggerVerification(instance, lastUserMsg, response.definition);
+              }
             }
           });
         } else {
@@ -1748,6 +1760,28 @@ function saveConversationAsPdf(instance) {
   html += `<script>window.onload = function() { setTimeout(function() { window.print(); }, 500); }</script></body></html>`;
 
   chrome.runtime.sendMessage({ type: "openPdfTab", htmlContent: html });
+}
+
+// --- NEW: Search Grounded Indicator (Smart Bypass) ---
+function showSearchGroundedIndicator(popupInstance) {
+  if (!popupInstance || !popupInstance.popup) return;
+  const contentWrapper = popupInstance.popup.querySelector('#ai-popup-content');
+  if (!contentWrapper) return;
+
+  const indicator = document.createElement('div');
+  indicator.style.marginTop = '12px';
+  indicator.style.padding = '8px';
+  indicator.style.borderRadius = '6px';
+  indicator.style.backgroundColor = 'rgba(59, 130, 246, 0.1)';
+  indicator.style.borderLeft = '3px solid #3b82f6';
+  indicator.style.fontSize = '12px';
+  indicator.style.color = 'inherit';
+  indicator.innerHTML = `🌐 <strong style="color:#3b82f6;">Search Grounded</strong> <span style="opacity:0.8">- Response is based on live web results. Hallucination Guard bypassed.</span>`;
+  contentWrapper.appendChild(indicator);
+
+  if (contentWrapper.scrollHeight > contentWrapper.clientHeight) {
+    contentWrapper.scrollTop = contentWrapper.scrollHeight;
+  }
 }
 
 // --- NEW: Hallucination Verification UI Logic ---
