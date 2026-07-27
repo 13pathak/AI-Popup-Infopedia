@@ -7,6 +7,20 @@ A powerful browser extension to get instant AI explanations for any word or phra
 
 ---
 
+## 🆕 What's New (v7.0)
+
+### 🌐 Real-Time Web Search Grounding
+AI Popup Infopedia now supports **real-time web search grounding** through native tool calling. Instead of relying solely on static training data, each configured model can now **autonomously invoke a search tool mid-inference** to fetch live results when the query demands it. If the model's parametric knowledge is sufficient, it skips the search entirely — keeping responses fast. Powered by the [Tavily Search API](https://tavily.com/).
+
+- **Native Function Calling:** The extension injects an OpenAI-compatible `web_search` tool schema into API requests. The AI decides at inference time whether a web search is needed — zero manual intervention.
+- **Universal Compatibility:** Works across all OpenAI-compatible endpoints — Gemini, OpenAI, Groq, Ollama, and more.
+- **Orchestrator Loop:** The background script acts as an AI orchestrator, handling multi-step tool calls (up to 3 search passes per query) with automatic forced-text fallback.
+
+### 🛡️ Smart Hallucination Guard Bypass
+When the primary model grounds its response with live web search results, the Hallucination Guard is **automatically bypassed** — preventing the verification model from falsely flagging accurate, real-time answers using its outdated static knowledge. A blue 🌐 **"Search Grounded"** indicator is shown instead. The guard continues to run normally for non-searched responses.
+
+---
+
 ## ✨ Features
 
 ### ⚡ Core Features
