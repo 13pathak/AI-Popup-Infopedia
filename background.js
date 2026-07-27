@@ -142,67 +142,80 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           // --- END ROBUST ERROR HANDLING ---
         }
 
-        const data = await response.json();
-        
+        let data = await response.json();
         let aiText = "";
+        let loopCount = 0;
+        const maxLoops = 3;
 
-        // Check if AI wants to use a tool
-        if (data.choices && data.choices[0].message.tool_calls) {
-          const toolCall = data.choices[0].message.tool_calls[0];
-          
-          if (toolCall.function.name === "web_search" && tavilyApiKey) {
-            // 1. Extract the query
-            const args = JSON.parse(toolCall.function.arguments);
-            const query = args.query;
+        // The Orchestrator Loop
+        while (loopCount < maxLoops) {
+          // Check if AI wants to use a tool
+          if (data.choices && data.choices[0].message.tool_calls) {
+            const toolCall = data.choices[0].message.tool_calls[0];
             
-            // 2. Make the request to Tavily
-            const tavilyResponse = await fetch("https://api.tavily.com/search", {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ api_key: tavilyApiKey, query: query, max_results: 3 })
-            });
-            const tavilyData = await tavilyResponse.json();
-            
-            // Format the search results
-            let searchResultsText = "Search Results:\n";
-            if (tavilyData.results) {
-              tavilyData.results.forEach(result => {
-                searchResultsText += `- ${result.title}: ${result.content}\n`;
+            if (toolCall.function.name === "web_search" && tavilyApiKey) {
+              // 1. Extract the query
+              const args = JSON.parse(toolCall.function.arguments);
+              const query = args.query;
+              
+              // 2. Make the request to Tavily
+              const tavilyResponse = await fetch("https://api.tavily.com/search", {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ api_key: tavilyApiKey, query: query, max_results: 3 })
               });
+              const tavilyData = await tavilyResponse.json();
+              
+              // Format the search results
+              let searchResultsText = "Search Results:\n";
+              if (tavilyData.results) {
+                tavilyData.results.forEach(result => {
+                  searchResultsText += `- ${result.title}: ${result.content}\n`;
+                });
+              } else {
+                searchResultsText += "No results found. Server returned: " + JSON.stringify(tavilyData);
+              }
+
+              // 3. Append to history and make next API call
+              safeMessagesText.push(data.choices[0].message); // Add the AI's tool request
+              safeMessagesText.push({
+                role: "tool",
+                tool_call_id: toolCall.id,
+                name: "web_search",
+                content: searchResultsText
+              });
+
+              payload.messages = safeMessagesText;
+              
+              // Re-fetch with the updated payload
+              const nextResponse = await fetch(endpointUrl, {
+                method: 'POST',
+                headers: headers,
+                body: JSON.stringify(payload)
+              });
+              
+              if (!nextResponse.ok) {
+                  throw new Error(`HTTP error on search pass: ${nextResponse.status}`);
+              }
+              
+              data = await nextResponse.json();
+              loopCount++;
+            } else if (toolCall.function.name === "web_search" && !tavilyApiKey) {
+              throw new Error("AI tried to search the web, but no Tavily API Key is configured in settings.");
             } else {
-              searchResultsText += "No results found.";
+               aiText = "Error: AI attempted to call an unknown tool: " + toolCall.function.name;
+               break;
             }
-
-            // 3. Append to history and make second API call
-            safeMessagesText.push(data.choices[0].message); // Add the AI's tool request
-            safeMessagesText.push({
-              role: "tool",
-              tool_call_id: toolCall.id,
-              name: "web_search",
-              content: searchResultsText
-            });
-
-            payload.messages = safeMessagesText;
-            
-            // Re-fetch with the updated payload
-            const secondResponse = await fetch(endpointUrl, {
-              method: 'POST',
-              headers: headers,
-              body: JSON.stringify(payload)
-            });
-            
-            if (!secondResponse.ok) {
-                throw new Error(`HTTP error on second pass: ${secondResponse.status}`);
-            }
-            
-            const secondData = await secondResponse.json();
-            aiText = secondData.choices[0].message.content;
-          } else if (toolCall.function.name === "web_search" && !tavilyApiKey) {
-            throw new Error("AI tried to search the web, but no Tavily API Key is configured in settings.");
+          } else {
+            // Standard text response received!
+            aiText = data.choices[0].message.content;
+            break;
           }
-        } else {
-          // Standard text response
-          aiText = data.choices[0].message.content;
+        }
+        
+        // Fallback if it looped too many times or content was null
+        if (!aiText) {
+          aiText = data.choices[0].message.content || "The AI reached maximum search depth or returned an empty response.";
         }
 
         sendResponse({ definition: aiText, usedPrompt: prompt, models: models, defaultModelId: defaultModelId, customPrompts: customPrompts || [], defaultPromptId: defaultPromptId, promptName: promptName });
