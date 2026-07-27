@@ -31,8 +31,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.type === "getAiDefinition") {
 
     // Get all saved models and the ID of the default one
-    chrome.storage.sync.get(['models', 'defaultModelId', 'customPrompts', 'defaultPromptId'], async (data) => {
-      const { models, defaultModelId, customPrompts, defaultPromptId } = data;
+    chrome.storage.sync.get(['models', 'defaultModelId', 'customPrompts', 'defaultPromptId', 'tavilyApiKey'], async (data) => {
+      const { models, defaultModelId, customPrompts, defaultPromptId, tavilyApiKey } = data;
 
       if (!models || models.length === 0 || !defaultModelId) {
         sendResponse({ error: "No default AI model configured. Please set one in the options page.", models: [], defaultModelId: null });
@@ -87,8 +87,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         "stream": false
       };
 
-      if (modelToUse.enableSearchGrounding && modelName.toLowerCase().includes('gemini')) {
-        payload.tools = [{"type": "google_search"}];
+      if (modelToUse.enableSearchGrounding) {
+        payload.tools = [{
+          "type": "function",
+          "function": {
+            "name": "web_search",
+            "description": "Searches the web for recent events, news, or factual information that might not be in your training data.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "query": { "type": "string", "description": "The search query to look up on the web" }
+              },
+              "required": ["query"]
+            }
+          }
+        }];
       }
 
       try {
@@ -130,7 +143,67 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         const data = await response.json();
-        const aiText = data.choices[0].message.content;
+        
+        let aiText = "";
+
+        // Check if AI wants to use a tool
+        if (data.choices && data.choices[0].message.tool_calls) {
+          const toolCall = data.choices[0].message.tool_calls[0];
+          
+          if (toolCall.function.name === "web_search" && tavilyApiKey) {
+            // 1. Extract the query
+            const args = JSON.parse(toolCall.function.arguments);
+            const query = args.query;
+            
+            // 2. Make the request to Tavily
+            const tavilyResponse = await fetch("https://api.tavily.com/search", {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ api_key: tavilyApiKey, query: query, max_results: 3 })
+            });
+            const tavilyData = await tavilyResponse.json();
+            
+            // Format the search results
+            let searchResultsText = "Search Results:\n";
+            if (tavilyData.results) {
+              tavilyData.results.forEach(result => {
+                searchResultsText += `- ${result.title}: ${result.content}\n`;
+              });
+            } else {
+              searchResultsText += "No results found.";
+            }
+
+            // 3. Append to history and make second API call
+            safeMessagesText.push(data.choices[0].message); // Add the AI's tool request
+            safeMessagesText.push({
+              role: "tool",
+              tool_call_id: toolCall.id,
+              name: "web_search",
+              content: searchResultsText
+            });
+
+            payload.messages = safeMessagesText;
+            
+            // Re-fetch with the updated payload
+            const secondResponse = await fetch(endpointUrl, {
+              method: 'POST',
+              headers: headers,
+              body: JSON.stringify(payload)
+            });
+            
+            if (!secondResponse.ok) {
+                throw new Error(`HTTP error on second pass: ${secondResponse.status}`);
+            }
+            
+            const secondData = await secondResponse.json();
+            aiText = secondData.choices[0].message.content;
+          } else if (toolCall.function.name === "web_search" && !tavilyApiKey) {
+            throw new Error("AI tried to search the web, but no Tavily API Key is configured in settings.");
+          }
+        } else {
+          // Standard text response
+          aiText = data.choices[0].message.content;
+        }
 
         sendResponse({ definition: aiText, usedPrompt: prompt, models: models, defaultModelId: defaultModelId, customPrompts: customPrompts || [], defaultPromptId: defaultPromptId, promptName: promptName });
 

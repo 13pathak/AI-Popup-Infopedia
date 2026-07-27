@@ -59,6 +59,7 @@ document.addEventListener('DOMContentLoaded', () => {
   loadReminderSettings(); // Load saved Reminder settings on page load
   loadFollowupSettings(); // Load follow-up custom message
   loadHallucinationGuardSettings(); // Load Hallucination Guard settings
+  loadSearchApiSettings(); // Load Search API settings
 
   // Helper helper to safely add listeners
   function safeAddListener(id, event, handler) {
@@ -81,6 +82,7 @@ document.addEventListener('DOMContentLoaded', () => {
   safeAddListener('save-followup-settings-btn', 'click', saveFollowupSettings);
   safeAddListener('enable-hallucination-guard', 'change', saveHallucinationGuardSettings);
   safeAddListener('verification-model-select', 'change', saveHallucinationGuardSettings);
+  safeAddListener('save-tavily-btn', 'click', saveSearchApiSettings);
 
   safeAddListener('export-history', 'click', exportHistory);
   safeAddListener('import-history', 'click', () => document.getElementById('import-file-input').click());
@@ -415,6 +417,25 @@ function loadFollowupSettings() {
     if (data.showUserQuestions !== undefined) {
       document.getElementById('show-user-questions-checkbox').checked = data.showUserQuestions;
     }
+  });
+}
+
+function loadSearchApiSettings() {
+  chrome.storage.sync.get(['tavilyApiKey'], (data) => {
+    if (data.tavilyApiKey !== undefined) {
+      document.getElementById('tavily-api-key').value = data.tavilyApiKey;
+    }
+  });
+}
+
+function saveSearchApiSettings() {
+  const apiKey = document.getElementById('tavily-api-key').value.trim();
+  chrome.storage.sync.set({ tavilyApiKey: apiKey }, () => {
+    const statusEl = document.getElementById('tavily-status');
+    statusEl.textContent = 'Search API key saved successfully!';
+    setTimeout(() => {
+      statusEl.textContent = '';
+    }, 3000);
   });
 }
 

@@ -671,7 +671,7 @@
             </div>
             <div style="display: flex; align-items: center; gap: 10px; margin-top: 10px; margin-bottom: 10px;">
                 <input type="checkbox" id="enableSearchGrounding" style="width: auto;">
-                <label for="enableSearchGrounding" style="margin-bottom: 0;">Enable Web Search Grounding (Gemini Only)</label>
+                <label for="enableSearchGrounding" style="margin-bottom: 0;">Enable Web Search (Requires Search API Key)</label>
             </div>
             <div id="model-form-actions">
                 <button id="save-model-btn" style="background-color: var(--primary-color);">Save Model</button>
@@ -699,6 +699,17 @@
                 <select id="verification-model-select" style="width: 100%;"></select>
                 <small>Select the model to act as the fact-checker. We recommend using a different provider than your default model.</small>
             </div>
+        </div>
+
+        <div id="search-api-container" style="margin-top: 30px; padding-top: 20px; border-top: 1px solid var(--border-color);">
+            <h3 style="color: var(--primary-color); margin-top: 0;">Search API Settings (Optional)</h3>
+            <p style="margin-bottom: 15px;">Enter a free Tavily API key to enable AI models to search the web for up-to-date facts.</p>
+            <div>
+                <label for="tavily-api-key">Tavily API Key</label>
+                <input type="password" id="tavily-api-key" placeholder="tvly-...">
+            </div>
+            <button id="save-tavily-btn" style="margin-top: 10px; background-color: var(--secondary-color);">Save Search API Key</button>
+            <div id="tavily-status" style="margin-top: 10px; font-weight: bold; min-height: 1em; color: var(--secondary-color);"></div>
         </div>
 
         <div id="global-io-container"
