@@ -3,6 +3,24 @@ chrome.action.onClicked.addListener((tab) => {
   chrome.runtime.openOptionsPage();
 });
 
+// Prevent a provider or search request from leaving a popup on "Loading..."
+// forever when the remote service stops responding.
+async function fetchWithTimeout(url, options, timeoutMs = 30000) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error('Request timed out after 30 seconds. Please try again.');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 // --- NEW: Listen for keyboard shortcuts (commands) ---
 chrome.commands.onCommand.addListener((command) => {
   if (command === "trigger-popup") {
@@ -117,7 +135,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
         // --- END OPTIONAL FIX ---
 
-        const response = await fetch(endpointUrl, {
+        const response = await fetchWithTimeout(endpointUrl, {
           method: 'POST',
           headers: headers, // Use the new headers object
           body: JSON.stringify(payload)
@@ -160,7 +178,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               const query = args.query;
               
               // 2. Make the request to Tavily
-              const tavilyResponse = await fetch("https://api.tavily.com/search", {
+              const tavilyResponse = await fetchWithTimeout("https://api.tavily.com/search", {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ api_key: tavilyApiKey, query: query, max_results: 3 })
@@ -198,7 +216,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               }
               
               // Re-fetch with the updated payload
-              const nextResponse = await fetch(endpointUrl, {
+              const nextResponse = await fetchWithTimeout(endpointUrl, {
                 method: 'POST',
                 headers: headers,
                 body: JSON.stringify(payload)
@@ -221,7 +239,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                      delete payload.tools;
                      payload.tool_choice = "none";
 
-                     const fallbackResponse = await fetch(endpointUrl, {
+                     const fallbackResponse = await fetchWithTimeout(endpointUrl, {
                        method: 'POST',
                        headers: headers,
                        body: JSON.stringify(payload)

@@ -6,37 +6,82 @@ let baseZIndex = 2100000000;
 const popupStyles = `
   #ai-definition-popup {
     position: fixed; /* Use fixed positioning relative to the viewport */
-    background-color: #333;
-    color: #eee;
-    border: 1px solid #555;
-    border-radius: 8px;
-    padding: 12px;
+    background: linear-gradient(145deg, #252a35 0%, #171b24 100%);
+    color: #eef3f8;
+    border: 1px solid rgba(125, 211, 252, 0.22);
+    border-radius: 14px;
+    padding: 14px;
     font-family: sans-serif;
     font-size: 14px;
     line-height: 1.5;
+    width: min(350px, calc(100vw - 28px));
     max-width: 350px;
+    box-sizing: border-box;
     max-height: 85vh; /* Keep the popup within screen bounds */
     display: flex;
     flex-direction: column;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 18px 42px rgba(0, 0, 0, 0.42), 0 3px 12px rgba(0, 0, 0, 0.28);
     pointer-events: auto; /* Re-enable pointer events for the popup itself */
     z-index: 1; /* z-index is now relative to its container */
+    animation: ai-popup-enter 180ms ease-out;
+  }
+
+  @keyframes ai-popup-enter {
+    from { opacity: 0; transform: translateY(6px) scale(0.985); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
+  #ai-popup-context {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  .ai-popup-context-copy { min-width: 0; }
+  .ai-popup-context-label {
+    color: #7dd3fc;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+  .ai-popup-context-query {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #f8fafc;
+    font-size: 15px;
+    font-weight: 650;
+  }
+  .ai-popup-context-model {
+    max-width: 110px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 3px 7px;
+    color: #b7f7eb;
+    background: rgba(45, 212, 191, 0.12);
+    border: 1px solid rgba(45, 212, 191, 0.22);
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 650;
   }
 
   /* --- NEW: Styles for custom dropdown --- */
-  .custom-select-container { position: relative; flex-grow: 1; min-width: 150px; }
+  .custom-select-container { position: relative; flex-grow: 1; min-width: 110px; }
   .custom-select {
       display: flex; align-items: center; justify-content: space-between;
-      padding: 6px 10px; background-color: #444;
-      border: 1px solid #666; border-radius: 4px;
+       padding: 7px 10px; background-color: #101827;
+       border: 1px solid #475569; border-radius: 8px;
       cursor: pointer; user-select: none; color: #eee;
       font-size: 13px; font-family: sans-serif;
   }
   .custom-select:focus { outline: none; border-color: #888; }
   .custom-options {
       position: absolute; bottom: 100%; left: 0; right: 0;
-      background-color: #333; border: 1px solid #555;
-      border-radius: 4px; margin-bottom: 4px; max-height: 250px; overflow-y: auto;
+       background-color: #0f172a; border: 1px solid #475569;
+       border-radius: 8px; margin-bottom: 6px; max-height: 250px; overflow-y: auto;
       z-index: 2000; display: none; box-shadow: 0 -4px 10px rgba(0,0,0,0.4);
       font-size: 13px; font-family: sans-serif;
   }
@@ -52,85 +97,98 @@ const popupStyles = `
   /* --- NEW: Container for selectors --- */
   #ai-popup-selectors-container {
     display: flex;
-    gap: 5px;
-    margin-bottom: 10px;
+     gap: 7px;
+     margin-bottom: 12px;
   }
 
   #ai-popup-model-selector,
   #ai-popup-prompt-selector {
     width: 50%; /* 50:50 split */
-    background-color: #444;
+     background-color: #101827;
     color: #eee;
-    border: 1px solid #666;
-    border-radius: 4px;
-    padding: 5px;
+     border: 1px solid #475569;
+     border-radius: 8px;
+     padding: 7px;
     font-family: sans-serif;
-    font-size: 13px;
-    box-sizing: border-box;
+     font-size: 13px;
+     box-sizing: border-box;
+     color-scheme: dark;
   }
 
   /* Wrapper for the AI-generated text */
   #ai-popup-content {
     overflow-y: auto; /* Scroll if content overflows */
-    padding-right: 5px; /* Spacing for the scrollbar */
+    padding: 2px 5px 2px 1px; /* Spacing for the scrollbar */
+    line-height: 1.62;
   }
 
   /* --- STYLES FOR BUTTONS --- */
   .ai-popup-actions {
     display: flex;
     align-items: center; /* Vertically center items */
-    gap: 10px; /* Space between items */
-    margin-top: 15px;
-    padding-top: 10px;
-    border-top: 1px solid #555;
+    gap: 6px;
+    margin-top: 14px;
+    padding: 8px;
+    background: #111c2c;
+    border: 1px solid #3b4b63;
+    border-radius: 10px;
   }
 
   .ai-popup-button {
     font-family: sans-serif;
     font-size: 14px; 
     font-weight: bold; 
-    color: #ff6b6b; 
+    color: #072b2b;
     cursor: pointer;
-    background: none;
-    border: none;
-    padding: 5px 10px; /* Add horizontal padding */
+    background: #5eead4;
+    border: 1px solid #99f6e4;
+    border-radius: 7px;
+    padding: 6px 11px;
     white-space: nowrap; /* Prevent wrapping */
     flex-shrink: 0; /* Prevent button from shrinking */
   }
 
   .ai-popup-button:hover {
-    opacity: 0.8;
+    background: #99f6e4;
+    transform: translateY(-1px);
   }
 
   /* SPEECH, PDF & PIN BUTTONS */
   #ai-popup-speak-btn, #ai-popup-pdf-btn, #ai-popup-pin-btn {
-    font-size: 18px; /* Slightly larger icon */
-    color: #4db6ac;
+    width: 30px;
+    height: 30px;
+    font-size: 15px;
+    color: #b9f6ed;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
+    background: rgba(45, 212, 191, 0.1);
+    border: 1px solid rgba(94, 234, 212, 0.18);
+    border-radius: 7px;
+    transition: transform 140ms ease, background-color 140ms ease;
   }
   #ai-popup-speak-btn:hover, #ai-popup-pdf-btn:hover, #ai-popup-pin-btn:hover {
-    color: #80cbc4;
+    color: #e6fffb;
+    background: rgba(45, 212, 191, 0.22);
+    transform: translateY(-1px);
   }
 
   /* --- NEW: Follow-up Prompt --- */
   #ai-popup-followup-container {
     display: flex;
-    margin-top: 10px;
-    padding-top: 10px;
-    border-top: 1px solid #555;
+    margin-top: 12px;
+    padding-top: 2px;
     gap: 8px;
   }
   
   #ai-popup-followup-input {
     flex-grow: 1;
-    background-color: #444;
+    background-color: #101827;
     color: #eee;
-    border: 1px solid #666;
-    border-radius: 4px;
+    border: 1px solid #475569;
+    border-radius: 8px;
     padding: 6px 10px;
     font-family: sans-serif;
     font-size: 13px;
@@ -142,10 +200,10 @@ const popupStyles = `
   }
 
   .ai-popup-followup-send {
-    background: #4db6ac;
-    color: #fff;
+    background: #2dd4bf;
+    color: #062c2c;
     border: none;
-    border-radius: 4px;
+    border-radius: 8px;
     padding: 6px 12px;
     cursor: pointer;
     font-weight: bold;
@@ -153,7 +211,7 @@ const popupStyles = `
   }
 
   .ai-popup-followup-send:hover {
-    background: #62c3b8;
+    background: #99f6e4;
   }
 
   /* --- NEW: Follow-up Mic Button --- */
@@ -551,9 +609,18 @@ function showOpenButtonPopup(rect, selectedText) {
 
 // --- NEW: Helper to start the popup logic (extracted from mouseup) ---
 function initiatePopupSequence(rect, selectedText) {
+  // A second selection while a request is still running used to leave another
+  // loading card on the page. Keep normal stacked conversations, but replace
+  // an unfinished request so the UI never accumulates stuck loaders.
+  const loadingPopup = activePopups.find(instance => instance.isLoading);
+  if (loadingPopup) {
+    removePopupInstance(loadingPopup);
+  }
+
   // Create a new popup instance
   // Note: we track the instance object to manage its state updates
   const popupInstance = showPopup(rect.left, rect.top, "Loading...");
+  popupInstance.isLoading = true;
 
   // --- NEW: Store the source text to prevent duplicate triggers ---
   popupInstance.sourceText = selectedText;
@@ -570,6 +637,7 @@ function initiatePopupSequence(rect, selectedText) {
     chrome.runtime.sendMessage({ type: "getAiDefinition", word: selectedText }, (response) => {
       // Verify instance still exists (user might have closed it)
       if (!activePopups.includes(popupInstance)) return;
+      popupInstance.isLoading = false;
 
       if (chrome.runtime.lastError) {
         response = { error: chrome.runtime.lastError.message };
@@ -880,6 +948,31 @@ function createSelectors(instance, models, prompts, currentModelId, currentPromp
   if (existingContainer) {
     existingContainer.remove();
   }
+  const existingContext = popup.querySelector('#ai-popup-context');
+  if (existingContext) {
+    existingContext.remove();
+  }
+
+  const activeModel = models.find(model => model.id === currentModelId) || models[0];
+  const context = document.createElement('div');
+  context.id = 'ai-popup-context';
+
+  const contextCopy = document.createElement('div');
+  contextCopy.className = 'ai-popup-context-copy';
+  const contextLabel = document.createElement('div');
+  contextLabel.className = 'ai-popup-context-label';
+  contextLabel.textContent = selectedText === 'Custom Question' ? 'Conversation' : 'Selected text';
+  const contextQuery = document.createElement('div');
+  contextQuery.className = 'ai-popup-context-query';
+  contextQuery.textContent = selectedText === 'Custom Question' ? 'Ask anything' : selectedText;
+  contextQuery.title = contextQuery.textContent;
+  contextCopy.append(contextLabel, contextQuery);
+
+  const contextModel = document.createElement('span');
+  contextModel.className = 'ai-popup-context-model';
+  contextModel.textContent = activeModel ? activeModel.name : 'AI model';
+  contextModel.title = contextModel.textContent;
+  context.append(contextCopy, contextModel);
 
   const container = document.createElement('div');
   container.id = 'ai-popup-selectors-container';
@@ -943,8 +1036,9 @@ function createSelectors(instance, models, prompts, currentModelId, currentPromp
   container.appendChild(modelSelector);
   container.appendChild(promptSelector);
 
-  // Prepend the container to the popup
+  // Keep the selected text and active model visible above the controls.
   popup.prepend(container);
+  popup.prepend(context);
 
   // Helper to trigger redefine
   function triggerRedefine() {
@@ -1239,8 +1333,10 @@ function createActionButtons(instance, word, definition, modelName, promptName) 
       // Update UI to show "Saved!"
       actionsContainer.innerHTML = ''; // Clear the controls
       const savedText = document.createElement('span');
-      savedText.textContent = 'Saved!';
+      savedText.textContent = '✓ Saved to list';
       savedText.style.opacity = '0.8';
+      savedText.style.color = '#b7f7eb';
+      savedText.style.fontWeight = '600';
       actionsContainer.appendChild(savedText);
 
       // --- REMOVED: Auto-close logic ---
@@ -1771,6 +1867,7 @@ function showSearchGroundedIndicator(popupInstance) {
   if (!contentWrapper) return;
 
   const indicator = document.createElement('div');
+  indicator.className = 'ai-popup-search-grounded';
   indicator.style.marginTop = '12px';
   indicator.style.padding = '8px';
   indicator.style.borderRadius = '6px';
@@ -1778,7 +1875,7 @@ function showSearchGroundedIndicator(popupInstance) {
   indicator.style.borderLeft = '3px solid #3b82f6';
   indicator.style.fontSize = '12px';
   indicator.style.color = 'inherit';
-  indicator.innerHTML = `🌐 <strong style="color:#3b82f6;">Search Grounded</strong> <span style="opacity:0.8">- Response is based on live web results. Hallucination Guard bypassed.</span>`;
+  indicator.innerHTML = `🌐 <strong style="color:#7dd3fc;">Search Grounded</strong> <span style="opacity:0.8">· Response is based on live web results. Hallucination Guard bypassed.</span>`;
   contentWrapper.appendChild(indicator);
 
   if (contentWrapper.scrollHeight > contentWrapper.clientHeight) {
