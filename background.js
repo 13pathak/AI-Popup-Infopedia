@@ -204,20 +204,49 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 body: JSON.stringify(payload)
               });
               
-              if (!nextResponse.ok) {
-                  let errDetails = "";
-                  try {
-                    const errJson = await nextResponse.json();
-                    errDetails = (errJson.error && errJson.error.message) ? errJson.error.message : JSON.stringify(errJson);
-                  } catch (e) {
-                    errDetails = "Could not parse error details.";
-                  }
-                  throw new Error(`HTTP error on search pass: ${nextResponse.status} - ${errDetails}`);
-              }
-              
-              data = await nextResponse.json();
-              loopCount++;
-              usedWebSearch = true;
+               if (!nextResponse.ok) {
+                   let errDetails = "";
+                   try {
+                     const errJson = await nextResponse.json();
+                     errDetails = (errJson.error && errJson.error.message) ? errJson.error.message : JSON.stringify(errJson);
+                   } catch (e) {
+                     errDetails = "Could not parse error details.";
+                   }
+
+                   // Some OpenAI-compatible providers (notably some Groq models) can
+                   // fail to parse a *subsequent* model-generated tool call. The search
+                   // result is already in the conversation, so retry once with tools
+                   // disabled and require the model to produce its final text answer.
+                   if (nextResponse.status === 400 && errDetails.includes("failed_generation")) {
+                     delete payload.tools;
+                     payload.tool_choice = "none";
+
+                     const fallbackResponse = await fetch(endpointUrl, {
+                       method: 'POST',
+                       headers: headers,
+                       body: JSON.stringify(payload)
+                     });
+
+                     if (!fallbackResponse.ok) {
+                       let fallbackError = fallbackResponse.statusText || `HTTP error ${fallbackResponse.status}`;
+                       try {
+                         const fallbackJson = await fallbackResponse.json();
+                         fallbackError = (typeof fallbackJson.error === 'string' ? fallbackJson.error : fallbackJson.error?.message) || fallbackJson.message || JSON.stringify(fallbackJson);
+                       } catch (e) {
+                         // Keep the HTTP status text when the provider returns non-JSON.
+                       }
+                       throw new Error(`HTTP error on search fallback: ${fallbackResponse.status} - ${fallbackError}`);
+                     }
+
+                     data = await fallbackResponse.json();
+                   } else {
+                     throw new Error(`HTTP error on search pass: ${nextResponse.status} - ${errDetails}`);
+                   }
+               } else {
+                 data = await nextResponse.json();
+               }
+               loopCount++;
+               usedWebSearch = true;
             } else if (toolCall.function.name === "web_search" && !tavilyApiKey) {
               throw new Error("AI tried to search the web, but no Tavily API Key is configured in settings.");
             } else {

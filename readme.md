@@ -15,6 +15,7 @@ AI Popup Infopedia now supports **real-time web search grounding** through nativ
 - **Native Function Calling:** The extension injects an OpenAI-compatible `web_search` tool schema into API requests. The AI decides at inference time whether a web search is needed zero manual intervention.
 - **Universal Compatibility:** Works across all OpenAI-compatible endpoints — Gemini, OpenAI, Groq, Ollama, and more.
 - **Orchestrator Loop:** The background script acts as an AI orchestrator, handling multi-step tool calls (up to 3 search passes per query) with automatic forced-text fallback.
+- **Groq Recovery:** If a Groq model fails to parse a follow-up tool call, the extension retries with the retrieved search results and requests a normal text answer instead of showing an error.
 
 ### 🛡️ Smart Hallucination Guard Bypass
 When the primary model grounds its response with live web search results, the Hallucination Guard is **automatically bypassed** — preventing the verification model from falsely flagging accurate, real-time answers using its outdated static knowledge. A blue 🌐 **"Search Grounded"** indicator is shown instead. The guard continues to run normally for non-searched responses.
