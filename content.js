@@ -1178,7 +1178,9 @@ function createActionButtons(instance, word, definition, modelName, promptName) 
           }
         }
       }, { showCreateNew: true });
-      selectorsContainer.insertBefore(listSelector, selectorsContainer.children[1]);
+      // It is appended with the other action controls once they have all been
+      // created. `selectorsContainer` is scoped to createSelectors(), so using
+      // it here previously threw a ReferenceError and stopped this callback.
 
       // Handle clicking outside custom dropdown (inside shadow root)
       instance.container.shadowRoot.addEventListener('click', (e) => {
