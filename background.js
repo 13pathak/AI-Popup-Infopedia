@@ -168,7 +168,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               
               // Format the search results
               let searchResultsText = "Search Results:\n";
-              if (tavilyData.results) {
+              if (tavilyData.results && tavilyData.results.length > 0) {
                 tavilyData.results.forEach(result => {
                   searchResultsText += `- ${result.title}: ${result.content}\n`;
                 });
@@ -186,6 +186,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               });
 
               payload.messages = safeMessagesText;
+              
+              // If we are about to hit max loops, force the AI to answer by removing tools
+              if (loopCount === maxLoops - 1) {
+                delete payload.tools;
+              }
               
               // Re-fetch with the updated payload
               const nextResponse = await fetch(endpointUrl, {
