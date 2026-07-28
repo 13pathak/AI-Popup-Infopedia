@@ -2,7 +2,10 @@
 
 A powerful browser extension to get instant AI explanations for any word or phrase you select. Features include multiple AI models, custom prompts, organized word lists, Anki integration, a built-in spaced repetition flashcard system, Speech-to-Text dictation, and built-in PDF support.
 
+Main Popup
 <img width="1917" height="930" alt="image" src="https://github.com/user-attachments/assets/2b7d9105-4cf9-42c6-8e74-d47efc942882" />
+
+Settings Menu
 <img width="1893" height="917" alt="image" src="https://github.com/user-attachments/assets/a6d1e6a9-3a4d-4a52-9022-12d75e99bb16" />
 
 ---
