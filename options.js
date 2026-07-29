@@ -1253,11 +1253,16 @@ function handleDeleteClick(event) {
 
 // --- deleteHistoryItem ---
 function deleteHistoryItem(timestamp) {
+  // Rebuilding the list replaces its contents and would otherwise reset this
+  // scrollable element to the top.
+  const historyList = document.getElementById('history-list');
+  const scrollTop = historyList.scrollTop;
+
   chrome.storage.local.get(['history'], (result) => {
     let history = result.history || [];
     const newHistory = history.filter(item => item.timestamp !== timestamp);
     chrome.storage.local.set({ history: newHistory }, () => {
-      loadHistory(document.getElementById('list-select').value);
+      applyFilters(scrollTop);
     });
   });
 }
@@ -2550,7 +2555,7 @@ function debounce(func, wait) {
 // --- NEW: SEARCH, FILTER, AND FAVORITES FUNCTIONS
 // ---
 
-function applyFilters() {
+function applyFilters(scrollTopToRestore = null) {
   const searchQuery = document.getElementById('history-search').value.toLowerCase().trim();
   const dateFilter = document.getElementById('date-filter').value;
   const favoritesOnly = document.getElementById('favorites-only').checked;
@@ -2613,11 +2618,11 @@ function applyFilters() {
     }
 
     // Render filtered history
-    renderFilteredHistory(history);
+    renderFilteredHistory(history, scrollTopToRestore);
   });
 }
 
-function renderFilteredHistory(history) {
+function renderFilteredHistory(history, scrollTopToRestore = null) {
   const historyList = document.getElementById('history-list');
   const noHistoryMessage = document.getElementById('no-history-message');
   historyList.innerHTML = '';
@@ -2702,6 +2707,13 @@ function renderFilteredHistory(history) {
 
       historyList.appendChild(itemElement);
     });
+
+    if (scrollTopToRestore !== null) {
+      requestAnimationFrame(() => {
+        const maxScrollTop = Math.max(0, historyList.scrollHeight - historyList.clientHeight);
+        historyList.scrollTop = Math.min(scrollTopToRestore, maxScrollTop);
+      });
+    }
   }
 }
 
