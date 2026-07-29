@@ -77,6 +77,13 @@ const popupStyles = `
       cursor: pointer; user-select: none; color: #eee;
       font-size: 13px; font-family: sans-serif;
   }
+  .custom-select-value {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+  }
+  .custom-select > span:last-child { flex-shrink: 0; margin-left: 8px; }
   .custom-select:focus { outline: none; border-color: #888; }
   .custom-options {
       position: absolute; bottom: 100%; left: 0; right: 0;
@@ -86,9 +93,10 @@ const popupStyles = `
       font-size: 13px; font-family: sans-serif;
   }
   .custom-options.show { display: block; }
-  .custom-option { padding: 6px 10px; cursor: pointer; display: flex; align-items: center; }
+  .custom-option { padding: 6px 10px; cursor: pointer; display: flex; align-items: center; min-width: 0; }
   .custom-option:hover { background-color: #555; }
   .custom-option.selected { background-color: rgba(150, 150, 255, 0.2); }
+  .custom-option > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .expand-toggle { cursor: pointer; display: inline-block; width: 16px; text-align: center; color: #aaa; font-size: 10px;}
   .expand-toggle:hover { color: #eee; }
   .indent-spacer { display: inline-block; width: 16px; }
@@ -305,6 +313,11 @@ function createCustomDropdown(lists, currentValue, onChange, options = {}) {
   valueDisplay.className = 'custom-select-value';
   valueDisplay.textContent = 'Select a list...';
 
+  function setSelectedLabel(name) {
+    valueDisplay.textContent = name;
+    valueDisplay.title = name;
+  }
+
   const arrow = document.createElement('span');
   arrow.textContent = '▼';
   
@@ -346,7 +359,7 @@ function createCustomDropdown(lists, currentValue, onChange, options = {}) {
       optEl.className = 'custom-option';
       if (item.id === selectedId) {
         optEl.classList.add('selected');
-        valueDisplay.textContent = item.name;
+        setSelectedLabel(item.name);
       }
       if (item.color) optEl.style.color = item.color;
       if (item.italic) optEl.style.fontStyle = 'italic';
@@ -376,12 +389,13 @@ function createCustomDropdown(lists, currentValue, onChange, options = {}) {
 
       const textNode = document.createElement('span');
       textNode.textContent = item.name;
+      textNode.title = item.name;
       optEl.appendChild(textNode);
 
       optEl.addEventListener('click', (e) => {
         e.stopPropagation();
         selectedId = item.id;
-        valueDisplay.textContent = item.name;
+        setSelectedLabel(item.name);
         optionsContainer.classList.remove('show');
         if (onChange) onChange(selectedId);
         renderOptions();
@@ -399,7 +413,7 @@ function createCustomDropdown(lists, currentValue, onChange, options = {}) {
   
   if (!selectedId && allItems.length > 0) {
     selectedId = allItems[0].id;
-    valueDisplay.textContent = allItems[0].name;
+    setSelectedLabel(allItems[0].name);
   }
 
   renderOptions();
