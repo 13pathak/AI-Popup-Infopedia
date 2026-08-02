@@ -1633,6 +1633,86 @@
       }
 
 :is(.annotationEditorLayer
+  :is(.freeTextEditor, .inkEditor, .stampEditor, .highlightEditor),.textLayer) .editToolbar .buttons .commentButton{
+        color:var(--editor-toolbar-fg-color);
+        font:600 12px/1 sans-serif;
+        padding:0 10px;
+      }
+
+:is(.annotationEditorLayer
+  :is(.freeTextEditor, .inkEditor, .stampEditor, .highlightEditor),.textLayer) .editToolbar .buttons .commentButton:hover{
+        background-color:var(--editor-toolbar-hover-bg-color);
+        color:var(--editor-toolbar-hover-fg-color);
+      }
+
+.pdfjsHighlightCommentComposer{
+  position:fixed;
+  z-index:10000;
+  width:300px;
+  padding:12px;
+  border:1px solid #8f8f9d;
+  border-radius:8px;
+  background:#fff;
+  box-shadow:0 8px 24px rgb(0 0 0 / 0.2);
+  color:#1b1b1b;
+  font:13px/1.35 sans-serif;
+}
+
+.pdfjsHighlightCommentComposer label{
+  display:grid;
+  gap:6px;
+  font-weight:600;
+}
+
+.pdfjsHighlightCommentComposer textarea{
+  box-sizing:border-box;
+  width:100%;
+  resize:vertical;
+  border:1px solid #8f8f9d;
+  border-radius:4px;
+  padding:8px;
+  color:inherit;
+  font:inherit;
+}
+
+.pdfjsHighlightCommentComposer .actions{
+  display:flex;
+  justify-content:flex-end;
+  gap:8px;
+  margin-top:10px;
+}
+
+.pdfjsHighlightCommentComposer button{
+  border:0;
+  border-radius:4px;
+  padding:6px 10px;
+  cursor:pointer;
+}
+
+.pdfjsHighlightCommentComposer .submit{
+  background:#0b57d0;
+  color:#fff;
+}
+
+.pdfjsHighlightCommentComposer .submit:disabled{
+  cursor:not-allowed;
+  opacity:0.55;
+}
+
+@media (prefers-color-scheme: dark){
+  .pdfjsHighlightCommentComposer{
+    border-color:#6d6d7a;
+    background:#2b2a33;
+    color:#fbfbfe;
+  }
+
+  .pdfjsHighlightCommentComposer textarea{
+    border-color:#6d6d7a;
+    background:#1f1e24;
+  }
+}
+
+:is(.annotationEditorLayer
   :is(.freeTextEditor, .inkEditor, .stampEditor, .highlightEditor),.textLayer) .editToolbar .buttons .highlightButton::before{
           content:"";
           -webkit-mask-image:var(--editor-toolbar-highlight-image);

@@ -43,8 +43,8 @@ pdfjs-print-button =
     .title = Print
 pdfjs-print-button-label = Print
 pdfjs-save-button =
-    .title = Save
-pdfjs-save-button-label = Save
+    .title = Save annotated PDF
+pdfjs-save-button-label = Save annotated PDF
 
 # Used in Firefox for Android as a tooltip for the download button (“download” is a verb).
 pdfjs-download-button =
@@ -307,8 +307,8 @@ pdfjs-web-fonts-disabled = Web fonts are disabled: unable to use embedded PDF fo
 ## Editing
 
 pdfjs-editor-free-text-button =
-    .title = Text
-pdfjs-editor-free-text-button-label = Text
+    .title = Comment
+pdfjs-editor-free-text-button-label = Comment
 pdfjs-editor-ink-button =
     .title = Draw
 pdfjs-editor-ink-button-label = Draw

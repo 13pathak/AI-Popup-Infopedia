@@ -1406,8 +1406,10 @@ class BasePreferences {
     defaultZoomDelay: 400,
     defaultZoomValue: "",
     disablePageLabels: false,
-    enableHighlightEditor: false,
-    enableHighlightFloatingButton: false,
+    // This viewer is used as an annotation-capable PDF reader. Keep the
+    // native PDF.js text-highlight editor available for every document.
+    enableHighlightEditor: true,
+    enableHighlightFloatingButton: true,
     enableML: false,
     enablePermissions: false,
     enablePrintAutoRotate: true,
@@ -3057,8 +3059,13 @@ class Preferences extends BasePreferences {
     localStorage.setItem("pdfjs.preferences", JSON.stringify(prefObj));
   }
   async _readFromStorage(prefObj) {
+    const prefs = JSON.parse(localStorage.getItem("pdfjs.preferences")) || {};
+    // Existing PDF.js preferences may have been created before this viewer
+    // supported editing. Do not let that stale opt-out hide Highlights.
+    prefs.enableHighlightEditor = true;
+    prefs.enableHighlightFloatingButton = true;
     return {
-      prefs: JSON.parse(localStorage.getItem("pdfjs.preferences"))
+      prefs
     };
   }
 }

@@ -1804,6 +1804,7 @@ class HighlightToolbar {
     buttons.className = "buttons";
     editToolbar.append(buttons);
     this.#addHighlightButton();
+    this.#addCommentButton();
     return editToolbar;
   }
   #getLastPoint(boxes, isLTR) {
@@ -1854,6 +1855,24 @@ class HighlightToolbar {
     button.addEventListener("contextmenu", noContextMenu);
     button.addEventListener("click", () => {
       this.#uiManager.highlightSelection("floating_button");
+    });
+    this.#buttons.append(button);
+  }
+  #addCommentButton() {
+    const button = document.createElement("button");
+    button.className = "commentButton";
+    button.type = "button";
+    button.tabIndex = 0;
+    button.title = "Highlight and add comment";
+    button.setAttribute("aria-label", "Highlight and add comment");
+    button.textContent = "Comment";
+    button.addEventListener("contextmenu", noContextMenu);
+    button.addEventListener("click", () => {
+      const anchor = this.#toolbar.getBoundingClientRect();
+      const editor = this.#uiManager.highlightSelection("floating_comment");
+      if (editor) {
+        this.#uiManager.editHighlightComment(editor, anchor);
+      }
     });
     this.#buttons.append(button);
   }
@@ -2433,7 +2452,7 @@ class AnnotationEditorUIManager {
   highlightSelection(methodOfCreation = "") {
     const selection = document.getSelection();
     if (!selection || selection.isCollapsed) {
-      return;
+      return null;
     }
     const {
       anchorNode,
@@ -2446,7 +2465,7 @@ class AnnotationEditorUIManager {
     const textLayer = anchorElement.closest(".textLayer");
     const boxes = this.getSelectionBoxes(textLayer);
     if (!boxes) {
-      return;
+      return null;
     }
     selection.empty();
     if (this.#mode === AnnotationEditorType.NONE) {
@@ -2458,7 +2477,7 @@ class AnnotationEditorUIManager {
     }
     for (const layer of this.#allLayers.values()) {
       if (layer.hasTextLayer(textLayer)) {
-        layer.createAndAddNewEditor({
+        return layer.createAndAddNewEditor({
           x: 0,
           y: 0
         }, false, {
@@ -2470,9 +2489,52 @@ class AnnotationEditorUIManager {
           focusOffset,
           text
         });
-        break;
       }
     }
+    return null;
+  }
+  editHighlightComment(editor, anchor) {
+    const composer = document.createElement("form");
+    composer.className = "pdfjsHighlightCommentComposer";
+    composer.innerHTML = '<label>Add a comment<textarea rows="4" placeholder="Write a comment..."></textarea></label><div class="actions"><button type="button" class="cancel">Cancel</button><button type="submit" class="submit" disabled>Post</button></div>';
+    const textarea = composer.querySelector("textarea");
+    const cancelButton = composer.querySelector(".cancel");
+    const submitButton = composer.querySelector(".submit");
+    const close = removeHighlight => {
+      composer.remove();
+      if (removeHighlight) {
+        editor.remove();
+      }
+    };
+    const updateSubmit = () => {
+      submitButton.disabled = !textarea.value.trim();
+    };
+    const maxLeft = Math.max(8, window.innerWidth - 332);
+    const maxTop = Math.max(8, window.innerHeight - 210);
+    composer.style.left = `${Math.min(Math.max(8, anchor.left), maxLeft)}px`;
+    composer.style.top = `${Math.min(anchor.bottom + 8, maxTop)}px`;
+    textarea.addEventListener("input", updateSubmit);
+    textarea.addEventListener("keydown", event => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        close(true);
+      } else if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        composer.requestSubmit();
+      }
+    });
+    cancelButton.addEventListener("click", () => close(true));
+    composer.addEventListener("submit", event => {
+      event.preventDefault();
+      const comment = textarea.value.trim();
+      if (!comment) {
+        return;
+      }
+      editor.setComment(comment);
+      close(false);
+    });
+    document.body.append(composer);
+    textarea.focus();
   }
   #displayHighlightToolbar() {
     const selection = document.getSelection();
@@ -16741,6 +16803,7 @@ class HighlightEditor extends AnnotationEditor {
   #anchorOffset = 0;
   #boxes;
   #clipPathId = null;
+  #comment = "";
   #colorPicker = null;
   #focusOutlines = null;
   #focusNode = null;
@@ -16788,6 +16851,7 @@ class HighlightEditor extends AnnotationEditor {
     this.#boxes = params.boxes || null;
     this.#methodOfCreation = params.methodOfCreation || "";
     this.#text = params.text || "";
+    this.#comment = params.comment?.trim() || "";
     this._isDraggable = false;
     if (params.highlightId > -1) {
       this.#isFreeHighlight = true;
@@ -16956,6 +17020,22 @@ class HighlightEditor extends AnnotationEditor {
       action: "color_changed",
       color: this._uiManager.highlightColorNames.get(color)
     }, true);
+  }
+  setComment(comment) {
+    const value = comment.trim();
+    if (!value || value === this.#comment) {
+      return;
+    }
+    const previous = this.#comment;
+    const setValue = newValue => {
+      this.#comment = newValue;
+    };
+    this.addCommands({
+      cmd: setValue.bind(this, value),
+      undo: setValue.bind(this, previous),
+      mustExec: true,
+      keepUndo: true
+    });
   }
   #updateThickness(thickness) {
     const savedThickness = this.#thickness;
@@ -17319,6 +17399,7 @@ class HighlightEditor extends AnnotationEditor {
     } = data;
     editor.color = Util.makeHexColor(...color);
     editor.#opacity = data.opacity;
+    editor.#comment = data.contents?.trim() || "";
     const [pageWidth, pageHeight] = editor.pageDimensions;
     editor.width = (trX - blX) / pageWidth;
     editor.height = (trY - blY) / pageHeight;
@@ -17343,6 +17424,7 @@ class HighlightEditor extends AnnotationEditor {
     return {
       annotationType: AnnotationEditorType.HIGHLIGHT,
       color,
+      contents: this.#comment || undefined,
       opacity: this.#opacity,
       thickness: this.#thickness,
       quadPoints: this.#serializeBoxes(),

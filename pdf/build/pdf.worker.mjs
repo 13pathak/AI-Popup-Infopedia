@@ -52170,6 +52170,7 @@ class InkAnnotation extends MarkupAnnotation {
   }) {
     const {
       color,
+      contents,
       opacity,
       paths,
       outlines,
@@ -52353,6 +52354,9 @@ class HighlightAnnotation extends MarkupAnnotation {
     highlight.set("QuadPoints", quadPoints);
     highlight.set("C", Array.from(color, c => c / 255));
     highlight.set("CA", opacity);
+    if (contents) {
+      highlight.set("Contents", isAscii(contents) ? contents : stringToUTF16String(contents, true));
+    }
     if (user) {
       highlight.set("T", isAscii(user) ? user : stringToUTF16String(user, true));
     }
