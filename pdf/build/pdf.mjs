@@ -2255,6 +2255,7 @@ class AnnotationEditorUIManager {
   #boundSelectionChange = this.#selectionChange.bind(this);
   #boundOnRotationChanging = this.onRotationChanging.bind(this);
   #boundToggleCommentsPanel = this.toggleCommentsPanel.bind(this);
+  #boundOpenCommentsFromAnnotation = this.#openCommentsFromAnnotation.bind(this);
   #previousStates = {
     isEditing: false,
     isEmpty: true,
@@ -2340,6 +2341,7 @@ class AnnotationEditorUIManager {
     this._eventBus._on("scalechanging", this.#boundOnScaleChanging);
     this._eventBus._on("rotationchanging", this.#boundOnRotationChanging);
     this._eventBus._on("togglecommentspanel", this.#boundToggleCommentsPanel);
+    document.addEventListener("dblclick", this.#boundOpenCommentsFromAnnotation, true);
     this.#addSelectionListener();
     this.#addKeyboardManager();
     this.#annotationStorage = pdfDocument.annotationStorage;
@@ -2363,6 +2365,7 @@ class AnnotationEditorUIManager {
     this._eventBus._off("scalechanging", this.#boundOnScaleChanging);
     this._eventBus._off("rotationchanging", this.#boundOnRotationChanging);
     this._eventBus._off("togglecommentspanel", this.#boundToggleCommentsPanel);
+    document.removeEventListener("dblclick", this.#boundOpenCommentsFromAnnotation, true);
     this.#commentPanel?.remove();
     for (const layer of this.#allLayers.values()) {
       layer.destroy();
@@ -2589,6 +2592,20 @@ class AnnotationEditorUIManager {
       return;
     }
     await this.#loadSavedHighlightComments();
+    this.#renderCommentPanel();
+  }
+  async #openCommentsFromAnnotation(event) {
+    const annotation = event.target.closest?.(".highlightAnnotation[data-annotation-id]");
+    if (!annotation) {
+      return;
+    }
+    await this.#loadSavedHighlightComments();
+    const entry = this.#commentPanelEntries.get(`saved:${annotation.dataset.annotationId}`);
+    if (!entry) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
     this.#renderCommentPanel();
   }
   async #loadSavedHighlightComments() {
