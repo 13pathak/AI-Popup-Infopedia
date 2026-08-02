@@ -165,6 +165,39 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         let loopCount = 0;
         let usedWebSearch = false;
         const maxLoops = 3;
+        const citations = [];
+        const citationsByUrl = new Map();
+        const maxCitations = 5;
+
+        // Keep source metadata separate from the text given to the model so the
+        // popup can render safe, clickable links after a grounded response.
+        const addCitation = (result, query) => {
+          if (!result || typeof result.url !== 'string') return null;
+
+          let parsedUrl;
+          try {
+            parsedUrl = new URL(result.url);
+          } catch (error) {
+            return null;
+          }
+
+          if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') return null;
+
+          const normalizedUrl = parsedUrl.href;
+          if (citationsByUrl.has(normalizedUrl)) return citationsByUrl.get(normalizedUrl);
+          if (citations.length >= maxCitations) return null;
+
+          const citation = {
+            id: `S${citations.length + 1}`,
+            title: typeof result.title === 'string' && result.title.trim() ? result.title.trim() : parsedUrl.hostname,
+            url: normalizedUrl,
+            domain: parsedUrl.hostname,
+            query: query
+          };
+          citations.push(citation);
+          citationsByUrl.set(normalizedUrl, citation);
+          return citation;
+        };
 
         // The Orchestrator Loop
         while (loopCount < maxLoops) {
@@ -183,13 +216,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ api_key: tavilyApiKey, query: query, max_results: 3 })
               });
+              if (!tavilyResponse.ok) {
+                throw new Error(`Search request failed: ${tavilyResponse.status} ${tavilyResponse.statusText}`);
+              }
               const tavilyData = await tavilyResponse.json();
               
               // Format the search results
               let searchResultsText = "Search Results:\n";
               if (tavilyData.results && tavilyData.results.length > 0) {
                 tavilyData.results.forEach(result => {
-                  searchResultsText += `- ${result.title}: ${result.content}\n`;
+                  const citation = addCitation(result, query);
+                  const title = typeof result.title === 'string' ? result.title : 'Untitled source';
+                  const content = typeof result.content === 'string' ? result.content : '';
+                  const sourceLabel = citation ? `[${citation.id}] ${citation.title} (${citation.url})` : title;
+                  searchResultsText += `- ${sourceLabel}: ${content}\n`;
                 });
               } else {
                 searchResultsText += "No results found. Server returned: " + JSON.stringify(tavilyData);
@@ -283,7 +323,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           aiText = data.choices[0].message.content || "The AI reached maximum search depth or returned an empty response.";
         }
 
-        sendResponse({ definition: aiText, usedWebSearch: usedWebSearch, usedPrompt: prompt, models: models, defaultModelId: defaultModelId, customPrompts: customPrompts || [], defaultPromptId: defaultPromptId, promptName: promptName });
+        sendResponse({ definition: aiText, usedWebSearch: usedWebSearch, citations: citations, usedPrompt: prompt, models: models, defaultModelId: defaultModelId, customPrompts: customPrompts || [], defaultPromptId: defaultPromptId, promptName: promptName });
 
       } catch (error) {
         console.error("AI API call failed:", error);
@@ -299,7 +339,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // --- Case 2: Save an item to history ---
   if (request.type === "saveToHistory") {
     // We pass sendResponse as a callback to run *after* saving
-    saveToHistory(request.word, request.definition, request.listId, request.modelName, request.promptName, request.sourceUrl, request.sourceTitle, () => {
+    saveToHistory(request.word, request.definition, request.listId, request.modelName, request.promptName, request.sourceUrl, request.sourceTitle, request.citations, () => {
       sendResponse({ status: "saved" });
     });
     // Return true to tell Chrome this is an async operation
@@ -437,7 +477,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 });
 
 // --- UPDATED to accept source URL and title ---
-function saveToHistory(word, definition, listId, modelName, promptName, sourceUrl, sourceTitle, callback) {
+function saveToHistory(word, definition, listId, modelName, promptName, sourceUrl, sourceTitle, citations, callback) {
   chrome.storage.local.get(['history'], (result) => {
     let history = result.history || [];
 
@@ -450,7 +490,8 @@ function saveToHistory(word, definition, listId, modelName, promptName, sourceUr
       modelName: modelName,
       promptName: promptName,
       sourceUrl: sourceUrl || '',
-      sourceTitle: sourceTitle || ''
+      sourceTitle: sourceTitle || '',
+      citations: Array.isArray(citations) ? citations.slice(0, 5) : []
     };
 
     // Add new item to the beginning of the array

@@ -696,18 +696,18 @@ function initiatePopupSequence(rect, selectedText) {
         if (response && response.usedPrompt) {
            popupInstance.messages = [
              { role: 'user', content: response.usedPrompt },
-             { role: 'assistant', content: response.definition }
+              { role: 'assistant', content: response.definition, citations: response.citations || [] }
            ];
         } else {
            popupInstance.messages = [
-             { role: 'assistant', content: definitionText }
+              { role: 'assistant', content: definitionText, citations: response?.citations || [] }
            ];
         }
 
         renderMessages(popupInstance);
 
         const modelName = response && response.models ? (response.models.find(m => m.id === response.defaultModelId)?.name || 'Unknown Model') : 'Unknown Model';
-        createActionButtons(popupInstance, selectedText, definitionText, modelName, response.promptName);
+        createActionButtons(popupInstance, selectedText, definitionText, modelName, response.promptName, response?.citations || []);
         
         // --- NEW: Trigger Hallucination Verification (with Smart Bypass) ---
         chrome.storage.sync.get(['enableHallucinationGuard'], (guardData) => {
@@ -897,6 +897,10 @@ function renderMessages(instance) {
           contentWrapper.insertAdjacentHTML('beforeend', html);
         }
       }
+
+      if (msg.role === 'assistant' && !msg.isError && !msg.isThinking && !msg.needsRetry && Array.isArray(msg.citations) && msg.citations.length > 0) {
+        appendCitations(contentWrapper, msg.citations);
+      }
     });
 
     // Automatically scroll to bottom if it overflows
@@ -907,6 +911,66 @@ function renderMessages(instance) {
     console.error("Popup render loop crashed:", err);
     contentWrapper.insertAdjacentHTML('beforeend', `<div style="color: red;">Error rendering messages: ${err.message}</div>`);
   }
+}
+
+// Sources are external search results, so create every element through the DOM
+// rather than interpolating titles or URLs into HTML.
+function appendCitations(container, citations) {
+  const validCitations = citations.filter(citation => {
+    if (!citation || typeof citation.url !== 'string') return false;
+    try {
+      const url = new URL(citation.url);
+      return url.protocol === 'http:' || url.protocol === 'https:';
+    } catch (error) {
+      return false;
+    }
+  });
+
+  if (validCitations.length === 0) return;
+
+  const details = document.createElement('details');
+  details.className = 'ai-popup-citations';
+  details.style.marginTop = '8px';
+  details.style.padding = '7px 9px';
+  details.style.borderRadius = '6px';
+  details.style.backgroundColor = 'rgba(59, 130, 246, 0.1)';
+  details.style.borderLeft = '3px solid #3b82f6';
+  details.style.fontSize = '12px';
+
+  const summary = document.createElement('summary');
+  summary.textContent = `Sources used (${validCitations.length})`;
+  summary.style.cursor = 'pointer';
+  summary.style.color = '#7dd3fc';
+  summary.style.fontWeight = '600';
+  details.appendChild(summary);
+
+  const list = document.createElement('ol');
+  list.style.margin = '7px 0 0';
+  list.style.paddingLeft = '19px';
+
+  validCitations.forEach(citation => {
+    const item = document.createElement('li');
+    item.style.marginTop = '4px';
+
+    const link = document.createElement('a');
+    link.href = citation.url;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.textContent = citation.title || citation.domain || citation.url;
+    link.style.color = '#a5d6ff';
+    link.style.textDecoration = 'underline';
+    link.addEventListener('click', event => event.stopPropagation());
+    item.appendChild(link);
+
+    const domain = document.createElement('span');
+    domain.textContent = ` · ${citation.domain || new URL(citation.url).hostname}`;
+    domain.style.opacity = '0.72';
+    item.appendChild(domain);
+    list.appendChild(item);
+  });
+
+  details.appendChild(list);
+  container.appendChild(details);
 }
 
 // Temporary compatibility function
@@ -939,7 +1003,7 @@ function retryMessage(instance, messageIndex) {
       }
 
       if (response && !response.error) {
-        instance.messages[messageIndex] = { role: 'assistant', content: response.definition, isError: false, needsRetry: false };
+        instance.messages[messageIndex] = { role: 'assistant', content: response.definition, citations: response.citations || [], isError: false, needsRetry: false };
       } else {
         instance.messages[messageIndex] = { 
            role: 'assistant', 
@@ -1132,7 +1196,7 @@ function redefineWithModelAndPrompt(instance, word, modelId, promptContent) {
              // If we already have follow-ups, preserve them.
              if (instance.messages && instance.messages.length > 2) {
                 instance.messages[0] = { role: 'user', content: response.usedPrompt };
-                instance.messages[1] = { role: 'assistant', content: response.definition };
+                instance.messages[1] = { role: 'assistant', content: response.definition, citations: response.citations || [] };
                 
                 // Flag subsequent AI messages as needing retry
                 instance.lastModelId = modelId;
@@ -1148,19 +1212,19 @@ function redefineWithModelAndPrompt(instance, word, modelId, promptContent) {
              } else {
                 instance.messages = [
                   { role: 'user', content: response.usedPrompt },
-                  { role: 'assistant', content: response.definition }
+                  { role: 'assistant', content: response.definition, citations: response.citations || [] }
                 ];
              }
           } else {
              instance.messages = [
-                { role: 'assistant', content: definitionText }
+                { role: 'assistant', content: definitionText, citations: response?.citations || [] }
              ];
           }
 
           renderMessages(instance);
 
           // Re-create the save button after model change
-          createActionButtons(instance, word, definitionText, modelName, response.promptName);
+          createActionButtons(instance, word, definitionText, modelName, response.promptName, response?.citations || []);
 
           // --- NEW: Trigger Hallucination Verification for Redefined Fetch (with Smart Bypass) ---
           chrome.storage.sync.get(['enableHallucinationGuard'], (guardData) => {
@@ -1184,7 +1248,7 @@ function redefineWithModelAndPrompt(instance, word, modelId, promptContent) {
 }
 
 // --- UPDATED to accept instance ---
-function createActionButtons(instance, word, definition, modelName, promptName) {
+function createActionButtons(instance, word, definition, modelName, promptName, citations = []) {
   if (!activePopups.includes(instance)) return;
   const popup = instance.popup;
 
@@ -1200,8 +1264,6 @@ function createActionButtons(instance, word, definition, modelName, promptName) 
   // --- REVISED: Immediately show list dropdown and save button ---
   // 1. Get the lists from the background
   chrome.runtime.sendMessage({ type: "getWordLists" }, (response) => {
-    // --- UPDATED: Handle new response format ---
-    // Fix: check if instance still valid after async
     if (!activePopups.includes(instance)) return;
 
     if (!response || !response.lists || response.lists.length === 0) {
@@ -1314,6 +1376,7 @@ function createActionButtons(instance, word, definition, modelName, promptName) 
 
       let wordToSave = word;
       let definitionToSave = definition;
+      let citationsToSave = citations;
 
       // If this was started from an empty hotkey popup, use the actual conversation instead of dummy text
       if (word === "Custom Question") {
@@ -1324,6 +1387,7 @@ function createActionButtons(instance, word, definition, modelName, promptName) 
             foundUserMsg = true;
           } else if (foundUserMsg && instance.messages[i].role === 'assistant' && !instance.messages[i].isThinking && !instance.messages[i].isError) {
             definitionToSave = instance.messages[i].content;
+            citationsToSave = instance.messages[i].citations || [];
           }
         }
       }
@@ -1337,7 +1401,8 @@ function createActionButtons(instance, word, definition, modelName, promptName) 
         modelName: modelName,
         promptName: promptName,
         sourceUrl: window.location.href,
-        sourceTitle: document.title
+        sourceTitle: document.title,
+        citations: citationsToSave
       }, (saveResponse) => {
         if (saveResponse && saveResponse.status === 'saved') {
           console.log('Definition saved to list.');
@@ -1652,7 +1717,7 @@ function createFollowupInput(instance, word) {
         instance.messages = instance.messages.filter(m => !m.isThinking);
 
         if (response && !response.error) {
-          instance.messages.push({ role: 'assistant', content: response.definition });
+          instance.messages.push({ role: 'assistant', content: response.definition, citations: response.citations || [] });
           
           // --- NEW: Trigger Hallucination Verification (with Smart Bypass) ---
           chrome.storage.sync.get(['enableHallucinationGuard'], (guardData) => {
