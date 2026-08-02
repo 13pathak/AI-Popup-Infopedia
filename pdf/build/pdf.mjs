@@ -2239,6 +2239,8 @@ class AnnotationEditorUIManager {
   #selectedEditors = new Set();
   #selectedTextNode = null;
   #pageColors = null;
+  #pdfDocument = null;
+  #savedCommentsLoaded = false;
   #showAllStates = null;
   #boundBlur = this.blur.bind(this);
   #boundFocus = this.focus.bind(this);
@@ -2252,6 +2254,7 @@ class AnnotationEditorUIManager {
   #boundOnScaleChanging = this.onScaleChanging.bind(this);
   #boundSelectionChange = this.#selectionChange.bind(this);
   #boundOnRotationChanging = this.onRotationChanging.bind(this);
+  #boundToggleCommentsPanel = this.toggleCommentsPanel.bind(this);
   #previousStates = {
     isEditing: false,
     isEmpty: true,
@@ -2336,9 +2339,11 @@ class AnnotationEditorUIManager {
     this._eventBus._on("pagechanging", this.#boundOnPageChanging);
     this._eventBus._on("scalechanging", this.#boundOnScaleChanging);
     this._eventBus._on("rotationchanging", this.#boundOnRotationChanging);
+    this._eventBus._on("togglecommentspanel", this.#boundToggleCommentsPanel);
     this.#addSelectionListener();
     this.#addKeyboardManager();
     this.#annotationStorage = pdfDocument.annotationStorage;
+    this.#pdfDocument = pdfDocument;
     this.#filterFactory = pdfDocument.filterFactory;
     this.#pageColors = pageColors;
     this.#highlightColors = highlightColors || null;
@@ -2357,6 +2362,8 @@ class AnnotationEditorUIManager {
     this._eventBus._off("pagechanging", this.#boundOnPageChanging);
     this._eventBus._off("scalechanging", this.#boundOnScaleChanging);
     this._eventBus._off("rotationchanging", this.#boundOnRotationChanging);
+    this._eventBus._off("togglecommentspanel", this.#boundToggleCommentsPanel);
+    this.#commentPanel?.remove();
     for (const layer of this.#allLayers.values()) {
       layer.destroy();
     }
@@ -2576,6 +2583,47 @@ class AnnotationEditorUIManager {
     }
     this.#renderCommentPanel();
   }
+  async toggleCommentsPanel() {
+    if (this.#commentPanel && !this.#commentPanel.hidden) {
+      this.#commentPanel.hidden = true;
+      return;
+    }
+    await this.#loadSavedHighlightComments();
+    this.#renderCommentPanel();
+  }
+  async #loadSavedHighlightComments() {
+    if (this.#savedCommentsLoaded || !this.#pdfDocument) {
+      return;
+    }
+    this.#savedCommentsLoaded = true;
+    const pagePromises = [];
+    for (let pageNumber = 1; pageNumber <= this.#pdfDocument.numPages; pageNumber++) {
+      pagePromises.push(this.#pdfDocument.getPage(pageNumber).then(page => page.getAnnotations({
+        intent: "display"
+      })).then(annotations => ({
+        annotations,
+        pageNumber
+      })));
+    }
+    const pages = await Promise.all(pagePromises);
+    for (const {
+      annotations,
+      pageNumber
+    } of pages) {
+      for (const annotation of annotations) {
+        const comment = annotation.contentsObj?.str || annotation.contents || "";
+        if (!comment || annotation.annotationType !== AnnotationType.HIGHLIGHT) {
+          continue;
+        }
+        this.#commentPanelEntries.set(`saved:${annotation.id}`, {
+          annotationId: annotation.id,
+          comment,
+          pageNumber,
+          text: `Page ${pageNumber}`
+        });
+      }
+    }
+  }
   #renderCommentPanel() {
     if (!this.#commentPanel) {
       const panel = this.#commentPanel = document.createElement("aside");
@@ -2598,6 +2646,8 @@ class AnnotationEditorUIManager {
       for (const {
         comment,
         editor,
+        annotationId,
+        pageNumber,
         text
       } of this.#commentPanelEntries.values()) {
         const entry = document.createElement("button");
@@ -2608,10 +2658,20 @@ class AnnotationEditorUIManager {
         entry.querySelector(".quoted").textContent = excerpt;
         entry.querySelector(".body").textContent = comment;
         entry.addEventListener("click", () => {
-          editor.div?.scrollIntoView({
-            behavior: "smooth",
-            block: "center"
-          });
+          if (editor) {
+            editor.div?.scrollIntoView({
+              behavior: "smooth",
+              block: "center"
+            });
+          } else if (pageNumber) {
+            document.querySelector(`.page[data-page-number="${pageNumber}"]`)?.scrollIntoView({
+              behavior: "smooth",
+              block: "center"
+            });
+            document.querySelector(`[data-annotation-id="${annotationId}"]`)?.focus({
+              preventScroll: true
+            });
+          }
           this.showHighlightComment(comment, entry.getBoundingClientRect());
         });
         list.append(entry);

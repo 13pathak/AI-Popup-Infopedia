@@ -11719,6 +11719,9 @@ class Toolbar {
         }
       }
     }, {
+      element: options.commentsPanelButton,
+      eventName: "togglecommentspanel"
+    }, {
       element: options.editorStampButton,
       eventName: "switchannotationeditormode",
       eventDetails: {
@@ -14298,6 +14301,7 @@ function getViewerConfiguration() {
       editorHighlightColorPicker: document.getElementById("editorHighlightColorPicker"),
       editorInkButton: document.getElementById("editorInk"),
       editorInkParamsToolbar: document.getElementById("editorInkParamsToolbar"),
+      commentsPanelButton: document.getElementById("commentsPanel"),
       editorStampButton: document.getElementById("editorStamp"),
       editorStampParamsToolbar: document.getElementById("editorStampParamsToolbar"),
       download: document.getElementById("download")
