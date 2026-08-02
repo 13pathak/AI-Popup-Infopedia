@@ -2217,6 +2217,8 @@ class AnnotationEditorUIManager {
   #changedExistingAnnotations = null;
   #commandManager = new CommandManager();
   #currentPageIndex = 0;
+  #commentPanel = null;
+  #commentPanelEntries = new Map();
   #deletedAnnotationsElementIds = new Set();
   #draggingEditors = null;
   #editorTypes = null;
@@ -2275,6 +2277,9 @@ class AnnotationEditorUIManager {
           type
         } = el;
         return type !== "text" && type !== "number";
+      }
+      if (el instanceof HTMLTextAreaElement || el.isContentEditable) {
+        return false;
       }
       return true;
     };
@@ -2505,6 +2510,11 @@ class AnnotationEditorUIManager {
       if (removeHighlight) {
         editor.remove();
       }
+      this.updateMode(AnnotationEditorType.NONE);
+      this._eventBus.dispatch("switchannotationeditormode", {
+        source: this,
+        mode: AnnotationEditorType.NONE
+      });
     };
     const updateSubmit = () => {
       submitButton.disabled = !textarea.value.trim();
@@ -2535,6 +2545,79 @@ class AnnotationEditorUIManager {
     });
     document.body.append(composer);
     textarea.focus();
+  }
+  showHighlightComment(comment, anchor) {
+    document.querySelector(".pdfjsHighlightCommentPreview")?.remove();
+    const preview = document.createElement("div");
+    preview.className = "pdfjsHighlightCommentPreview";
+    preview.textContent = comment;
+    preview.tabIndex = 0;
+    const maxLeft = Math.max(8, window.innerWidth - 332);
+    const maxTop = Math.max(8, window.innerHeight - 180);
+    preview.style.left = `${Math.min(Math.max(8, anchor.left), maxLeft)}px`;
+    preview.style.top = `${Math.min(anchor.bottom + 8, maxTop)}px`;
+    preview.addEventListener("keydown", event => {
+      if (event.key === "Escape") {
+        preview.remove();
+      }
+    });
+    document.body.append(preview);
+    preview.focus();
+  }
+  updateHighlightComment(editor, comment) {
+    if (comment) {
+      this.#commentPanelEntries.set(editor.id, {
+        comment,
+        editor,
+        text: editor.commentText
+      });
+    } else {
+      this.#commentPanelEntries.delete(editor.id);
+    }
+    this.#renderCommentPanel();
+  }
+  #renderCommentPanel() {
+    if (!this.#commentPanel) {
+      const panel = this.#commentPanel = document.createElement("aside");
+      panel.className = "pdfjsCommentsPanel";
+      panel.innerHTML = '<div class="header"><strong>Comments</strong><button type="button" aria-label="Close comments">×</button></div><div class="commentList"></div>';
+      panel.querySelector(".header button").addEventListener("click", () => {
+        panel.hidden = true;
+      });
+      document.body.append(panel);
+    }
+    const panel = this.#commentPanel;
+    const list = panel.querySelector(".commentList");
+    list.replaceChildren();
+    if (this.#commentPanelEntries.size === 0) {
+      const empty = document.createElement("p");
+      empty.className = "empty";
+      empty.textContent = "No comments yet.";
+      list.append(empty);
+    } else {
+      for (const {
+        comment,
+        editor,
+        text
+      } of this.#commentPanelEntries.values()) {
+        const entry = document.createElement("button");
+        entry.className = "commentEntry";
+        entry.type = "button";
+        const excerpt = text?.trim() || "Highlighted text";
+        entry.innerHTML = '<span class="quoted"></span><span class="body"></span>';
+        entry.querySelector(".quoted").textContent = excerpt;
+        entry.querySelector(".body").textContent = comment;
+        entry.addEventListener("click", () => {
+          editor.div?.scrollIntoView({
+            behavior: "smooth",
+            block: "center"
+          });
+          this.showHighlightComment(comment, entry.getBoundingClientRect());
+        });
+        list.append(entry);
+      }
+    }
+    panel.hidden = false;
   }
   #displayHighlightToolbar() {
     const selection = document.getSelection();
@@ -2944,8 +3027,11 @@ class AnnotationEditorUIManager {
         this.showAllEditors("highlight", value);
         break;
     }
+    // The main highlight palette sets the default for future annotations,
+    // but should also recolor an already-selected highlight immediately.
+    const selectedEditorParamType = type === AnnotationEditorParamsType.HIGHLIGHT_DEFAULT_COLOR ? AnnotationEditorParamsType.HIGHLIGHT_COLOR : type;
     for (const editor of this.#selectedEditors) {
-      editor.updateParams(type, value);
+      editor.updateParams(selectedEditorParamType, value);
     }
     for (const editorType of this.#editorTypes) {
       editorType.updateDefaultParams(type, value);
@@ -16804,6 +16890,7 @@ class HighlightEditor extends AnnotationEditor {
   #boxes;
   #clipPathId = null;
   #comment = "";
+  #commentIndicator = null;
   #colorPicker = null;
   #focusOutlines = null;
   #focusNode = null;
@@ -16828,6 +16915,9 @@ class HighlightEditor extends AnnotationEditor {
   static _freeHighlightId = -1;
   static _freeHighlight = null;
   static _freeHighlightClipId = "";
+  get commentText() {
+    return this.#text;
+  }
   static get _keyboardManager() {
     const proto = HighlightEditor.prototype;
     return shadow(this, "_keyboardManager", new KeyboardManager([[["ArrowLeft", "mac+ArrowLeft"], proto._moveCaret, {
@@ -17029,6 +17119,8 @@ class HighlightEditor extends AnnotationEditor {
     const previous = this.#comment;
     const setValue = newValue => {
       this.#comment = newValue;
+      this.#updateCommentIndicator();
+      this._uiManager.updateHighlightComment(this, newValue);
     };
     this.addCommands({
       cmd: setValue.bind(this, value),
@@ -17036,6 +17128,25 @@ class HighlightEditor extends AnnotationEditor {
       mustExec: true,
       keepUndo: true
     });
+  }
+  #updateCommentIndicator() {
+    if (!this.div) {
+      return;
+    }
+    if (!this.#comment) {
+      this.#commentIndicator?.remove();
+      this.#commentIndicator = null;
+      return;
+    }
+    if (this.#commentIndicator) {
+      return;
+    }
+    const button = this.#commentIndicator = document.createElement("span");
+    button.className = "highlightCommentIndicator";
+    button.title = "Commented highlight - see the Comments panel";
+    button.setAttribute("aria-hidden", "true");
+    button.textContent = "\u{1F4AC}";
+    this.div.append(button);
   }
   #updateThickness(thickness) {
     const savedThickness = this.#thickness;
@@ -17229,6 +17340,7 @@ class HighlightEditor extends AnnotationEditor {
     highlightDiv.setAttribute("aria-hidden", "true");
     highlightDiv.className = "internal";
     highlightDiv.style.clipPath = this.#clipPathId;
+    this.#updateCommentIndicator();
     const [parentWidth, parentHeight] = this.parentDimensions;
     this.setDims(this.width * parentWidth, this.height * parentHeight);
     bindEvents(this, this.#highlightDiv, ["pointerover", "pointerleave"]);

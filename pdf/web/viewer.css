@@ -1699,6 +1699,120 @@
   opacity:0.55;
 }
 
+.annotationEditorLayer .highlightEditor .highlightCommentIndicator{
+  position:absolute;
+  z-index:2;
+  right:-11px;
+  bottom:-11px;
+  width:22px;
+  height:22px;
+  border:1px solid #5d5d68;
+  border-radius:50%;
+  background:#fff;
+  box-shadow:0 1px 4px rgb(0 0 0 / 0.25);
+  color:#2e2e56;
+  font-size:12px;
+  line-height:1;
+  padding:0;
+}
+
+.pdfjsCommentsPanel{
+  position:fixed;
+  z-index:10000;
+  top:0;
+  right:0;
+  bottom:0;
+  width:320px;
+  border-left:1px solid #8f8f9d;
+  background:#fff;
+  box-shadow:-8px 0 24px rgb(0 0 0 / 0.15);
+  color:#1b1b1b;
+  font:13px/1.4 sans-serif;
+}
+
+.pdfjsCommentsPanel .header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  height:48px;
+  padding:0 12px;
+  border-bottom:1px solid #d5d5dc;
+  font-size:15px;
+}
+
+.pdfjsCommentsPanel .header button{
+  border:0;
+  background:transparent;
+  color:inherit;
+  cursor:pointer;
+  font-size:24px;
+  line-height:1;
+}
+
+.pdfjsCommentsPanel .commentList{
+  height:calc(100% - 49px);
+  overflow:auto;
+  padding:12px;
+  box-sizing:border-box;
+}
+
+.pdfjsCommentsPanel .empty{
+  color:#65656f;
+}
+
+.pdfjsCommentsPanel .commentEntry{
+  display:grid;
+  gap:6px;
+  width:100%;
+  margin:0 0 10px;
+  padding:10px;
+  border:1px solid #d5d5dc;
+  border-radius:6px;
+  background:#fff;
+  color:inherit;
+  cursor:pointer;
+  text-align:left;
+}
+
+.pdfjsCommentsPanel .commentEntry:hover{
+  border-color:#0b57d0;
+  background:#f5f8ff;
+}
+
+.pdfjsCommentsPanel .quoted{
+  color:#4b4b57;
+  font-style:italic;
+}
+
+.pdfjsCommentsPanel .quoted::before{
+  content:"“";
+}
+
+.pdfjsCommentsPanel .quoted::after{
+  content:"”";
+}
+
+.pdfjsCommentsPanel .body{
+  white-space:pre-wrap;
+}
+
+.pdfjsHighlightCommentPreview{
+  position:fixed;
+  z-index:10000;
+  box-sizing:border-box;
+  max-width:300px;
+  max-height:160px;
+  overflow:auto;
+  padding:12px;
+  border:1px solid #8f8f9d;
+  border-radius:8px;
+  background:#fff;
+  box-shadow:0 8px 24px rgb(0 0 0 / 0.2);
+  color:#1b1b1b;
+  font:13px/1.4 sans-serif;
+  white-space:pre-wrap;
+}
+
 @media (prefers-color-scheme: dark){
   .pdfjsHighlightCommentComposer{
     border-color:#6d6d7a;
@@ -1709,6 +1823,43 @@
   .pdfjsHighlightCommentComposer textarea{
     border-color:#6d6d7a;
     background:#1f1e24;
+  }
+
+  .annotationEditorLayer .highlightEditor .highlightCommentIndicator{
+    border-color:#6d6d7a;
+    background:#2b2a33;
+    color:#fbfbfe;
+  }
+
+  .pdfjsHighlightCommentPreview{
+    border-color:#6d6d7a;
+    background:#2b2a33;
+    color:#fbfbfe;
+  }
+
+  .pdfjsCommentsPanel{
+    border-color:#6d6d7a;
+    background:#2b2a33;
+    color:#fbfbfe;
+  }
+
+  .pdfjsCommentsPanel .header,
+  .pdfjsCommentsPanel .commentEntry{
+    border-color:#6d6d7a;
+  }
+
+  .pdfjsCommentsPanel .commentEntry{
+    background:#2b2a33;
+  }
+
+  .pdfjsCommentsPanel .commentEntry:hover{
+    border-color:#0df;
+    background:#3b3a45;
+  }
+
+  .pdfjsCommentsPanel .quoted,
+  .pdfjsCommentsPanel .empty{
+    color:#c5c5d0;
   }
 }
 

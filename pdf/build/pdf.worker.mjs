@@ -52337,6 +52337,7 @@ class HighlightAnnotation extends MarkupAnnotation {
   }) {
     const {
       color,
+      contents,
       opacity,
       rect,
       rotation,
@@ -52347,6 +52348,7 @@ class HighlightAnnotation extends MarkupAnnotation {
     highlight.set("Type", Name.get("Annot"));
     highlight.set("Subtype", Name.get("Highlight"));
     highlight.set("CreationDate", `D:${getModificationDate()}`);
+    highlight.set("M", `D:${getModificationDate()}`);
     highlight.set("Rect", rect);
     highlight.set("F", 4);
     highlight.set("Border", [0, 0, 0]);
@@ -52357,9 +52359,8 @@ class HighlightAnnotation extends MarkupAnnotation {
     if (contents) {
       highlight.set("Contents", isAscii(contents) ? contents : stringToUTF16String(contents, true));
     }
-    if (user) {
-      highlight.set("T", isAscii(user) ? user : stringToUTF16String(user, true));
-    }
+    const author = user || "AI Popup Infopedia";
+    highlight.set("T", isAscii(author) ? author : stringToUTF16String(author, true));
     if (apRef || ap) {
       const n = new Dict(xref);
       highlight.set("AP", n);
