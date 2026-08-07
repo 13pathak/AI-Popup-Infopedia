@@ -35,6 +35,7 @@ See https://github.com/adobe-type-tools/cmap-resources
 
   <script src="viewer.mjs" type="module"></script>
     <script src="../../content.js"></script>
+    <script src="bookmark.js" type="module"></script>
   </head>
 
   <body tabindex="1">
@@ -296,10 +297,10 @@ See https://github.com/adobe-type-tools/cmap-resources
               </div>
               <div id="toolbarViewerRight">
                 <div id="editorModeButtons" class="splitToolbarButton toggled" role="radiogroup">
-                  <button id="editorHighlight" class="toolbarButton" hidden="true" disabled="disabled" title="Highlight" role="radio" aria-checked="false" aria-controls="editorHighlightParamsToolbar" tabindex="31" data-l10n-id="pdfjs-editor-highlight-button">
+                  <button id="editorHighlight" class="toolbarButton" title="Highlight" role="radio" aria-checked="false" aria-controls="editorHighlightParamsToolbar" tabindex="31" data-l10n-id="pdfjs-editor-highlight-button">
                     <span data-l10n-id="pdfjs-editor-highlight-button-label">Highlight</span>
                   </button>
-                  <button id="editorFreeText" class="toolbarButton" hidden="true" disabled="disabled" title="Comment" role="radio" aria-checked="false" aria-controls="editorFreeTextParamsToolbar" tabindex="32" data-l10n-id="pdfjs-editor-free-text-button">
+                  <button id="editorFreeText" class="toolbarButton" title="Comment" role="radio" aria-checked="false" aria-controls="editorFreeTextParamsToolbar" tabindex="32" data-l10n-id="pdfjs-editor-free-text-button">
                     <span data-l10n-id="pdfjs-editor-free-text-button-label">Comment</span>
                   </button>
                   <button id="editorInk" class="toolbarButton" disabled="disabled" title="Draw" role="radio" aria-checked="false" aria-controls="editorInkParamsToolbar" tabindex="33" data-l10n-id="pdfjs-editor-ink-button">
@@ -317,6 +318,13 @@ See https://github.com/adobe-type-tools/cmap-resources
 
                 <button id="print" class="toolbarButton hiddenMediumView" title="Print" tabindex="41" data-l10n-id="pdfjs-print-button">
                   <span data-l10n-id="pdfjs-print-button-label">Print</span>
+                </button>
+
+                <button id="addBookmarkBtn" class="toolbarButton hiddenMediumView" title="Add Bookmark" tabindex="41" style="display: flex; align-items: center; justify-content: center; font-size: 16px;">
+                  ⭐
+                </button>
+                <button id="viewBookmarksBtn" class="toolbarButton hiddenMediumView" title="View Bookmarks" tabindex="42" style="display: flex; align-items: center; justify-content: center; font-size: 16px;">
+                  📑
                 </button>
 
                 <button id="download" class="toolbarButton hiddenMediumView" title="Save annotated PDF" tabindex="42" data-l10n-id="pdfjs-save-button">
@@ -508,5 +516,14 @@ See https://github.com/adobe-type-tools/cmap-resources
 
     </div> <!-- outerContainer -->
     <div id="printContainer"></div>
+
+    <dialog id="bookmarkDialog" style="border: 1px solid #ccc; border-radius: 8px; padding: 20px; min-width: 250px; background: #fff; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+      <h3 style="margin-top: 0; color: #333;">Bookmarks</h3>
+      <ul id="bookmarkList" style="list-style-type: none; padding: 0; margin-bottom: 20px; max-height: 300px; overflow-y: auto;">
+      </ul>
+      <div style="display: flex; justify-content: flex-end;">
+        <button id="closeBookmarkDialogBtn" style="padding: 5px 10px; cursor: pointer;">Close</button>
+      </div>
+    </dialog>
   </body>
 </html>
