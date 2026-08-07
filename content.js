@@ -9,8 +9,8 @@ const popupStyles = `
     background: linear-gradient(145deg, #252a35 0%, #171b24 100%);
     color: #eef3f8;
     border: 1px solid rgba(125, 211, 252, 0.22);
-    border-radius: 14px;
-    padding: 14px;
+    border-radius: 12px;
+    padding: 18px 14px 14px 14px;
     font-family: sans-serif;
     font-size: 14px;
     line-height: 1.5;
@@ -115,7 +115,7 @@ const popupStyles = `
      background-color: #101827;
     color: #eee;
      border: 1px solid #475569;
-     border-radius: 8px;
+     border-radius: 10px;
      padding: 7px;
     font-family: sans-serif;
      font-size: 13px;
@@ -129,6 +129,15 @@ const popupStyles = `
     padding: 2px 5px 2px 1px; /* Spacing for the scrollbar */
     line-height: 1.62;
   }
+  
+  #ai-popup-content p {
+    margin-top: 0;
+    margin-bottom: 12px;
+  }
+  
+  #ai-popup-content p:last-child {
+    margin-bottom: 0;
+  }
 
   /* --- STYLES FOR BUTTONS --- */
   .ai-popup-actions {
@@ -138,7 +147,7 @@ const popupStyles = `
     margin-top: 14px;
     padding: 8px;
     background: #111c2c;
-    border: 1px solid #3b4b63;
+    border: none;
     border-radius: 10px;
   }
 
@@ -150,7 +159,7 @@ const popupStyles = `
     cursor: pointer;
     background: #5eead4;
     border: 1px solid #99f6e4;
-    border-radius: 7px;
+    border-radius: 10px;
     padding: 6px 11px;
     white-space: nowrap; /* Prevent wrapping */
     flex-shrink: 0; /* Prevent button from shrinking */
@@ -172,23 +181,26 @@ const popupStyles = `
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
-    background: rgba(45, 212, 191, 0.1);
-    border: 1px solid rgba(94, 234, 212, 0.18);
-    border-radius: 7px;
+    background: transparent;
+    border: none;
+    border-radius: 10px;
     transition: transform 140ms ease, background-color 140ms ease;
   }
   #ai-popup-speak-btn:hover, #ai-popup-pdf-btn:hover, #ai-popup-pin-btn:hover {
     color: #e6fffb;
-    background: rgba(45, 212, 191, 0.22);
+    background: rgba(45, 212, 191, 0.15);
     transform: translateY(-1px);
   }
 
   /* --- NEW: Follow-up Prompt --- */
   #ai-popup-followup-container {
     display: flex;
-    margin-top: 12px;
-    padding-top: 2px;
+    position: relative;
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
     gap: 8px;
+    align-items: center;
   }
   
   #ai-popup-followup-input {
@@ -196,11 +208,13 @@ const popupStyles = `
     background-color: #101827;
     color: #eee;
     border: 1px solid #475569;
-    border-radius: 8px;
-    padding: 6px 10px;
+    border-radius: 10px;
+    padding: 6px 36px 6px 10px;
     font-family: sans-serif;
     font-size: 13px;
     outline: none;
+    width: 100%;
+    box-sizing: border-box;
   }
   
   #ai-popup-followup-input::placeholder {
@@ -211,7 +225,7 @@ const popupStyles = `
     background: #2dd4bf;
     color: #062c2c;
     border: none;
-    border-radius: 8px;
+    border-radius: 10px;
     padding: 6px 12px;
     cursor: pointer;
     font-weight: bold;
@@ -224,21 +238,24 @@ const popupStyles = `
 
   /* --- NEW: Follow-up Mic Button --- */
   .ai-popup-followup-mic {
-    background: #444;
-    color: #eee;
-    border: 1px solid #666;
-    border-radius: 4px;
-    padding: 6px 10px;
+    position: absolute;
+    right: 4px;
+    background: transparent;
+    color: #aaa;
+    border: none;
+    padding: 6px;
     cursor: pointer;
     font-size: 13px;
     display: flex;
     align-items: center;
     justify-content: center;
     transition: all 0.2s;
+    border-radius: 6px;
   }
 
   .ai-popup-followup-mic:hover {
-    background: #555;
+    color: #eee;
+    background: rgba(255,255,255,0.1);
   }
 
   .ai-popup-followup-mic.recording {
@@ -1046,11 +1063,7 @@ function createSelectors(instance, models, prompts, currentModelId, currentPromp
   contextQuery.title = contextQuery.textContent;
   contextCopy.append(contextLabel, contextQuery);
 
-  const contextModel = document.createElement('span');
-  contextModel.className = 'ai-popup-context-model';
-  contextModel.textContent = activeModel ? activeModel.name : 'AI model';
-  contextModel.title = contextModel.textContent;
-  context.append(contextCopy, contextModel);
+  context.append(contextCopy);
 
   const container = document.createElement('div');
   container.id = 'ai-popup-selectors-container';
@@ -1367,6 +1380,7 @@ function createActionButtons(instance, word, definition, modelName, promptName, 
     const finalSaveButton = document.createElement('button');
     finalSaveButton.textContent = 'Save';
     finalSaveButton.className = 'ai-popup-button';
+    finalSaveButton.style.marginLeft = 'auto';
     // Removed manual margin-left, relying on flex gap
 
 
@@ -1464,9 +1478,15 @@ function createFollowupInput(instance, word) {
   micBtn.className = 'ai-popup-followup-mic';
   micBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>';
   micBtn.title = 'Type by speaking';
+  const inputWrapper = document.createElement('div');
+  inputWrapper.style.position = 'relative';
+  inputWrapper.style.flexGrow = '1';
+  inputWrapper.style.display = 'flex';
+  inputWrapper.style.alignItems = 'center';
+  inputWrapper.appendChild(input);
+  inputWrapper.appendChild(micBtn);
 
-  container.appendChild(input);
-  container.appendChild(micBtn);
+  container.appendChild(inputWrapper);
   container.appendChild(sendBtn);
   popup.appendChild(container);
 
@@ -2021,9 +2041,9 @@ function triggerVerification(popupInstance, originalPrompt, aiResponse) {
       
       indEl.innerHTML = `⚠️ <strong style="color:#ef4444;">Hallucination Detected</strong>${detailsHtml}<div>${correctionsHtml}</div>`;
     } else {
-      indEl.style.backgroundColor = 'rgba(16, 185, 129, 0.1)';
-      indEl.style.borderLeftColor = '#10b981';
-      indEl.innerHTML = `🛡️ <strong style="color:#10b981;">Verified</strong> <span style="opacity:0.8">- No hallucinations detected.</span>${detailsHtml}`;
+      indEl.style.backgroundColor = 'rgba(94, 234, 212, 0.1)';
+      indEl.style.borderLeftColor = '#5eead4';
+      indEl.innerHTML = `🛡️ <strong style="color:#5eead4;">Verified</strong> <span style="opacity:0.8">- No hallucinations detected.</span>${detailsHtml}`;
     }
     
     // Attach event listener for toggle
