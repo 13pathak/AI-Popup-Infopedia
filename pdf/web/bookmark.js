@@ -13,7 +13,10 @@ style.textContent = `
   }
   #editorHighlight,
   #editorFreeText,
-  #editorInk {
+  #editorInk,
+  #editorHighlightParamsToolbar,
+  #editorFreeTextParamsToolbar,
+  #editorInkParamsToolbar {
     display: none !important;
   }
 `;
