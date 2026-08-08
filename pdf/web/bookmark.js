@@ -70,24 +70,33 @@ style.textContent = `
   }
 
   /* --- EMOJI ICON REPLACEMENTS --- */
+  .toolbarButton, .secondaryToolbarButton {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    position: relative !important;
+  }
+  
   .toolbarButton::before, .secondaryToolbarButton::before {
     -webkit-mask-image: none !important;
     mask-image: none !important;
     background-color: transparent !important;
-    display: flex !important;
+    display: inline-flex !important;
     align-items: center !important;
     justify-content: center !important;
     font-size: 16px !important;
     line-height: 1 !important;
-    width: 100% !important;
-    height: 100% !important;
-    left: 0 !important;
-    top: 0 !important;
+    position: static !important;
     content: " " !important; /* Fallback */
   }
 
   /* Hide default icons completely just in case */
   .toolbarButton::after, .secondaryToolbarButton::after {
+    display: none !important;
+  }
+  
+  /* Hide unnecessary Add Image button */
+  #editorStamp {
     display: none !important;
   }
 
