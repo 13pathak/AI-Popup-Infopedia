@@ -13,6 +13,7 @@ A powerful browser extension to get instant AI explanations for any word or phra
 <img width="1119" height="579" alt="image" src="https://github.com/user-attachments/assets/e00681be-7473-4b5a-b7d1-179b378f7fb5" />
 
 ---
+## Download From Chrome Store: https://chromewebstore.google.com/detail/ai-popup-infopedia/jejfdgeiihgomipkhjkbplikgkcjcpab
 
 ## 🆕 What's New (v7.0)
 
