@@ -2488,7 +2488,7 @@ class AnnotationEditorUIManager {
     }
     for (const layer of this.#allLayers.values()) {
       if (layer.hasTextLayer(textLayer)) {
-        return layer.createAndAddNewEditor({
+        const editor = layer.createAndAddNewEditor({
           x: 0,
           y: 0
         }, false, {
@@ -2501,6 +2501,10 @@ class AnnotationEditorUIManager {
           focusOffset,
           text
         });
+        if (editor) {
+          this.setSelected(editor);
+        }
+        return editor;
       }
     }
     return null;
