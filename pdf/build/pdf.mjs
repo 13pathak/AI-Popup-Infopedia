@@ -2632,7 +2632,7 @@ class AnnotationEditorUIManager {
           annotationId: annotation.id,
           comment,
           pageNumber,
-          text: `Page ${pageNumber}`
+          text: annotation.highlightText || `Page ${pageNumber}`
         });
       }
     }
@@ -17624,7 +17624,8 @@ class HighlightEditor extends AnnotationEditor {
       pageIndex: this.pageIndex,
       rect,
       rotation: this.#getRotation(),
-      structTreeParentId: this._structTreeParentId
+      structTreeParentId: this._structTreeParentId,
+      highlightText: this.#text
     };
   }
   static canCreateNewEmptyEditor() {

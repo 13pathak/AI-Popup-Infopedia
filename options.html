@@ -621,6 +621,7 @@
 
     <div class="tab-nav">
         <button class="tab-button" data-tab="settings-content">Settings</button>
+        <button class="tab-button" data-tab="pdf-content">PDF Reader</button>
         <button class="tab-button" data-tab="history-content">History</button>
         <button class="tab-button" data-tab="anki-content">Anki</button>
         <button class="tab-button" data-tab="flashcards-content">Flashcards</button>
@@ -741,9 +742,13 @@
             <div id="followup-status" style="margin-top: 10px; font-weight: bold; min-height: 1em;"></div>
         </div>
 
-        <div id="pdf-settings-container"
-            style="margin-top: 30px; padding-top: 20px; border-top: 1px solid var(--border-color);">
-            <h3 style="color: var(--primary-color); margin-top: 0;">PDF Support</h3>
+        <div id="status"></div>
+    </div>
+
+    <!-- NEW PDF CONTENT TAB -->
+    <div id="pdf-content" class="tab-content">
+        <h2>PDF Reader Settings</h2>
+        <div id="pdf-settings-container">
             <p style="margin-bottom: 10px;">The AI Popup Infopedia supports reading and translating PDFs using a built-in viewer.</p>
             
             <div style="margin-bottom: 20px; display: flex; align-items: center; gap: 10px;">
@@ -763,8 +768,6 @@
                 <p style="margin: 0; font-size: 0.9em;">You can now use the AI Popup on local PDFs!</p>
             </div>
         </div>
-
-        <div id="status"></div>
     </div>
 
     <div id="history-content" class="tab-content">
