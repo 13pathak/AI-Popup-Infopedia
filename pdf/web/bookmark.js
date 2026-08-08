@@ -23,6 +23,11 @@ style.textContent = `
     padding: 6px !important;
     max-width: 200px !important;
     min-width: 150px !important;
+    border-radius: 10px !important;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15) !important;
+    border: 1px solid rgba(128, 128, 128, 0.15) !important;
+    backdrop-filter: blur(10px) !important;
+    -webkit-backdrop-filter: blur(10px) !important;
   }
   .annotationLayer .popup > .header {
     padding-bottom: 4px !important;
@@ -33,6 +38,63 @@ style.textContent = `
   .annotationLayer .popupContent {
     font-size: 12px !important;
     padding: 4px !important;
+  }
+  
+  /* Modernize PDF.js UI */
+  body, input, button, select, textarea, .dialog, .pdfjsCommentsPanel {
+    font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+  }
+  :root {
+    --toolbar-bg-color: rgba(249, 249, 250, 0.85) !important;
+    --toolbar-border-color: transparent !important;
+    --button-hover-color: rgba(0, 0, 0, 0.05) !important;
+    --toggled-btn-bg-color: rgba(0, 0, 0, 0.1) !important;
+    --dialog-bg-color: rgba(255, 255, 255, 0.95) !important;
+  }
+  :root:where(.is-dark) {
+    --toolbar-bg-color: rgba(28, 27, 34, 0.85) !important;
+    --button-hover-color: rgba(255, 255, 255, 0.1) !important;
+    --toggled-btn-bg-color: rgba(255, 255, 255, 0.15) !important;
+    --dialog-bg-color: rgba(42, 42, 46, 0.95) !important;
+  }
+  #toolbarContainer, .findbar, .secondaryToolbar {
+    backdrop-filter: blur(12px) !important;
+    -webkit-backdrop-filter: blur(12px) !important;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05) !important;
+    border-bottom: 1px solid rgba(128, 128, 128, 0.1) !important;
+  }
+  .toolbarButton, .secondaryToolbarButton, .dialogButton, .findbar button {
+    border-radius: 6px !important;
+    transition: background-color 0.2s ease, transform 0.1s ease !important;
+  }
+  .toolbarButton:active, .secondaryToolbarButton:active {
+    transform: scale(0.95) !important;
+  }
+  .toolbarField, .dialog input, .dialog textarea {
+    border-radius: 6px !important;
+    border: 1px solid rgba(128, 128, 128, 0.3) !important;
+    padding: 4px 6px !important;
+  }
+  .dialog, .secondaryToolbar, .findbar, .pdfjsCommentsPanel, #bookmarkDialog {
+    border-radius: 12px !important;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15), 0 1px 3px rgba(0,0,0,0.05) !important;
+    backdrop-filter: blur(20px) !important;
+    -webkit-backdrop-filter: blur(20px) !important;
+    border: 1px solid rgba(128, 128, 128, 0.1) !important;
+  }
+  ::-webkit-scrollbar {
+    width: 8px !important;
+    height: 8px !important;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent !important;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: rgba(128, 128, 128, 0.3) !important;
+    border-radius: 10px !important;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(128, 128, 128, 0.5) !important;
   }
 `;
 document.head.appendChild(style);
