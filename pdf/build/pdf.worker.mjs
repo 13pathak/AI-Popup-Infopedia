@@ -52359,7 +52359,7 @@ class HighlightAnnotation extends MarkupAnnotation {
     if (contents) {
       highlight.set("Contents", isAscii(contents) ? contents : stringToUTF16String(contents, true));
     }
-    const author = user || "AI Popup Infopedia";
+    const author = user || "";
     highlight.set("T", isAscii(author) ? author : stringToUTF16String(author, true));
     if (apRef || ap) {
       const n = new Dict(xref);
