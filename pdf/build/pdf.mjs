@@ -2484,10 +2484,6 @@ class AnnotationEditorUIManager {
     }
     selection.empty();
     if (this.#mode === AnnotationEditorType.NONE) {
-      this._eventBus.dispatch("showannotationeditorui", {
-        source: this,
-        mode: AnnotationEditorType.HIGHLIGHT
-      });
       this.showAllEditors("highlight", true, true);
     }
     for (const layer of this.#allLayers.values()) {
@@ -2496,6 +2492,7 @@ class AnnotationEditorUIManager {
           x: 0,
           y: 0
         }, false, {
+          annotationType: 9,
           methodOfCreation,
           boxes,
           anchorNode,
@@ -2628,11 +2625,20 @@ class AnnotationEditorUIManager {
         if (annotation.annotationType !== 9) {
           continue;
         }
+        
+        let highlightText = annotation.highlightText;
+        if (!highlightText && this.#annotationStorage) {
+          const raw = this.#annotationStorage.getRawValue(annotation.id);
+          if (raw && raw.highlightText) {
+            highlightText = raw.highlightText;
+          }
+        }
+        
         this.#commentPanelEntries.set(`saved:${annotation.id}`, {
           annotationId: annotation.id,
           comment,
           pageNumber,
-          text: annotation.highlightText || `Page ${pageNumber}`
+          text: highlightText || `Page ${pageNumber}`
         });
       }
     }
@@ -3172,7 +3178,7 @@ class AnnotationEditorUIManager {
   }
   addEditor(editor) {
     this.#allEditors.set(editor.id, editor);
-    if (editor.annotationEditorType === 9) {
+    if (editor.editorType === "highlight") {
       this.updateHighlightComment(editor, editor.comment || "");
     }
   }
@@ -3187,7 +3193,7 @@ class AnnotationEditorUIManager {
       }, 0);
     }
     this.#allEditors.delete(editor.id);
-    if (editor.annotationEditorType === 9) {
+    if (editor.editorType === "highlight") {
       this.#commentPanelEntries.delete(editor.id);
       this.#renderCommentPanel();
     }
@@ -17138,12 +17144,16 @@ class HighlightEditor extends AnnotationEditor {
   }
   static initialize(l10n, uiManager) {
     AnnotationEditor.initialize(l10n, uiManager);
-    HighlightEditor._defaultColor ||= uiManager.highlightColors?.values().next().value || "#fff066";
+    let storedColor = null;
+    try { storedColor = window.localStorage.getItem("pdfjs_highlight_default_color"); } catch (e) {}
+    HighlightEditor._defaultColor ||= storedColor || uiManager.highlightColors?.values().next().value || "#fff066";
   }
   static updateDefaultParams(type, value) {
     switch (type) {
       case AnnotationEditorParamsType.HIGHLIGHT_DEFAULT_COLOR:
+      case AnnotationEditorParamsType.HIGHLIGHT_COLOR:
         HighlightEditor._defaultColor = value;
+        try { window.localStorage.setItem("pdfjs_highlight_default_color", value); } catch (e) {}
         break;
       case AnnotationEditorParamsType.HIGHLIGHT_THICKNESS:
         HighlightEditor._defaultThickness = value;
@@ -19232,7 +19242,7 @@ class AnnotationEditorLayer {
     return AnnotationEditorLayer.#editorTypes.get(this.#uiManager.getMode());
   }
   #createNewEditor(params) {
-    const editorType = this.#currentEditorType;
+    const editorType = params.annotationType ? AnnotationEditorLayer.#editorTypes.get(params.annotationType) : this.#currentEditorType;
     return editorType ? new editorType.prototype.constructor(params) : null;
   }
   canCreateNewEmptyEditor() {
