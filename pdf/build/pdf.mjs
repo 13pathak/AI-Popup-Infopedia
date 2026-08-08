@@ -2575,15 +2575,11 @@ class AnnotationEditorUIManager {
     preview.focus();
   }
   updateHighlightComment(editor, comment) {
-    if (comment) {
-      this.#commentPanelEntries.set(editor.id, {
-        comment,
-        editor,
-        text: editor.commentText
-      });
-    } else {
-      this.#commentPanelEntries.delete(editor.id);
-    }
+    this.#commentPanelEntries.set(editor.id, {
+      comment: comment || "",
+      editor,
+      text: editor.commentText
+    });
     this.#renderCommentPanel();
   }
   async toggleCommentsPanel() {
@@ -2629,7 +2625,7 @@ class AnnotationEditorUIManager {
     } of pages) {
       for (const annotation of annotations) {
         const comment = annotation.contentsObj?.str || annotation.contents || "";
-        if (!comment || annotation.annotationType !== AnnotationType.HIGHLIGHT) {
+        if (annotation.annotationType !== 9) {
           continue;
         }
         this.#commentPanelEntries.set(`saved:${annotation.id}`, {
@@ -2645,7 +2641,7 @@ class AnnotationEditorUIManager {
     if (!this.#commentPanel) {
       const panel = this.#commentPanel = document.createElement("aside");
       panel.className = "pdfjsCommentsPanel";
-      panel.innerHTML = '<div class="header"><strong>Comments</strong><button type="button" aria-label="Close comments">×</button></div><div class="commentList"></div>';
+      panel.innerHTML = '<div class="header"><strong>Highlights and Comments</strong><button type="button" aria-label="Close comments">×</button></div><div class="commentList"></div>';
       panel.querySelector(".header button").addEventListener("click", () => {
         panel.hidden = true;
       });
@@ -3176,6 +3172,9 @@ class AnnotationEditorUIManager {
   }
   addEditor(editor) {
     this.#allEditors.set(editor.id, editor);
+    if (editor.annotationEditorType === 9) {
+      this.updateHighlightComment(editor, editor.comment || "");
+    }
   }
   removeEditor(editor) {
     if (editor.div.contains(document.activeElement)) {
@@ -3188,6 +3187,10 @@ class AnnotationEditorUIManager {
       }, 0);
     }
     this.#allEditors.delete(editor.id);
+    if (editor.annotationEditorType === 9) {
+      this.#commentPanelEntries.delete(editor.id);
+      this.#renderCommentPanel();
+    }
     this.unselect(editor);
     if (!editor.annotationElementId || !this.#deletedAnnotationsElementIds.has(editor.annotationElementId)) {
       this.#annotationStorage?.remove(editor.id);

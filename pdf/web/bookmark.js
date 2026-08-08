@@ -278,3 +278,19 @@ const observer = new MutationObserver((mutations) => {
   });
 });
 observer.observe(document.body, { childList: true, subtree: true });
+
+// --- Close Comments Panel on Outside Click ---
+document.addEventListener("click", (e) => {
+  const panel = document.querySelector(".pdfjsCommentsPanel");
+  const trigger = document.getElementById("commentsPanel");
+  
+  if (panel && !panel.hidden) {
+    // Check if the click happened outside the panel and outside the toolbar trigger button
+    if (!panel.contains(e.target) && (!trigger || !trigger.contains(e.target))) {
+      // Also ignore clicks inside floating editors or popups so we don't accidentally close when interacting with a highlight
+      if (!e.target.closest('.popupAnnotation') && !e.target.closest('.highlightAnnotation') && !e.target.closest('.annotationEditorLayer')) {
+        panel.hidden = true;
+      }
+    }
+  }
+});
