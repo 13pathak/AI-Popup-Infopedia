@@ -45,29 +45,65 @@ style.textContent = `
   }
   
   :root {
-    --body-bg-color: #f1f5f9 !important;
-    --toolbar-bg-color: rgba(255, 255, 255, 0.75) !important;
+    --body-bg-color: #f8fafc !important; /* Slate 50 */
+    --toolbar-bg-color: rgba(255, 255, 255, 0.85) !important;
     --toolbar-border-color: rgba(0, 0, 0, 0.05) !important;
-    --button-hover-color: rgba(0, 0, 0, 0.06) !important;
-    --toggled-btn-bg-color: rgba(0, 0, 0, 0.1) !important;
-    --dialog-bg-color: rgba(255, 255, 255, 0.9) !important;
-    --sidebar-bg-color: rgba(255, 255, 255, 0.8) !important;
+    --button-hover-color: rgba(0, 0, 0, 0.08) !important;
+    --toggled-btn-bg-color: rgba(0, 0, 0, 0.12) !important;
+    --dialog-bg-color: rgba(255, 255, 255, 0.95) !important;
+    --sidebar-bg-color: rgba(255, 255, 255, 0.9) !important;
   }
 
   :root:where(.is-dark) {
-    --body-bg-color: #0f172a !important; /* Tailwind slate-900 */
-    --toolbar-bg-color: rgba(30, 41, 59, 0.75) !important; /* Tailwind slate-800 */
-    --toolbar-border-color: rgba(255, 255, 255, 0.05) !important;
-    --button-hover-color: rgba(255, 255, 255, 0.1) !important;
-    --toggled-btn-bg-color: rgba(255, 255, 255, 0.15) !important;
-    --dialog-bg-color: rgba(30, 41, 59, 0.95) !important;
-    --sidebar-bg-color: rgba(15, 23, 42, 0.85) !important;
+    --body-bg-color: #1e1b4b !important; /* Deep Indigo-950 */
+    --toolbar-bg-color: rgba(49, 46, 129, 0.85) !important; /* Indigo-900 */
+    --toolbar-border-color: rgba(255, 255, 255, 0.1) !important;
+    --button-hover-color: rgba(255, 255, 255, 0.15) !important;
+    --toggled-btn-bg-color: rgba(255, 255, 255, 0.25) !important;
+    --dialog-bg-color: rgba(49, 46, 129, 0.95) !important;
+    --sidebar-bg-color: rgba(30, 27, 75, 0.9) !important; /* Indigo-950/900 blend */
   }
 
   body {
     background-color: var(--body-bg-color) !important;
-    background-image: radial-gradient(circle at top left, rgba(255,255,255,0.03) 0%, transparent 50%), radial-gradient(circle at bottom right, rgba(0,0,0,0.2) 0%, transparent 50%) !important;
+    background-image: linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, transparent 100%), radial-gradient(circle at top left, rgba(255,255,255,0.05) 0%, transparent 50%) !important;
   }
+
+  /* --- EMOJI ICON REPLACEMENTS --- */
+  .toolbarButton::before, .secondaryToolbarButton::before {
+    -webkit-mask-image: none !important;
+    mask-image: none !important;
+    background-color: transparent !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    font-size: 16px !important;
+    line-height: 1 !important;
+    width: 100% !important;
+    height: 100% !important;
+    left: 0 !important;
+    top: 0 !important;
+    content: " " !important; /* Fallback */
+  }
+
+  /* Hide default icons completely just in case */
+  .toolbarButton::after, .secondaryToolbarButton::after {
+    display: none !important;
+  }
+
+  #sidebarToggle::before { content: "🗂️" !important; }
+  #viewFind::before { content: "🔍" !important; }
+  #previous::before { content: "⬆️" !important; }
+  #next::before { content: "⬇️" !important; }
+  #zoomOut::before { content: "➖" !important; }
+  #zoomIn::before { content: "➕" !important; }
+  #presentationMode::before { content: "🖥️" !important; }
+  #print::before, #secondaryPrint::before { content: "🖨️" !important; }
+  #download::before, #secondaryDownload::before { content: "💾" !important; }
+  #secondaryToolbarToggle::before { content: "⚙️" !important; }
+  #commentsPanel::before { content: "💬" !important; }
+  #editorStamp::before { content: "🖼️" !important; }
+  #viewBookmark::before { content: "🔗" !important; }
 
   /* Floating Toolbar */
   .toolbar {
@@ -75,9 +111,9 @@ style.textContent = `
     width: calc(100% - 32px) !important;
     border-radius: 16px !important;
     background-color: var(--toolbar-bg-color) !important;
-    backdrop-filter: blur(20px) saturate(180%) !important;
-    -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
-    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+    backdrop-filter: blur(24px) saturate(200%) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(200%) !important;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
     border: 1px solid var(--toolbar-border-color) !important;
     height: 48px !important;
   }
@@ -136,13 +172,13 @@ style.textContent = `
   .toolbarField, .dialog input, .dialog textarea {
     border-radius: 8px !important;
     border: 1px solid var(--toolbar-border-color) !important;
-    background-color: rgba(255, 255, 255, 0.05) !important;
+    background-color: rgba(255, 255, 255, 0.1) !important;
     padding: 6px 10px !important;
     transition: border-color 0.2s ease, box-shadow 0.2s ease !important;
   }
   .toolbarField:focus, .dialog input:focus {
-    border-color: #3b82f6 !important; /* Tailwind blue-500 */
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2) !important;
+    border-color: #6366f1 !important; /* Tailwind indigo-500 */
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.3) !important;
     outline: none !important;
   }
 
