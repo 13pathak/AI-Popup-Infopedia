@@ -39,62 +39,128 @@ style.textContent = `
     font-size: 12px !important;
     padding: 4px !important;
   }
-  
-  /* Modernize PDF.js UI */
+    /* --- ULTRA PREMIUM PDF.JS THEME --- */
   body, input, button, select, textarea, .dialog, .pdfjsCommentsPanel {
     font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
   }
+  
   :root {
-    --toolbar-bg-color: rgba(249, 249, 250, 0.85) !important;
-    --toolbar-border-color: transparent !important;
-    --button-hover-color: rgba(0, 0, 0, 0.05) !important;
+    --body-bg-color: #f1f5f9 !important;
+    --toolbar-bg-color: rgba(255, 255, 255, 0.75) !important;
+    --toolbar-border-color: rgba(0, 0, 0, 0.05) !important;
+    --button-hover-color: rgba(0, 0, 0, 0.06) !important;
     --toggled-btn-bg-color: rgba(0, 0, 0, 0.1) !important;
-    --dialog-bg-color: rgba(255, 255, 255, 0.95) !important;
+    --dialog-bg-color: rgba(255, 255, 255, 0.9) !important;
+    --sidebar-bg-color: rgba(255, 255, 255, 0.8) !important;
   }
+
   :root:where(.is-dark) {
-    --toolbar-bg-color: rgba(28, 27, 34, 0.85) !important;
+    --body-bg-color: #0f172a !important; /* Tailwind slate-900 */
+    --toolbar-bg-color: rgba(30, 41, 59, 0.75) !important; /* Tailwind slate-800 */
+    --toolbar-border-color: rgba(255, 255, 255, 0.05) !important;
     --button-hover-color: rgba(255, 255, 255, 0.1) !important;
     --toggled-btn-bg-color: rgba(255, 255, 255, 0.15) !important;
-    --dialog-bg-color: rgba(42, 42, 46, 0.95) !important;
+    --dialog-bg-color: rgba(30, 41, 59, 0.95) !important;
+    --sidebar-bg-color: rgba(15, 23, 42, 0.85) !important;
   }
-  #toolbarContainer, .findbar, .secondaryToolbar {
-    backdrop-filter: blur(12px) !important;
-    -webkit-backdrop-filter: blur(12px) !important;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05) !important;
-    border-bottom: 1px solid rgba(128, 128, 128, 0.1) !important;
+
+  body {
+    background-color: var(--body-bg-color) !important;
+    background-image: radial-gradient(circle at top left, rgba(255,255,255,0.03) 0%, transparent 50%), radial-gradient(circle at bottom right, rgba(0,0,0,0.2) 0%, transparent 50%) !important;
   }
+
+  /* Floating Toolbar */
+  .toolbar {
+    margin: 12px 16px !important;
+    width: calc(100% - 32px) !important;
+    border-radius: 16px !important;
+    background-color: var(--toolbar-bg-color) !important;
+    backdrop-filter: blur(20px) saturate(180%) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+    border: 1px solid var(--toolbar-border-color) !important;
+    height: 48px !important;
+  }
+  
+  /* Fix viewer container positioning since toolbar is floating */
+  #viewerContainer, #sidebarContainer {
+    top: 72px !important; /* 48px height + 12px margin * 2 */
+  }
+
+  /* Floating Sidebar */
+  #sidebarContainer {
+    margin-left: 16px !important;
+    margin-bottom: 16px !important;
+    height: calc(100% - 88px) !important;
+    border-radius: 16px !important;
+    background-color: var(--sidebar-bg-color) !important;
+    backdrop-filter: blur(24px) saturate(180%) !important;
+    -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+    border: 1px solid var(--toolbar-border-color) !important;
+    overflow: hidden !important;
+  }
+  
+  /* Make sidebar toolbar blend in */
+  #toolbarSidebar {
+    background-color: transparent !important;
+    border-bottom: 1px solid var(--toolbar-border-color) !important;
+  }
+
+  /* Interactive Buttons */
   .toolbarButton, .secondaryToolbarButton, .dialogButton, .findbar button {
-    border-radius: 6px !important;
-    transition: background-color 0.2s ease, transform 0.1s ease !important;
+    border-radius: 8px !important;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    margin: 2px !important;
+  }
+  .toolbarButton:hover, .secondaryToolbarButton:hover {
+    background-color: var(--button-hover-color) !important;
+    transform: translateY(-1px) !important;
   }
   .toolbarButton:active, .secondaryToolbarButton:active {
-    transform: scale(0.95) !important;
+    transform: translateY(1px) scale(0.95) !important;
   }
-  .toolbarField, .dialog input, .dialog textarea {
-    border-radius: 6px !important;
-    border: 1px solid rgba(128, 128, 128, 0.3) !important;
-    padding: 4px 6px !important;
-  }
+
+  /* Elevated Cards (Dialogs & Menus) */
   .dialog, .secondaryToolbar, .findbar, .pdfjsCommentsPanel, #bookmarkDialog {
-    border-radius: 12px !important;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15), 0 1px 3px rgba(0,0,0,0.05) !important;
-    backdrop-filter: blur(20px) !important;
-    -webkit-backdrop-filter: blur(20px) !important;
-    border: 1px solid rgba(128, 128, 128, 0.1) !important;
+    border-radius: 16px !important;
+    background-color: var(--dialog-bg-color) !important;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2), 0 1px 3px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+    backdrop-filter: blur(30px) saturate(200%) !important;
+    -webkit-backdrop-filter: blur(30px) saturate(200%) !important;
+    border: 1px solid var(--toolbar-border-color) !important;
+    padding: 8px !important;
   }
+
+  /* Inputs */
+  .toolbarField, .dialog input, .dialog textarea {
+    border-radius: 8px !important;
+    border: 1px solid var(--toolbar-border-color) !important;
+    background-color: rgba(255, 255, 255, 0.05) !important;
+    padding: 6px 10px !important;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease !important;
+  }
+  .toolbarField:focus, .dialog input:focus {
+    border-color: #3b82f6 !important; /* Tailwind blue-500 */
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2) !important;
+    outline: none !important;
+  }
+
+  /* Scrollbars */
   ::-webkit-scrollbar {
-    width: 8px !important;
-    height: 8px !important;
+    width: 6px !important;
+    height: 6px !important;
   }
   ::-webkit-scrollbar-track {
     background: transparent !important;
+    margin: 4px !important;
   }
   ::-webkit-scrollbar-thumb {
-    background-color: rgba(128, 128, 128, 0.3) !important;
+    background-color: rgba(128, 128, 128, 0.25) !important;
     border-radius: 10px !important;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background-color: rgba(128, 128, 128, 0.5) !important;
+    background-color: rgba(128, 128, 128, 0.4) !important;
   }
 `;
 document.head.appendChild(style);
