@@ -745,6 +745,13 @@
             style="margin-top: 30px; padding-top: 20px; border-top: 1px solid var(--border-color);">
             <h3 style="color: var(--primary-color); margin-top: 0;">PDF Support</h3>
             <p style="margin-bottom: 10px;">The AI Popup Infopedia supports reading and translating PDFs using a built-in viewer.</p>
+            
+            <div style="margin-bottom: 20px; display: flex; align-items: center; gap: 10px;">
+                <label for="pdf-author-name" style="font-weight: 500;">Custom Author Name for Highlights/Comments:</label>
+                <input type="text" id="pdf-author-name" placeholder="e.g. John Doe" style="flex-grow: 1; max-width: 300px;">
+                <button id="save-pdf-author-btn" style="background-color: var(--secondary-color);">Save Name</button>
+            </div>
+            
             <div id="file-access-warning" style="display: none; background-color: rgba(239, 68, 68, 0.1); border: 1px solid var(--danger-color); padding: 15px; border-radius: 8px;">
                 <h4 style="color: var(--danger-color); margin-top: 0; margin-bottom: 5px;">Local PDF Access is Disabled</h4>
                 <p style="margin: 0; font-size: 0.9em;">To use the AI Popup on PDFs saved to your computer (file:// URLs), you must allow file access in Chrome.</p>

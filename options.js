@@ -60,6 +60,7 @@ document.addEventListener('DOMContentLoaded', () => {
   loadFollowupSettings(); // Load follow-up custom message
   loadHallucinationGuardSettings(); // Load Hallucination Guard settings
   loadSearchApiSettings(); // Load Search API settings
+  loadPdfAuthorName(); // Load Custom Author Name
 
   // Helper helper to safely add listeners
   function safeAddListener(id, event, handler) {
@@ -79,6 +80,7 @@ document.addEventListener('DOMContentLoaded', () => {
   safeAddListener('save-model-btn', 'click', saveModel);
   safeAddListener('default-prompt-select', 'change', (e) => saveDefaultPromptId(e.target.value));
   safeAddListener('cancel-model-btn', 'click', hideModelForm);
+  safeAddListener('save-pdf-author-btn', 'click', savePdfAuthorName);
   safeAddListener('save-followup-settings-btn', 'click', saveFollowupSettings);
   safeAddListener('enable-hallucination-guard', 'change', saveHallucinationGuardSettings);
   safeAddListener('verification-model-select', 'change', saveHallucinationGuardSettings);
@@ -387,7 +389,27 @@ function setDefaultModel(modelId) {
   chrome.storage.sync.set({ defaultModelId: modelId }, () => {
     updateStatus('Default model updated.', 'success');
     loadModels();
+    checkLocalPdfAccess();
   });
+}
+
+function loadPdfAuthorName() {
+  chrome.storage.local.get(['pdf_author_name'], (result) => {
+    if (result.pdf_author_name) {
+      const input = document.getElementById('pdf-author-name');
+      if (input) input.value = result.pdf_author_name;
+    }
+  });
+}
+
+function savePdfAuthorName() {
+  const input = document.getElementById('pdf-author-name');
+  if (input) {
+    const name = input.value.trim();
+    chrome.storage.local.set({ pdf_author_name: name }, () => {
+      updateStatusGlobal('Custom Author Name saved successfully!');
+    });
+  }
 }
 
 function saveDefaultPromptId(promptId) {

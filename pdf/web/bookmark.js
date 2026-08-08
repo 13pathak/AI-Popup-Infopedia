@@ -395,29 +395,7 @@ function initAnnotationPersistence() {
 initAnnotationPersistence();
 
 // --- Author Name Configuration & Popup Modifier ---
-const authorSettingsDiv = document.createElement("div");
-authorSettingsDiv.style.marginTop = "20px";
-authorSettingsDiv.style.borderTop = "1px solid #ccc";
-authorSettingsDiv.style.paddingTop = "10px";
-authorSettingsDiv.innerHTML = `
-  <label for="pdfAuthorName" style="font-size: 14px; color: #333;">Comment Author Name:</label>
-  <input type="text" id="pdfAuthorName" placeholder="Unknown" style="width: 100%; margin-top: 5px; padding: 5px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px;">
-`;
-if (dialog) {
-  dialog.insertBefore(authorSettingsDiv, dialog.lastElementChild);
-}
-
-const authorInput = document.getElementById("pdfAuthorName");
-if (authorInput) {
-  chrome.storage.local.get(['pdf_author_name'], (result) => {
-    if (result.pdf_author_name) {
-      authorInput.value = result.pdf_author_name;
-    }
-  });
-  authorInput.addEventListener("change", (e) => {
-    chrome.storage.local.set({ pdf_author_name: e.target.value.trim() });
-  });
-}
+// (UI moved to options.html)
 
 // Observe DOM for popupAnnotations to override "AI Popup Infopedia" and apply author name
 const observer = new MutationObserver((mutations) => {
