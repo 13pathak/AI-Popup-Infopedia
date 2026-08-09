@@ -706,14 +706,14 @@ function isAlreadyRedirected(tabId, url) {
 function redirectToPdfViewer(tabId, originalUrl) {
   if (isAlreadyRedirected(tabId, originalUrl)) return; // dedupe across listeners
   markRedirected(tabId, originalUrl);
-  const viewerUrl = chrome.runtime.getURL('pdf/web/viewer.html?file=' + encodeURIComponent(originalUrl));
+  const viewerUrl = chrome.runtime.getURL('pdf/web/custom-viewer.html?file=' + encodeURIComponent(originalUrl));
   chrome.tabs.update(tabId, { url: viewerUrl });
 }
 
 chrome.webNavigation.onBeforeNavigate.addListener((details) => {
   if (details.frameId !== 0) return;
   const url = details.url;
-  if (url.includes(chrome.runtime.id) && url.includes('/pdf/web/viewer.html')) return;
+  if (url.includes(chrome.runtime.id) && url.includes('/pdf/web/custom-viewer.html')) return;
   try {
     const urlObj = new URL(url);
     const isPdfExt = urlObj.pathname.toLowerCase().endsWith('.pdf');
@@ -734,7 +734,7 @@ chrome.webRequest.onHeadersReceived.addListener(
     if (details.type !== 'main_frame') return;
 
     const url = details.url;
-    if (url.includes(chrome.runtime.id) && url.includes('/pdf/web/viewer.html')) return;
+    if (url.includes(chrome.runtime.id) && url.includes('/pdf/web/custom-viewer.html')) return;
     if (isAlreadyRedirected(details.tabId, url)) return; // dedupe with webNavigation listener
 
     const contentTypeHeader = details.responseHeaders.find(h => h.name.toLowerCase() === 'content-type');

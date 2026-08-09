@@ -2348,6 +2348,7 @@ class AnnotationEditorUIManager {
     this.#pdfDocument = pdfDocument;
     this.#filterFactory = pdfDocument.filterFactory;
     this.#pageColors = pageColors;
+    console.log("[DEBUG] highlightColors passed to UIManager:", highlightColors);
     this.#highlightColors = highlightColors || null;
     this.#enableHighlightFloatingButton = enableHighlightFloatingButton;
     this.#mlManager = mlManager || null;
@@ -17263,16 +17264,22 @@ class HighlightEditor extends AnnotationEditor {
     }, true);
   }
   async addEditToolbar() {
+    console.log("[DEBUG] addEditToolbar started!");
     const toolbar = await super.addEditToolbar();
+    console.log("[DEBUG] super.addEditToolbar returned:", !!toolbar);
     if (!toolbar) {
       return null;
     }
     if (this._uiManager.highlightColors) {
+      console.log("[DEBUG] highlightColors exists, adding ColorPicker!");
       this.#colorPicker = new ColorPicker({
         editor: this
       });
       toolbar.addColorPicker(this.#colorPicker);
+    } else {
+      console.log("[DEBUG] highlightColors is MISSING!");
     }
+    console.log("[DEBUG] addEditToolbar finished and appended toolbar!");
     return toolbar;
   }
   disableEditing() {

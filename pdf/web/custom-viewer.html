@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Popup Infopedia - Custom Viewer</title>
+    <link rel="stylesheet" href="custom-viewer.css">
+</head>
+<body>
+    <div id="toolbar">
+        <div id="toolbar-left">
+            <span id="page-num-container">Page: <span id="page_num"></span> / <span id="page_count"></span></span>
+        </div>
+        <div id="toolbar-center">
+            <button id="zoom_out">-</button>
+            <span id="zoom_level">100%</span>
+            <button id="zoom_in">+</button>
+        </div>
+        <div id="toolbar-right">
+            <button id="save_pdf">Save PDF with Highlights</button>
+        </div>
+    </div>
+
+    <div id="viewerContainer">
+        <!-- Pages will be rendered here -->
+        <div id="viewer" class="pdfViewer"></div>
+    </div>
+
+    <!-- AI Popup is handled dynamically by content.js -->
+
+    <!-- Color Picker Popup -->
+    <div id="color-picker-popup" class="hidden">
+        <button class="color-btn" style="background-color: #FFFF98;" data-color="#FFFF98"></button>
+        <button class="color-btn" style="background-color: #53FFBC;" data-color="#53FFBC"></button>
+        <button class="color-btn" style="background-color: #80EBFF;" data-color="#80EBFF"></button>
+        <button class="color-btn" style="background-color: #FFCBE6;" data-color="#FFCBE6"></button>
+        <button class="color-btn" style="background-color: #FF4F5F;" data-color="#FF4F5F"></button>
+        <button id="ai-btn-new" title="Ask AI" style="background: none; border: none; cursor: pointer; font-size: 16px;">🤖</button>
+        <button id="close-color-picker">x</button>
+    </div>
+
+    <div id="edit-highlight-popup" class="hidden">
+        <button id="edit-btn-ai" title="Ask AI">🤖</button>
+        <button id="edit-btn-note" title="Add Note">💬</button>
+        <button id="edit-btn-color" title="Change Color">🎨</button>
+        <button id="edit-btn-trash" title="Delete">🗑️</button>
+    </div>
+
+    <!-- Note Editor Popup -->
+    <div id="note-editor-popup" class="hidden">
+        <textarea id="note-textarea" placeholder="Add a note..."></textarea>
+        <div id="note-editor-actions">
+            <button id="note-btn-cancel">Cancel</button>
+            <button id="note-btn-save">Save</button>
+        </div>
+    </div>
+
+    <script src="../../pdf-lib.min.js"></script>
+    <script src="../../content.js"></script>
+    <script type="module" src="custom-viewer.js"></script>
+</body>
+</html>

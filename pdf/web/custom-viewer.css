@@ -1,0 +1,245 @@
+body, html {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    background-color: #525659;
+    font-family: sans-serif;
+    overflow: hidden; /* Prevent body scroll, use viewerContainer */
+}
+
+#toolbar {
+    height: 40px;
+    background-color: #323639;
+    color: white;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 20px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.5);
+    z-index: 1000;
+    position: relative;
+}
+
+#toolbar button {
+    background: #4a4d51;
+    border: none;
+    color: white;
+    padding: 5px 10px;
+    cursor: pointer;
+    border-radius: 2px;
+}
+
+#toolbar button:hover {
+    background: #626569;
+}
+
+#viewerContainer {
+    position: absolute;
+    top: 40px;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    overflow: auto;
+}
+
+#viewer {
+    margin: 0 auto;
+    padding-top: 10px;
+    padding-bottom: 10px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.page {
+    direction: ltr;
+    position: relative;
+    box-shadow: 0px 0px 5px rgba(0,0,0,0.5);
+    background-color: white;
+    margin-bottom: 10px;
+}
+
+.textLayer{
+  position:absolute;
+  text-align:initial;
+  inset:0;
+  overflow:clip;
+  opacity:1;
+  line-height:1;
+  -webkit-text-size-adjust:none;
+     -moz-text-size-adjust:none;
+          text-size-adjust:none;
+  forced-color-adjust:none;
+  transform-origin:0 0;
+  caret-color:CanvasText;
+  z-index:0;
+}
+
+.textLayer.highlighting{
+    touch-action:none;
+  }
+
+.textLayer :is(span, br){
+    color:transparent;
+    position:absolute;
+    white-space:pre;
+    cursor:text;
+    transform-origin:0% 0%;
+  }
+
+.textLayer > :not(.markedContent),
+  .textLayer .markedContent span:not(.markedContent){
+    z-index:1;
+  }
+
+.textLayer span.markedContent{
+    top:0;
+    height:0;
+  }
+
+.textLayer ::-moz-selection{
+    background:rgba(0, 0, 255, 0.25);
+  }
+
+.textLayer ::selection{
+    background:rgba(0, 0, 255, 0.25);
+  }
+
+.textLayer br::-moz-selection{
+    background:transparent;
+  }
+
+.textLayer br::selection{
+    background:transparent;
+  }
+
+.textLayer .endOfContent{
+    display:block;
+    position:absolute;
+    inset:100% 0 0;
+    z-index:0;
+    cursor:default;
+    -webkit-user-select:none;
+       -moz-user-select:none;
+            user-select:none;
+  }
+
+.custom-highlight {
+    position: absolute;
+    mix-blend-mode: multiply;
+    pointer-events: none;
+    opacity: 0.5;
+    border-radius: 2px;
+}
+
+/* Active Highlight Styling */
+.custom-highlight.active {
+    box-shadow: 0 0 0 2px #0078D7;
+    z-index: 10;
+}
+
+#color-picker-popup, #ai-popup-container, #edit-highlight-popup, #note-editor-popup {
+    position: absolute;
+    background: white;
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    border: 1px solid #ddd;
+    z-index: 10000;
+    display: flex;
+    gap: 8px;
+    padding: 6px;
+    align-items: center;
+}
+
+#color-picker-popup.hidden, #ai-popup-container.hidden, #edit-highlight-popup.hidden, #note-editor-popup.hidden {
+    display: none;
+}
+
+#note-editor-popup {
+    flex-direction: column;
+    align-items: stretch;
+    width: 250px;
+    padding: 10px;
+}
+
+#note-textarea {
+    width: 100%;
+    height: 80px;
+    box-sizing: border-box;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    padding: 6px;
+    resize: none;
+    font-family: sans-serif;
+    font-size: 13px;
+    margin-bottom: 8px;
+}
+
+#note-editor-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+}
+
+#note-editor-actions button {
+    padding: 4px 12px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+}
+
+#note-btn-save {
+    background: #0078D7;
+    color: white;
+}
+
+#note-btn-cancel {
+    background: #f0f0f0;
+    color: #333;
+}
+
+.note-indicator {
+    position: absolute;
+    font-size: 14px;
+    cursor: pointer;
+    z-index: 5;
+    user-select: none;
+    transform: translate(-100%, -50%); /* Center vertically relative to top-left, and push completely to the left */
+    padding-right: 4px; /* small gap between emoji and text */
+}
+
+#edit-highlight-popup button {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    font-size: 18px;
+    width: 32px;
+    height: 32px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s;
+}
+
+#edit-highlight-popup button:hover {
+    background: #f0f0f0;
+}
+
+.color-btn {
+    width: 24px;
+    height: 24px;
+    border: 1px solid #ccc;
+    border-radius: 50%;
+    cursor: pointer;
+}
+
+#close-color-picker {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-weight: bold;
+    color: #666;
+}
