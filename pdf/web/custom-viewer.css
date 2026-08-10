@@ -243,3 +243,75 @@ body, html {
     font-weight: bold;
     color: #666;
 }
+
+/* Find Bar Styles */
+#findbar {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-right: 15px;
+    background: #4a4d51;
+    padding: 2px 8px;
+    border-radius: 4px;
+}
+
+#findbar input {
+    background: white;
+    border: 1px solid #ccc;
+    border-radius: 2px;
+    padding: 3px 6px;
+    font-size: 12px;
+    width: 150px;
+    outline: none;
+}
+
+#findbar span {
+    font-size: 12px;
+    min-width: 40px;
+    text-align: center;
+}
+
+#findbar button {
+    background: #323639 !important;
+    padding: 2px 6px !important;
+}
+
+#findbar button:hover {
+    background: #626569 !important;
+}
+
+/* Search Highlight Styles */
+.search-highlight {
+    position: absolute;
+    background-color: rgba(255, 255, 0, 0.4); /* yellow */
+    pointer-events: none;
+    border-radius: 2px;
+    z-index: 1; /* below text but above page */
+}
+
+.search-highlight.active {
+    background-color: rgba(255, 165, 0, 0.6); /* orange */
+    box-shadow: 0 0 2px rgba(255, 165, 0, 0.8);
+    z-index: 2;
+}
+
+/* Annotation Layer Styles (for Links) */
+.annotationLayer {
+    position: absolute;
+    inset: 0;
+    z-index: 2; /* above textLayer */
+    pointer-events: none; /* Let clicks pass through except on links */
+}
+
+.annotationLayer .linkAnnotation {
+    position: absolute;
+    pointer-events: auto; /* Enable clicks */
+    cursor: pointer;
+    background: transparent;
+    border-radius: 2px;
+}
+
+.annotationLayer .linkAnnotation:hover {
+    background: rgba(0, 120, 215, 0.2); /* light blue highlight on hover */
+    box-shadow: 0 0 2px rgba(0, 120, 215, 0.4);
+}

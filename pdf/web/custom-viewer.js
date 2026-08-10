@@ -117,6 +117,8 @@ async function renderPageContent(pageDiv) {
     
     // Draw existing highlights for this page
     drawHighlightsForPage(parseInt(pageDiv.dataset.pageNumber), pageDiv, viewport);
+    drawSearchHighlightsForPage(parseInt(pageDiv.dataset.pageNumber), pageDiv, viewport);
+    renderLinkAnnotations(page, pageDiv, viewport);
 }
 
 const pageObserver = new IntersectionObserver((entries) => {
@@ -164,31 +166,97 @@ async function renderAllPages() {
 loadPDF();
 
 // Zoom logic
+let currentZoomMode = 'custom';
+
+async function calculateScaleAndRender() {
+    if (currentZoomMode === 'custom') {
+        renderAllPages();
+        return;
+    }
+    
+    if (!pdfDoc) return;
+    
+    const page = await pdfDoc.getPage(1);
+    const unscaledViewport = page.getViewport({ scale: 1.0 });
+    const container = document.getElementById('viewerContainer');
+    const containerWidth = container.clientWidth;
+    const containerHeight = container.clientHeight;
+    
+    if (currentZoomMode === 'page-width') {
+        scale = (containerWidth - 40) / unscaledViewport.width; // 40px padding for scrollbars
+    } else if (currentZoomMode === 'page-fit') {
+        const scaleWidth = (containerWidth - 40) / unscaledViewport.width;
+        const scaleHeight = (containerHeight - 40) / unscaledViewport.height;
+        scale = Math.min(scaleWidth, scaleHeight);
+    }
+    
+    if (scale < 0.25) scale = 0.25;
+    if (scale > 5.0) scale = 5.0;
+    
+    renderAllPages();
+}
+
 document.getElementById('zoom_in').addEventListener('click', () => {
+    currentZoomMode = 'custom';
     scale += 0.25;
     renderAllPages();
 });
 
 document.getElementById('zoom_out').addEventListener('click', () => {
+    currentZoomMode = 'custom';
     if (scale <= 0.5) return;
     scale -= 0.25;
     renderAllPages();
 });
 
+document.getElementById('fit_width').addEventListener('click', () => {
+    currentZoomMode = 'page-width';
+    calculateScaleAndRender();
+});
+
+document.getElementById('fit_page').addEventListener('click', () => {
+    currentZoomMode = 'page-fit';
+    calculateScaleAndRender();
+});
+
+window.addEventListener('resize', () => {
+    if (currentZoomMode !== 'custom') {
+        calculateScaleAndRender();
+    }
+});
 // Update page number based on scroll
 const container = document.getElementById('viewerContainer');
 container.addEventListener('scroll', updatePageNumber);
 function updatePageNumber() {
+    // Do not update while the user is actively typing in the input
+    if (document.activeElement === document.getElementById('page_num')) return;
+    
     const pages = document.querySelectorAll('.page');
     const containerCenter = container.scrollTop + (container.clientHeight / 2);
     
     for (const page of pages) {
         if (page.offsetTop <= containerCenter && (page.offsetTop + page.clientHeight) > containerCenter) {
-            document.getElementById('page_num').textContent = page.dataset.pageNumber;
+            document.getElementById('page_num').value = page.dataset.pageNumber;
             break;
         }
     }
 }
+
+// Handle page navigation via input
+const pageNumInput = document.getElementById('page_num');
+pageNumInput.addEventListener('change', () => {
+    let num = parseInt(pageNumInput.value);
+    if (isNaN(num)) return;
+    if (num < 1) num = 1;
+    if (pdfDoc && num > pdfDoc.numPages) num = pdfDoc.numPages;
+    
+    pageNumInput.value = num;
+    pageNumInput.blur(); // remove focus
+    
+    if (typeof scrollToPage === 'function') {
+        scrollToPage(num);
+    }
+});
 
 // Handle text selection
 document.addEventListener('mouseup', (e) => {
@@ -668,3 +736,284 @@ document.getElementById('save_pdf').addEventListener('click', async () => {
         alert("Error saving PDF. Check console.");
     }
 });
+
+// ==================== Find Feature ====================
+let currentSearchQuery = '';
+let searchResults = [];
+let activeMatchIndex = -1;
+let isSearching = false;
+
+const findInput = document.getElementById('findInput');
+const findResultsSpan = document.getElementById('findResults');
+const findNextBtn = document.getElementById('findNext');
+const findPrevBtn = document.getElementById('findPrevious');
+
+if (findNextBtn) findNextBtn.addEventListener('click', () => navigateSearch(1));
+if (findPrevBtn) findPrevBtn.addEventListener('click', () => navigateSearch(-1));
+if (findInput) {
+    findInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            const query = findInput.value.trim();
+            if (query === currentSearchQuery && query !== '') {
+                navigateSearch(1);
+            } else {
+                performSearch(query);
+            }
+        }
+    });
+}
+
+async function performSearch(query) {
+    if (!query) {
+        clearSearch();
+        return;
+    }
+    
+    if (isSearching) return;
+    isSearching = true;
+    currentSearchQuery = query;
+    searchResults = [];
+    activeMatchIndex = -1;
+    findResultsSpan.textContent = "Searching...";
+
+    const lowerQuery = query.toLowerCase();
+
+    for (let i = 1; i <= pdfDoc.numPages; i++) {
+        const page = await pdfDoc.getPage(i);
+        const textContent = await page.getTextContent();
+        
+        let pageText = '';
+        const textItems = [];
+        
+        for (const item of textContent.items) {
+            if (!item.str && item.width === 0) continue;
+            
+            textItems.push({
+                ...item,
+                startIndex: pageText.length,
+                endIndex: pageText.length + item.str.length
+            });
+            pageText += item.str;
+            
+            if (item.hasEOL) {
+                pageText += ' ';
+            }
+        }
+        
+        const lowerPageText = pageText.toLowerCase();
+        
+        let startIndex = 0;
+        let index;
+        while ((index = lowerPageText.indexOf(lowerQuery, startIndex)) > -1) {
+            const matchStart = index;
+            const matchEnd = index + lowerQuery.length;
+            
+            const matchItems = textItems.filter(item => 
+                (matchStart < item.endIndex) && (matchEnd > item.startIndex)
+            );
+            
+            if (matchItems.length > 0) {
+                const rects = matchItems.map(item => {
+                    const height = Math.abs(item.transform[3]);
+                    return {
+                        pdfX: item.transform[4],
+                        pdfY: item.transform[5] + height, // top edge
+                        pdfWidth: item.width,
+                        pdfHeight: height
+                    };
+                });
+                
+                searchResults.push({
+                    pageNumber: i,
+                    rects: rects
+                });
+            }
+            startIndex = index + 1;
+        }
+    }
+    
+    isSearching = false;
+    
+    if (searchResults.length > 0) {
+        activeMatchIndex = 0;
+        updateSearchUI();
+        renderAllSearchHighlights();
+        scrollToActiveMatch();
+    } else {
+        findResultsSpan.textContent = "0 / 0";
+        renderAllSearchHighlights();
+    }
+}
+
+function clearSearch() {
+    currentSearchQuery = '';
+    searchResults = [];
+    activeMatchIndex = -1;
+    findResultsSpan.textContent = "0 / 0";
+    renderAllSearchHighlights();
+}
+
+function navigateSearch(direction) {
+    if (searchResults.length === 0) return;
+    
+    activeMatchIndex += direction;
+    if (activeMatchIndex >= searchResults.length) activeMatchIndex = 0;
+    if (activeMatchIndex < 0) activeMatchIndex = searchResults.length - 1;
+    
+    updateSearchUI();
+    renderAllSearchHighlights();
+    scrollToActiveMatch();
+}
+
+function updateSearchUI() {
+    findResultsSpan.textContent = `${activeMatchIndex + 1} / ${searchResults.length}`;
+}
+
+function scrollToActiveMatch() {
+    if (activeMatchIndex === -1) return;
+    const match = searchResults[activeMatchIndex];
+    
+    const pageDiv = document.querySelector(`.page[data-page-number="${match.pageNumber}"]`);
+    if (pageDiv) {
+        const container = document.getElementById('viewerContainer');
+        const containerRect = container.getBoundingClientRect();
+        const pageRect = pageDiv.getBoundingClientRect();
+        
+        if (pageRect.top < containerRect.top || pageRect.bottom > containerRect.bottom) {
+            container.scrollTop = container.scrollTop + (pageRect.top - containerRect.top) - 20;
+        }
+    } else {
+        // Find approximate position if page not rendered yet
+        const container = document.getElementById('viewerContainer');
+        // We know roughly 800px per page or just scroll by percentage
+        const scrollHeight = container.scrollHeight;
+        container.scrollTop = (match.pageNumber / pdfDoc.numPages) * scrollHeight;
+    }
+}
+
+function drawSearchHighlightsForPage(pageNumber, pageDiv, viewport) {
+    pageDiv.querySelectorAll('.search-highlight').forEach(el => el.remove());
+    if (searchResults.length === 0) return;
+    
+    searchResults.forEach((match, index) => {
+        if (match.pageNumber === pageNumber) {
+            match.rects.forEach(r => {
+                const div = document.createElement('div');
+                div.className = 'search-highlight';
+                if (index === activeMatchIndex) div.classList.add('active');
+                
+                const pt1 = viewport.convertToViewportPoint(r.pdfX, r.pdfY);
+                const pt2 = viewport.convertToViewportPoint(r.pdfX + r.pdfWidth, r.pdfY - r.pdfHeight);
+                
+                const cssLeft = Math.min(pt1[0], pt2[0]);
+                const cssTop = Math.min(pt1[1], pt2[1]);
+                const cssWidth = Math.abs(pt2[0] - pt1[0]);
+                const cssHeight = Math.abs(pt2[1] - pt1[1]);
+
+                div.style.left = `${cssLeft}px`;
+                div.style.top = `${cssTop}px`;
+                div.style.width = `${cssWidth}px`;
+                div.style.height = `${cssHeight}px`;
+                pageDiv.appendChild(div);
+            });
+        }
+    });
+}
+
+function renderAllSearchHighlights() {
+    const pages = document.querySelectorAll('.page[data-loaded="true"]');
+    pages.forEach(pageDiv => {
+        const pageNum = parseInt(pageDiv.dataset.pageNumber);
+        if (pageDiv._viewport) {
+            drawSearchHighlightsForPage(pageNum, pageDiv, pageDiv._viewport);
+        }
+    });
+}
+
+// Intercept Ctrl+F / Cmd+F to focus custom find bar
+document.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
+        e.preventDefault();
+        const findInput = document.getElementById('findInput');
+        if (findInput) {
+            findInput.focus();
+            findInput.select();
+        }
+    }
+});
+
+// ==================== Interactive Links ====================
+async function renderLinkAnnotations(page, pageDiv, viewport) {
+    try {
+        const annots = await page.getAnnotations();
+        const linkAnnots = annots.filter(a => a.subtype === 'Link');
+        
+        if (linkAnnots.length === 0) return;
+        
+        const annotationLayerDiv = document.createElement('div');
+        annotationLayerDiv.className = 'annotationLayer';
+        pageDiv.appendChild(annotationLayerDiv);
+        
+        linkAnnots.forEach(annot => {
+            if (!annot.rect) return;
+            
+            const rect = annot.rect;
+            const pt1 = viewport.convertToViewportPoint(rect[0], rect[1]);
+            const pt2 = viewport.convertToViewportPoint(rect[2], rect[3]);
+            
+            const cssLeft = Math.min(pt1[0], pt2[0]);
+            const cssTop = Math.min(pt1[1], pt2[1]);
+            const cssWidth = Math.abs(pt2[0] - pt1[0]);
+            const cssHeight = Math.abs(pt2[1] - pt1[1]);
+            
+            const linkEl = document.createElement('div');
+            linkEl.className = 'linkAnnotation';
+            linkEl.style.left = `${cssLeft}px`;
+            linkEl.style.top = `${cssTop}px`;
+            linkEl.style.width = `${cssWidth}px`;
+            linkEl.style.height = `${cssHeight}px`;
+            linkEl.title = annot.url || "Go to page";
+            
+            linkEl.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                if (annot.url) {
+                    window.open(annot.url, '_blank', 'noopener,noreferrer');
+                } else if (annot.dest) {
+                    try {
+                        let dest = annot.dest;
+                        if (typeof dest === 'string') {
+                            dest = await pdfDoc.getDestination(dest);
+                        }
+                        
+                        if (dest && dest[0]) {
+                            const pageIndex = await pdfDoc.getPageIndex(dest[0]);
+                            const targetPageNumber = pageIndex + 1;
+                            scrollToPage(targetPageNumber);
+                        }
+                    } catch (err) {
+                        console.error("Error resolving link destination:", err);
+                    }
+                }
+            });
+            
+            annotationLayerDiv.appendChild(linkEl);
+        });
+    } catch (e) {
+        console.error("Error rendering annotations", e);
+    }
+}
+
+function scrollToPage(pageNumber) {
+    const pageDiv = document.querySelector(`.page[data-page-number="${pageNumber}"]`);
+    const container = document.getElementById('viewerContainer');
+    if (pageDiv) {
+        const containerRect = container.getBoundingClientRect();
+        const pageRect = pageDiv.getBoundingClientRect();
+        container.scrollTop = container.scrollTop + (pageRect.top - containerRect.top) - 20;
+    } else {
+        // Approximate position if page not loaded yet
+        const scrollHeight = container.scrollHeight;
+        container.scrollTop = ((pageNumber - 1) / pdfDoc.numPages) * scrollHeight;
+    }
+}
+

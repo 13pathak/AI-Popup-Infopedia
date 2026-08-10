@@ -8,15 +8,26 @@
 </head>
 <body>
     <div id="toolbar">
-        <div id="toolbar-left">
-            <span id="page-num-container">Page: <span id="page_num"></span> / <span id="page_count"></span></span>
+        <div id="toolbar-left" style="display: flex; align-items: center; gap: 5px;">
+            <span>Page:</span>
+            <input type="number" id="page_num" value="1" min="1" style="width: 50px; text-align: center; background: #4a4d51; color: white; border: 1px solid #666; border-radius: 2px;">
+            <span>/ <span id="page_count"></span></span>
         </div>
-        <div id="toolbar-center">
-            <button id="zoom_out">-</button>
-            <span id="zoom_level">100%</span>
-            <button id="zoom_in">+</button>
+        <div id="toolbar-center" style="display: flex; align-items: center; gap: 5px;">
+            <button id="zoom_out" title="Zoom Out">-</button>
+            <span id="zoom_level" style="min-width: 45px; text-align: center;">100%</span>
+            <button id="zoom_in" title="Zoom In">+</button>
+            <div style="width: 10px;"></div>
+            <button id="fit_width" title="Fit to Width">Fit Width</button>
+            <button id="fit_page" title="Fit to Page">Fit Page</button>
         </div>
         <div id="toolbar-right">
+            <div id="findbar">
+                <input type="text" id="findInput" placeholder="Find in document..." />
+                <span id="findResults">0 / 0</span>
+                <button id="findPrevious" title="Previous match">↑</button>
+                <button id="findNext" title="Next match">↓</button>
+            </div>
             <button id="save_pdf">Save PDF with Highlights</button>
         </div>
     </div>
