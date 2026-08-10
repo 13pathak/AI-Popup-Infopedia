@@ -20,6 +20,8 @@
             <div style="width: 10px;"></div>
             <button id="fit_width" title="Fit to Width">Fit Width</button>
             <button id="fit_page" title="Fit to Page">Fit Page</button>
+            <div style="width: 10px;"></div>
+            <button id="dark_mode_toggle" title="Toggle Dark Mode">🌙 Dark Mode</button>
         </div>
         <div id="toolbar-right">
             <div id="findbar">
@@ -28,26 +30,64 @@
                 <button id="findPrevious" title="Previous match">↑</button>
                 <button id="findNext" title="Next match">↓</button>
             </div>
-            <button id="save_pdf">Save PDF with Highlights</button>
+            <button id="bookmark_page" title="Bookmark current page">📌 Bookmark</button>
+            <button id="summarize_page" title="Summarize current page">✨ Summarize Page</button>
+            <button id="export_md" title="Export Notes to Markdown">📝 Export MD</button>
+            <button id="save_pdf" title="Save PDF with Highlights">💾 Save</button>
         </div>
     </div>
 
-    <div id="viewerContainer">
-        <!-- Pages will be rendered here -->
-        <div id="viewer" class="pdfViewer"></div>
+    <div id="mainContainer">
+        <div id="viewerContainer">
+            <!-- Pages will be rendered here -->
+            <div id="viewer" class="pdfViewer"></div>
+        </div>
+        <div id="sidebar" class="hidden">
+            <div id="sidebar-header">
+                <button id="close_sidebar">✕</button>
+                <h3 id="sidebar-title">Bookmarks</h3>
+                <div id="sidebar-header-actions" style="flex:1; text-align:right;">
+                    <!-- Additional icons could go here -->
+                </div>
+            </div>
+            <div id="sidebar-content-bookmarks" class="hidden">
+                <!-- Bookmarks will be dynamically injected here -->
+            </div>
+            <div id="sidebar-content-comments" class="hidden">
+                <!-- Highlights will be dynamically injected here -->
+            </div>
+            <div id="sidebar-content-outline" class="hidden">
+                <!-- Outline will be dynamically injected here -->
+            </div>
+        </div>
+        
+        <!-- Sidebar Icons Strip (Always visible on the right) -->
+        <div id="sidebar-icons">
+            <button id="icon-tab-bookmarks" title="Bookmarks" data-tab="bookmarks">📌</button>
+            <button id="icon-tab-outline" title="Outline" data-tab="outline">📑</button>
+            <button id="icon-tab-comments" title="Comments" data-tab="comments">💬</button>
+        </div>
     </div>
 
     <!-- AI Popup is handled dynamically by content.js -->
 
     <!-- Color Picker Popup -->
     <div id="color-picker-popup" class="hidden">
-        <button class="color-btn" style="background-color: #FFFF98;" data-color="#FFFF98"></button>
-        <button class="color-btn" style="background-color: #53FFBC;" data-color="#53FFBC"></button>
-        <button class="color-btn" style="background-color: #80EBFF;" data-color="#80EBFF"></button>
-        <button class="color-btn" style="background-color: #FFCBE6;" data-color="#FFCBE6"></button>
-        <button class="color-btn" style="background-color: #FF4F5F;" data-color="#FF4F5F"></button>
-        <button id="ai-btn-new" title="Ask AI" style="background: none; border: none; cursor: pointer; font-size: 16px;">🤖</button>
-        <button id="close-color-picker">x</button>
+        <div id="markup-tools" style="display: flex; gap: 5px; margin-bottom: 5px; justify-content: center; border-bottom: 1px solid #ccc; padding-bottom: 5px;">
+            <button class="markup-tool-btn active" data-type="Highlight" title="Highlight">🖌️</button>
+            <button class="markup-tool-btn" data-type="Underline" title="Underline"><u>U</u></button>
+            <button class="markup-tool-btn" data-type="StrikeOut" title="Strikethrough"><s>S</s></button>
+            <div style="flex:1"></div>
+            <button id="ai-btn-new" title="Ask AI" style="background: none; border: none; cursor: pointer; font-size: 14px; padding: 2px;">🤖</button>
+            <button id="close-color-picker" style="background: none; border: none; cursor: pointer; color: #666; font-size: 14px; padding: 2px;">x</button>
+        </div>
+        <div id="color-tools" style="display: flex; gap: 5px; justify-content: center;">
+            <button class="color-btn" style="background-color: #FFFF98;" data-color="#FFFF98"></button>
+            <button class="color-btn" style="background-color: #53FFBC;" data-color="#53FFBC"></button>
+            <button class="color-btn" style="background-color: #80EBFF;" data-color="#80EBFF"></button>
+            <button class="color-btn" style="background-color: #FFCBE6;" data-color="#FFCBE6"></button>
+            <button class="color-btn" style="background-color: #FF4F5F;" data-color="#FF4F5F"></button>
+        </div>
     </div>
 
     <div id="edit-highlight-popup" class="hidden">

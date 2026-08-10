@@ -530,7 +530,7 @@ document.addEventListener('mouseup', (event) => {
 // --- NEW: Custom event listener for programmatic trigger from custom viewer ---
 document.addEventListener('trigger-ai-popup', (e) => {
   if (e.detail && e.detail.rect && e.detail.text) {
-    initiatePopupSequence(e.detail.rect, e.detail.text);
+    initiatePopupSequence(e.detail.rect, e.detail.text, e.detail.prompt);
   }
 });
 
@@ -620,7 +620,7 @@ function showOpenButtonPopup(rect, selectedText) {
 
   const openBtn = document.createElement('button');
   openBtn.id = 'ai-open-button-popup';
-  openBtn.textContent = 'Open';
+  openBtn.textContent = 'Ask AI';
 
   // Position it a bit above the selection if possible
   const topPos = rect.top >= 40 ? rect.top - 40 : rect.bottom + 10;
@@ -651,7 +651,7 @@ function showOpenButtonPopup(rect, selectedText) {
 }
 
 // --- NEW: Helper to start the popup logic (extracted from mouseup) ---
-function initiatePopupSequence(rect, selectedText) {
+function initiatePopupSequence(rect, selectedText, customPrompt) {
   // A second selection while a request is still running used to leave another
   // loading card on the page. Keep normal stacked conversations, but replace
   // an unfinished request so the UI never accumulates stuck loaders.
@@ -677,7 +677,10 @@ function initiatePopupSequence(rect, selectedText) {
       if (actions) actions.remove();
     }
 
-    chrome.runtime.sendMessage({ type: "getAiDefinition", word: selectedText }, (response) => {
+    const payload = { type: "getAiDefinition", word: selectedText };
+    if (customPrompt) payload.customPrompt = customPrompt;
+
+    chrome.runtime.sendMessage(payload, (response) => {
       // Verify instance still exists (user might have closed it)
       if (!activePopups.includes(popupInstance)) return;
       popupInstance.isLoading = false;
@@ -933,9 +936,9 @@ function renderMessages(instance) {
     });
 
     // Automatically scroll to bottom if it overflows
-    if (contentWrapper.scrollHeight > contentWrapper.clientHeight) {
-       contentWrapper.scrollTop = contentWrapper.scrollHeight;
-    }
+    // if (contentWrapper.scrollHeight > contentWrapper.clientHeight) {
+    //    contentWrapper.scrollTop = contentWrapper.scrollHeight;
+    // }
   } catch (err) {
     console.error("Popup render loop crashed:", err);
     contentWrapper.insertAdjacentHTML('beforeend', `<div style="color: red;">Error rendering messages: ${err.message}</div>`);
@@ -1989,9 +1992,9 @@ function showSearchGroundedIndicator(popupInstance) {
   indicator.innerHTML = `🌐 <strong style="color:#7dd3fc;">Search Grounded</strong> <span style="opacity:0.8">· Response is based on live web results. Hallucination Guard bypassed.</span>`;
   contentWrapper.appendChild(indicator);
 
-  if (contentWrapper.scrollHeight > contentWrapper.clientHeight) {
-    contentWrapper.scrollTop = contentWrapper.scrollHeight;
-  }
+  // if (contentWrapper.scrollHeight > contentWrapper.clientHeight) {
+  //   contentWrapper.scrollTop = contentWrapper.scrollHeight;
+  // }
 }
 
 // --- NEW: Hallucination Verification UI Logic ---
@@ -2014,9 +2017,9 @@ function triggerVerification(popupInstance, originalPrompt, aiResponse) {
   
   contentWrapper.appendChild(indicator);
   
-  if (contentWrapper.scrollHeight > contentWrapper.clientHeight) {
-     contentWrapper.scrollTop = contentWrapper.scrollHeight;
-  }
+  // if (contentWrapper.scrollHeight > contentWrapper.clientHeight) {
+  //    contentWrapper.scrollTop = contentWrapper.scrollHeight;
+  // }
 
   chrome.runtime.sendMessage({ 
     type: "verifyAiResponse", 
@@ -2071,15 +2074,15 @@ function triggerVerification(popupInstance, originalPrompt, aiResponse) {
             detailsDiv.style.display = 'none';
             toggleBtn.textContent = 'View reasoning';
          }
-         if (contentWrapper.scrollHeight > contentWrapper.clientHeight) {
-            contentWrapper.scrollTop = contentWrapper.scrollHeight;
-         }
+         // if (contentWrapper.scrollHeight > contentWrapper.clientHeight) {
+         //    contentWrapper.scrollTop = contentWrapper.scrollHeight;
+         // }
       });
     }
     
-    if (contentWrapper.scrollHeight > contentWrapper.clientHeight) {
-       contentWrapper.scrollTop = contentWrapper.scrollHeight;
-    }
+    // if (contentWrapper.scrollHeight > contentWrapper.clientHeight) {
+    //    contentWrapper.scrollTop = contentWrapper.scrollHeight;
+    // }
   });
 }
 

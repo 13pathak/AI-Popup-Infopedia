@@ -34,13 +34,21 @@ body, html {
     background: #626569;
 }
 
-#viewerContainer {
+#mainContainer {
     position: absolute;
     top: 40px;
     bottom: 0;
     left: 0;
     right: 0;
+    display: flex;
+    flex-direction: row;
+}
+
+#viewerContainer {
+    flex: 1;
+    position: relative;
     overflow: auto;
+    background-color: #525659;
 }
 
 #viewer {
@@ -152,8 +160,44 @@ body, html {
     align-items: center;
 }
 
-#color-picker-popup.hidden, #ai-popup-container.hidden, #edit-highlight-popup.hidden, #note-editor-popup.hidden {
-    display: none;
+#color-picker-popup {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 8px;
+}
+
+.markup-tool-btn {
+    background: none;
+    border: 1px solid transparent;
+    cursor: pointer;
+    font-size: 14px;
+    padding: 2px 6px;
+    border-radius: 3px;
+}
+.markup-tool-btn:hover {
+    background: #e0e0e0;
+}
+.markup-tool-btn.active {
+    background: #d0e8ff;
+    border: 1px solid #0078D7;
+}
+
+/* Rendering styles for markups */
+.custom-highlight.markup-underline {
+    background-color: transparent !important;
+    border-bottom: 2px solid;
+    box-sizing: border-box;
+}
+
+.custom-highlight.markup-strikethrough {
+    background-color: transparent !important;
+    border-bottom: 2px solid;
+    transform: translateY(-50%);
+    box-sizing: border-box;
+}
+
+.hidden {
+    display: none !important;
 }
 
 #note-editor-popup {
@@ -314,4 +358,267 @@ body, html {
 .annotationLayer .linkAnnotation:hover {
     background: rgba(0, 120, 215, 0.2); /* light blue highlight on hover */
     box-shadow: 0 0 2px rgba(0, 120, 215, 0.4);
+}
+
+/* Sidebar Styles */
+#sidebar {
+    width: 300px;
+    background: white;
+    border-left: 1px solid #ccc;
+    display: flex;
+    flex-direction: column;
+    box-shadow: -2px 0 5px rgba(0,0,0,0.1);
+    z-index: 1000;
+}
+
+
+#sidebar-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 15px;
+    background: #f5f5f5;
+    border-bottom: 1px solid #ddd;
+}
+
+#sidebar-header h3 {
+    margin: 0;
+    font-size: 14px;
+    color: #333;
+}
+
+#sidebar-header-actions button {
+    background: none;
+    border: none;
+    font-size: 14px;
+    cursor: pointer;
+    color: #555;
+    padding: 0 4px;
+}
+
+#sidebar-header-actions button:hover {
+    color: #000;
+}
+
+#close_sidebar {
+    background: none !important;
+    border: none;
+    color: #666 !important;
+    font-size: 16px;
+    cursor: pointer;
+    padding: 0 !important;
+    margin-right: 10px;
+}
+
+#close_sidebar:hover {
+    color: #000 !important;
+}
+
+.sidebar-pane {
+    flex: 1;
+    overflow-y: auto;
+    padding: 10px;
+}
+
+/* Sidebar Icons Strip */
+#sidebar-icons {
+    width: 40px;
+    background: #f5f5f5;
+    border-left: 1px solid #ddd;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding-top: 10px;
+    z-index: 1001;
+}
+
+#sidebar-icons button {
+    background: none;
+    border: none;
+    font-size: 18px;
+    padding: 10px 0;
+    width: 100%;
+    cursor: pointer;
+    color: #555;
+    transition: background 0.2s, color 0.2s;
+}
+
+#sidebar-icons button:hover {
+    background: #e0e0e0;
+    color: #000;
+}
+
+#sidebar-icons button.active {
+    background: #fff;
+    border-left: 3px solid #0078D7;
+    color: #0078D7;
+}
+
+/* Outline List Styles (Adobe Reader Style) */
+#sidebar-content-outline {
+    padding: 10px 0; /* less horizontal padding for full width items */
+}
+
+.outline-item {
+    font-size: 13px;
+    color: #333;
+    line-height: 1.5;
+    display: flex;
+    flex-direction: column;
+}
+
+.outline-item-title {
+    padding: 4px 10px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+}
+
+.outline-item-title:hover {
+    background-color: #e6f3ff;
+}
+
+.outline-item-title a {
+    text-decoration: none;
+    color: inherit;
+    display: block;
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.outline-toggle {
+    width: 16px;
+    height: 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 4px;
+    cursor: pointer;
+    font-size: 10px;
+    color: #666;
+    user-select: none;
+    transition: transform 0.2s;
+}
+
+.outline-toggle:hover {
+    color: #000;
+}
+
+.outline-toggle.collapsed {
+    transform: rotate(-90deg);
+}
+
+.outline-children {
+    padding-left: 16px;
+}
+
+
+.sidebar-item {
+    background: #fff;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    padding: 10px;
+    margin-bottom: 10px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    cursor: pointer;
+    transition: box-shadow 0.2s;
+}
+
+.sidebar-item:hover {
+    box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+}
+
+.sidebar-item-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+}
+
+.sidebar-item-page {
+    font-size: 11px;
+    color: #666;
+    font-weight: bold;
+}
+
+.sidebar-item-color {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: 1px solid #ccc;
+}
+
+.sidebar-item-text {
+    font-size: 13px;
+    color: #333;
+    line-height: 1.4;
+    margin-bottom: 8px;
+    font-style: italic;
+    background: #f9f9f9;
+    padding: 4px;
+    border-left: 2px solid #ccc;
+}
+
+.sidebar-item-note-input {
+    width: 100%;
+    box-sizing: border-box;
+    font-size: 12px;
+    font-family: inherit;
+    padding: 6px;
+    border: 1px solid #ddd;
+    border-radius: 3px;
+    resize: vertical;
+    min-height: 40px;
+}
+
+.sidebar-item-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 6px;
+}
+
+.sidebar-item-actions button {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 12px;
+    color: #0078D7;
+    padding: 2px 6px;
+}
+
+.sidebar-item-actions button:hover {
+    text-decoration: underline;
+}
+
+.sidebar-item-delete {
+    color: #d32f2f !important;
+}
+
+/* --- Dark Mode Styles --- */
+body.dark-mode {
+    background-color: #080808;
+}
+
+body.dark-mode #viewerContainer {
+    background-color: #080808;
+}
+
+/* Invert the canvas and text layer, keeping colors mostly correct by hue-rotating 180deg */
+body.dark-mode .page {
+    filter: invert(90%) hue-rotate(180deg);
+    box-shadow: none;
+    border: 1px solid #ddd; /* When inverted, becomes a subtle dark gray border */
+}
+
+/* Ensure the toolbar stays the same or slightly darker if needed, but it's already dark */
+body.dark-mode #toolbar {
+    background-color: #222;
+}
+body.dark-mode #toolbar button {
+    background: #333;
+}
+body.dark-mode #toolbar button:hover {
+    background: #444;
 }

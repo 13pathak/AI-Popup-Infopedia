@@ -14,6 +14,11 @@ let highlightCounter = 0;
 let currentSelection = null; // Store temp selection
 let activeHighlightId = null;
 
+// Store bookmarks in memory: { id: 1, pageNum: 5, title: 'Chapter 1' }
+let bookmarks = [];
+let bookmarkCounter = 0;
+let autoSavedLastPage = 1;
+
 // Extract PDF URL from query string, e.g. custom-viewer.html?file=abc.pdf
 const urlParams = new URLSearchParams(window.location.search);
 let fileUrl = urlParams.get('file');
@@ -23,21 +28,35 @@ if (!fileUrl) {
     fileUrl = '../../test.pdf';
 }
 
-async function loadHighlights() {
+async function loadStorageData() {
     return new Promise((resolve) => {
         if (!chrome || !chrome.storage) {
             resolve(); // Not running in extension context
             return;
         }
         
-        const storageKey = 'pdf_highlights_' + fileUrl;
-        chrome.storage.local.get([storageKey], (result) => {
-            if (result[storageKey]) {
-                highlights = result[storageKey];
+        const highlightsKey = 'pdf_highlights_' + fileUrl;
+        const bookmarksKey = 'pdf_bookmarks_' + fileUrl;
+        const lastPageKey = 'pdf_lastpage_' + fileUrl;
+        
+        chrome.storage.local.get([highlightsKey, bookmarksKey, lastPageKey], (result) => {
+            if (result[highlightsKey]) {
+                highlights = result[highlightsKey];
                 if (highlights.length > 0) {
                     highlightCounter = Math.max(...highlights.map(h => h.id || 0));
                 }
             }
+            if (result[bookmarksKey]) {
+                bookmarks = result[bookmarksKey];
+                if (bookmarks.length > 0) {
+                    bookmarkCounter = Math.max(...bookmarks.map(b => b.id || 0));
+                }
+            }
+            if (result[lastPageKey]) {
+                autoSavedLastPage = parseInt(result[lastPageKey], 10) || 1;
+            }
+            if (typeof renderSidebar === 'function') renderSidebar();
+            if (typeof renderBookmarks === 'function') renderBookmarks();
             resolve();
         });
     });
@@ -47,6 +66,20 @@ function saveHighlights() {
     if (!chrome || !chrome.storage) return;
     const storageKey = 'pdf_highlights_' + fileUrl;
     chrome.storage.local.set({ [storageKey]: highlights });
+    if (typeof renderSidebar === 'function') renderSidebar();
+}
+
+function saveBookmarks() {
+    if (!chrome || !chrome.storage) return;
+    const storageKey = 'pdf_bookmarks_' + fileUrl;
+    chrome.storage.local.set({ [storageKey]: bookmarks });
+    if (typeof renderBookmarks === 'function') renderBookmarks();
+}
+
+function saveLastPage(pageNum) {
+    if (!chrome || !chrome.storage) return;
+    const storageKey = 'pdf_lastpage_' + fileUrl;
+    chrome.storage.local.set({ [storageKey]: pageNum });
 }
 
 async function setupPage(num) {
@@ -56,8 +89,8 @@ async function setupPage(num) {
     // Create wrapper for this page
     const pageDiv = document.createElement('div');
     pageDiv.className = 'page';
-    pageDiv.style.width = `${Math.floor(viewport.width)}px`;
-    pageDiv.style.height = `${Math.floor(viewport.height)}px`;
+    pageDiv.style.width = `${viewport.width}px`;
+    pageDiv.style.height = `${viewport.height}px`;
     pageDiv.dataset.pageNumber = num;
     pageDiv.dataset.loaded = "false";
     
@@ -75,22 +108,25 @@ async function renderPageContent(pageDiv) {
 
     const page = pageDiv._pdfPage;
     const viewport = pageDiv._viewport;
-    const outputScale = window.devicePixelRatio || 1;
+    // Ensure ultra-crisp text by rendering at a higher internal resolution (at least 2x)
+    const outputScale = Math.max(window.devicePixelRatio || 1, 2);
 
     // Create canvas
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     canvas.width = Math.floor(viewport.width * outputScale);
     canvas.height = Math.floor(viewport.height * outputScale);
-    canvas.style.width = Math.floor(viewport.width) + "px";
-    canvas.style.height =  Math.floor(viewport.height) + "px";
+    
+    // Use exact floating point dimensions for CSS to avoid subpixel scaling blur
+    canvas.style.width = viewport.width + "px";
+    canvas.style.height = viewport.height + "px";
     pageDiv.appendChild(canvas);
 
     // Create text layer
     const textLayerDiv = document.createElement('div');
     textLayerDiv.className = 'textLayer';
-    textLayerDiv.style.width = `${Math.floor(viewport.width)}px`;
-    textLayerDiv.style.height = `${Math.floor(viewport.height)}px`;
+    textLayerDiv.style.width = `${viewport.width}px`;
+    textLayerDiv.style.height = `${viewport.height}px`;
     textLayerDiv.style.setProperty('--scale-factor', viewport.scale);
     pageDiv.appendChild(textLayerDiv);
 
@@ -134,10 +170,21 @@ const pageObserver = new IntersectionObserver((entries) => {
 
 async function loadPDF() {
     try {
-        await loadHighlights();
+        await loadStorageData();
         pdfDoc = await pdfjsLib.getDocument(fileUrl).promise;
         pageCountSpan.textContent = pdfDoc.numPages;
-        renderAllPages();
+        await renderAllPages();
+        
+        pdfDoc.getOutline().then(outline => {
+            renderOutline(outline);
+        }).catch(err => console.error("Error fetching outline", err));
+        
+        // Auto-resume
+        if (autoSavedLastPage > 1 && autoSavedLastPage <= pdfDoc.numPages) {
+            setTimeout(() => {
+                scrollToPage(autoSavedLastPage);
+            }, 300); // small delay to ensure rendering has caught up
+        }
     } catch (e) {
         console.error("Error loading PDF:", e);
     }
@@ -227,6 +274,8 @@ window.addEventListener('resize', () => {
 // Update page number based on scroll
 const container = document.getElementById('viewerContainer');
 container.addEventListener('scroll', updatePageNumber);
+let scrollSaveTimeout = null;
+
 function updatePageNumber() {
     // Do not update while the user is actively typing in the input
     if (document.activeElement === document.getElementById('page_num')) return;
@@ -236,7 +285,17 @@ function updatePageNumber() {
     
     for (const page of pages) {
         if (page.offsetTop <= containerCenter && (page.offsetTop + page.clientHeight) > containerCenter) {
-            document.getElementById('page_num').value = page.dataset.pageNumber;
+            const currentNum = parseInt(page.dataset.pageNumber, 10);
+            document.getElementById('page_num').value = currentNum;
+            
+            // Auto-resume save logic (debounced to avoid spamming storage)
+            if (autoSavedLastPage !== currentNum) {
+                autoSavedLastPage = currentNum;
+                clearTimeout(scrollSaveTimeout);
+                scrollSaveTimeout = setTimeout(() => {
+                    saveLastPage(currentNum);
+                }, 1000);
+            }
             break;
         }
     }
@@ -354,6 +413,16 @@ function hidePopups() {
     document.querySelectorAll('.custom-highlight.active').forEach(el => el.classList.remove('active'));
 }
 
+// Markup tools logic
+let currentMarkupType = 'Highlight';
+document.querySelectorAll('.markup-tool-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+        document.querySelectorAll('.markup-tool-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentMarkupType = btn.dataset.type;
+    });
+});
+
 // Color buttons logic
 document.querySelectorAll('.color-btn').forEach(btn => {
     btn.addEventListener('click', (e) => {
@@ -364,9 +433,12 @@ document.querySelectorAll('.color-btn').forEach(btn => {
             const hl = highlights.find(h => h.id === activeHighlightId);
             if (hl) {
                 hl.color = color;
-                // re-draw all pages just to be safe, or just find its divs
                 document.querySelectorAll(`.custom-highlight[data-hl-id="${hl.id}"]`).forEach(el => {
-                    el.style.backgroundColor = color;
+                    if (hl.markupType === 'Underline' || hl.markupType === 'StrikeOut') {
+                        el.style.borderColor = color;
+                    } else {
+                        el.style.backgroundColor = color;
+                    }
                 });
                 saveHighlights();
             }
@@ -381,7 +453,8 @@ document.querySelectorAll('.color-btn').forEach(btn => {
             pageNumber: currentSelection.pageNumber,
             rects: currentSelection.rects,
             color: color,
-            text: currentSelection.text
+            text: currentSelection.text,
+            markupType: currentMarkupType
         };
         
         highlights.push(hl);
@@ -423,7 +496,17 @@ function drawHighlight(hl, pageDiv, viewport) {
         div.style.top = `${cssTop}px`;
         div.style.width = `${cssWidth}px`;
         div.style.height = `${cssHeight}px`;
-        div.style.backgroundColor = hl.color;
+        
+        const mType = hl.markupType || 'Highlight';
+        if (mType === 'Underline') {
+            div.classList.add('markup-underline');
+            div.style.borderColor = hl.color;
+        } else if (mType === 'StrikeOut') {
+            div.classList.add('markup-strikethrough');
+            div.style.borderColor = hl.color;
+        } else {
+            div.style.backgroundColor = hl.color;
+        }
         pageDiv.appendChild(div);
     });
 
@@ -584,6 +667,66 @@ document.getElementById('ai-btn-new').addEventListener('click', () => {
     hidePopups();
 });
 
+document.getElementById('dark_mode_toggle').addEventListener('click', () => {
+    document.body.classList.toggle('dark-mode');
+    const isDark = document.body.classList.contains('dark-mode');
+    const btn = document.getElementById('dark_mode_toggle');
+    btn.innerHTML = isDark ? '☀️ Light Mode' : '🌙 Dark Mode';
+});
+
+document.getElementById('bookmark_page').addEventListener('click', () => {
+    const pageNum = parseInt(document.getElementById('page_num').value) || 1;
+    
+    // Check if already bookmarked
+    if (bookmarks.some(b => b.pageNumber === pageNum)) {
+        alert(`Page ${pageNum} is already bookmarked!`);
+        return;
+    }
+    
+    const customName = prompt(`Enter a name for this bookmark:`, `Page ${pageNum}`);
+    if (customName !== null) { // if not cancelled
+        bookmarkCounter++;
+        const newBookmark = {
+            id: bookmarkCounter,
+            pageNumber: pageNum,
+            title: customName.trim() || `Page ${pageNum}`
+        };
+        bookmarks.push(newBookmark);
+        saveBookmarks();
+        
+        // Open the bookmarks sidebar tab to show feedback
+        document.getElementById('icon-tab-bookmarks').click();
+    }
+});
+
+document.getElementById('summarize_page').addEventListener('click', async () => {
+    const pageNum = parseInt(document.getElementById('page_num').value) || 1;
+    const page = await pdfDoc.getPage(pageNum);
+    const textContent = await page.getTextContent();
+    const pageText = textContent.items.map(i => i.str).join(' ');
+
+    if (!pageText.trim()) {
+        alert('No text found on this page to summarize.');
+        return;
+    }
+
+    // Position popup near the center of the viewer
+    const containerRect = document.getElementById('viewerContainer').getBoundingClientRect();
+    const rect = {
+        left: containerRect.left + (containerRect.width / 2) - 150,
+        top: containerRect.top + 100,
+        bottom: containerRect.top + 100,
+        right: containerRect.left + (containerRect.width / 2) - 150
+    };
+
+    const prompt = "Please generate a concise, bulleted summary of the following page content:\n\n{word}";
+
+    const event = new CustomEvent('trigger-ai-popup', {
+        detail: { rect: rect, text: pageText, prompt: prompt }
+    });
+    document.dispatchEvent(event);
+});
+
 document.getElementById('edit-btn-note').addEventListener('click', () => {
     if (activeHighlightId === null) return;
     const hl = highlights.find(h => h.id === activeHighlightId);
@@ -662,6 +805,56 @@ function hexToRgb(hex) {
     } : null;
 }
 
+document.getElementById('export_md').addEventListener('click', () => {
+    if (highlights.length === 0) {
+        alert("No annotations to export.");
+        return;
+    }
+    
+    // Sort highlights by page, then by Y position (top to bottom visually)
+    const sortedHighlights = [...highlights].sort((a, b) => {
+        if (a.pageNumber !== b.pageNumber) return a.pageNumber - b.pageNumber;
+        const aTop = a.rects && a.rects[0] ? a.rects[0].pdfY : 0;
+        const bTop = b.rects && b.rects[0] ? b.rects[0].pdfY : 0;
+        return bTop - aTop;
+    });
+
+    let mdContent = "# PDF Annotations & Notes\n\n";
+    let currentPage = -1;
+    
+    sortedHighlights.forEach(hl => {
+        if (hl.pageNumber !== currentPage) {
+            currentPage = hl.pageNumber;
+            mdContent += `## Page ${currentPage}\n\n`;
+        }
+        
+        const cleanText = (hl.text || '').replace(/\n/g, ' ');
+        if (hl.markupType === 'Underline') {
+            mdContent += `> <u>${cleanText}</u>\n`;
+        } else if (hl.markupType === 'StrikeOut') {
+            mdContent += `> ~~${cleanText}~~\n`;
+        } else {
+            mdContent += `> ==${cleanText}==\n`;
+        }
+        
+        if (hl.note) {
+            mdContent += `\n**Note:** ${hl.note}\n`;
+        }
+        mdContent += "\n---\n\n";
+    });
+    
+    const blob = new Blob([mdContent], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'Annotations.md';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+});
+
 document.getElementById('save_pdf').addEventListener('click', async () => {
     try {
         const existingPdfBytes = await fetch(fileUrl).then(res => res.arrayBuffer());
@@ -700,7 +893,7 @@ document.getElementById('save_pdf').addEventListener('click', async () => {
 
             const annotObj = {
                 Type: 'Annot',
-                Subtype: 'Highlight',
+                Subtype: hl.markupType || 'Highlight',
                 Rect: [minX, minY, maxX, maxY], // Bounding box of all quads
                 QuadPoints: quadPoints,
                 C: [colorRgb.r, colorRgb.g, colorRgb.b],
@@ -930,14 +1123,54 @@ function renderAllSearchHighlights() {
     });
 }
 
-// Intercept Ctrl+F / Cmd+F to focus custom find bar
+// Intercept Keyboard Shortcuts
 document.addEventListener('keydown', (e) => {
+    // Ignore if typing in input/textarea (except Escape)
+    const isInput = document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA');
+    
+    if (e.key === 'Escape') {
+        hidePopups();
+        if (isInput) document.activeElement.blur();
+        return;
+    }
+    
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
         e.preventDefault();
         const findInput = document.getElementById('findInput');
         if (findInput) {
             findInput.focus();
             findInput.select();
+        }
+        return;
+    }
+    
+    // Zoom shortcuts
+    if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) {
+        e.preventDefault();
+        document.getElementById('zoom_in').click();
+        return;
+    }
+    
+    if ((e.ctrlKey || e.metaKey) && e.key === '-') {
+        e.preventDefault();
+        document.getElementById('zoom_out').click();
+        return;
+    }
+    
+    if (!isInput) {
+        // Page Navigation with Left/Right Arrows
+        if (e.key === 'ArrowRight') {
+            e.preventDefault();
+            const currentPage = parseInt(document.getElementById('page_num').value) || 1;
+            if (currentPage < pdfDoc.numPages) {
+                if (typeof scrollToPage === 'function') scrollToPage(currentPage + 1);
+            }
+        } else if (e.key === 'ArrowLeft') {
+            e.preventDefault();
+            const currentPage = parseInt(document.getElementById('page_num').value) || 1;
+            if (currentPage > 1) {
+                if (typeof scrollToPage === 'function') scrollToPage(currentPage - 1);
+            }
         }
     }
 });
@@ -1017,3 +1250,413 @@ function scrollToPage(pageNumber) {
     }
 }
 
+// ==================== Sidebar & Outline Feature ====================
+const sidebar = document.getElementById('sidebar');
+const tabComments = document.getElementById('icon-tab-comments');
+const tabOutline = document.getElementById('icon-tab-outline');
+const tabBookmarks = document.getElementById('icon-tab-bookmarks');
+const contentComments = document.getElementById('sidebar-content-comments');
+const contentOutline = document.getElementById('sidebar-content-outline');
+const contentBookmarks = document.getElementById('sidebar-content-bookmarks');
+const sidebarTitle = document.getElementById('sidebar-title');
+
+function switchTab(tabName) {
+    if (sidebar.classList.contains('hidden')) {
+        sidebar.classList.remove('hidden');
+        window.dispatchEvent(new Event('resize'));
+    }
+    
+    tabComments.classList.remove('active');
+    tabOutline.classList.remove('active');
+    tabBookmarks.classList.remove('active');
+    contentComments.classList.add('hidden');
+    contentOutline.classList.add('hidden');
+    contentBookmarks.classList.add('hidden');
+    
+    if (tabName === 'comments') {
+        tabComments.classList.add('active');
+        contentComments.classList.remove('hidden');
+        sidebarTitle.textContent = 'Comments';
+        renderSidebar(); // re-render comments
+    } else if (tabName === 'outline') {
+        tabOutline.classList.add('active');
+        contentOutline.classList.remove('hidden');
+        sidebarTitle.textContent = 'Outline';
+    } else if (tabName === 'bookmarks') {
+        tabBookmarks.classList.add('active');
+        contentBookmarks.classList.remove('hidden');
+        sidebarTitle.textContent = 'Bookmarks';
+        renderBookmarks(); // re-render bookmarks
+    }
+}
+
+tabComments.addEventListener('click', () => switchTab('comments'));
+tabOutline.addEventListener('click', () => switchTab('outline'));
+tabBookmarks.addEventListener('click', () => switchTab('bookmarks'));
+
+document.getElementById('close_sidebar').addEventListener('click', () => {
+    sidebar.classList.add('hidden');
+    tabComments.classList.remove('active');
+    tabOutline.classList.remove('active');
+    tabBookmarks.classList.remove('active');
+    window.dispatchEvent(new Event('resize'));
+});
+
+function renderSidebar() {
+    const sidebarContent = document.getElementById('sidebar-content-comments');
+    if (!sidebarContent) return;
+    
+    sidebarContent.innerHTML = '';
+    
+    if (highlights.length === 0) {
+        sidebarContent.innerHTML = '<div style="color:#666; text-align:center; margin-top:20px; font-size:13px;">No comments or highlights yet.</div>';
+        return;
+    }
+    
+    // Sort highlights by page number, then by vertical position
+    const sortedHighlights = [...highlights].sort((a, b) => {
+        if (a.pageNumber !== b.pageNumber) return a.pageNumber - b.pageNumber;
+        const aTop = a.rects && a.rects[0] ? a.rects[0].pdfY : 0;
+        const bTop = b.rects && b.rects[0] ? b.rects[0].pdfY : 0;
+        return bTop - aTop; // In PDF space, higher Y is visually higher on the page
+    });
+    
+    sortedHighlights.forEach(hl => {
+        const item = document.createElement('div');
+        item.className = 'sidebar-item';
+        
+        // Header (Page & Color)
+        const header = document.createElement('div');
+        header.className = 'sidebar-item-header';
+        
+        const pageSpan = document.createElement('span');
+        pageSpan.className = 'sidebar-item-page';
+        
+        let typeIcon = '🖌️';
+        if (hl.markupType === 'Underline') typeIcon = '<u>U</u>';
+        else if (hl.markupType === 'StrikeOut') typeIcon = '<s>S</s>';
+        
+        pageSpan.innerHTML = `Page ${hl.pageNumber} <span style="margin-left: 5px; font-size: 10px;">${typeIcon}</span>`;
+        
+        const colorSpan = document.createElement('span');
+        colorSpan.className = 'sidebar-item-color';
+        colorSpan.style.backgroundColor = hl.color;
+        
+        header.appendChild(pageSpan);
+        header.appendChild(colorSpan);
+        item.appendChild(header);
+        
+        // Highlighted text snippet
+        if (hl.text) {
+            const textDiv = document.createElement('div');
+            textDiv.className = 'sidebar-item-text';
+            textDiv.textContent = hl.text;
+            item.appendChild(textDiv);
+        }
+        
+        // Note Input
+        const noteInput = document.createElement('textarea');
+        noteInput.className = 'sidebar-item-note-input';
+        noteInput.placeholder = 'Add a comment...';
+        noteInput.value = hl.note || '';
+        
+        noteInput.addEventListener('change', () => {
+            hl.note = noteInput.value.trim() || null;
+            saveHighlights();
+            updateHighlightIndicatorsOnPage(hl);
+        });
+        
+        item.appendChild(noteInput);
+        
+        // Actions (Delete)
+        const actions = document.createElement('div');
+        actions.className = 'sidebar-item-actions';
+        
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'sidebar-item-delete';
+        deleteBtn.textContent = 'Delete';
+        deleteBtn.addEventListener('click', (e) => {
+            e.stopPropagation(); // prevent clicking the item itself
+            
+            // Remove from global array
+            highlights = highlights.filter(h => h.id !== hl.id);
+            saveHighlights();
+            
+            // Remove from DOM
+            document.querySelectorAll(`.custom-highlight[data-hl-id="${hl.id}"]`).forEach(el => el.remove());
+            document.querySelectorAll(`.note-indicator[data-hl-id="${hl.id}"]`).forEach(el => el.remove());
+        });
+        
+        actions.appendChild(deleteBtn);
+        item.appendChild(actions);
+        
+        // Click to jump to highlight
+        item.addEventListener('click', (e) => {
+            if (e.target.tagName.toLowerCase() === 'textarea' || e.target.tagName.toLowerCase() === 'button') {
+                return; // Let user type or click button
+            }
+            scrollToHighlight(hl);
+        });
+        
+        sidebarContent.appendChild(item);
+    });
+}
+
+function renderBookmarks() {
+    const sidebarContent = document.getElementById('sidebar-content-bookmarks');
+    if (!sidebarContent) return;
+    
+    sidebarContent.innerHTML = '';
+    
+    if (bookmarks.length === 0) {
+        sidebarContent.innerHTML = '<div style="color:#666; text-align:center; margin-top:20px; font-size:13px;">No bookmarks yet.</div>';
+        return;
+    }
+    
+    // Sort bookmarks by page number
+    const sortedBookmarks = [...bookmarks].sort((a, b) => a.pageNumber - b.pageNumber);
+    
+    sortedBookmarks.forEach(bk => {
+        const item = document.createElement('div');
+        item.className = 'sidebar-item';
+        
+        const header = document.createElement('div');
+        header.className = 'sidebar-item-header';
+        
+        const pageSpan = document.createElement('span');
+        pageSpan.className = 'sidebar-item-page';
+        pageSpan.innerHTML = `Page ${bk.pageNumber} <span style="margin-left: 5px; font-size: 10px;">📌</span>`;
+        
+        header.appendChild(pageSpan);
+        item.appendChild(header);
+        
+        // Editable Title Input
+        const titleInput = document.createElement('input');
+        titleInput.type = 'text';
+        titleInput.className = 'sidebar-item-note-input'; // reusing styling
+        titleInput.placeholder = 'Name this bookmark...';
+        titleInput.value = bk.title || '';
+        titleInput.style.marginTop = '5px';
+        titleInput.style.padding = '4px';
+        titleInput.style.width = 'calc(100% - 10px)';
+        
+        titleInput.addEventListener('change', () => {
+            bk.title = titleInput.value.trim() || `Page ${bk.pageNumber}`;
+            saveBookmarks();
+        });
+        
+        item.appendChild(titleInput);
+        
+        // Actions (Delete)
+        const actions = document.createElement('div');
+        actions.className = 'sidebar-item-actions';
+        
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'sidebar-item-delete';
+        deleteBtn.textContent = 'Delete';
+        deleteBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            bookmarks = bookmarks.filter(b => b.id !== bk.id);
+            saveBookmarks();
+        });
+        
+        actions.appendChild(deleteBtn);
+        item.appendChild(actions);
+        
+        // Click to jump to bookmark
+        item.addEventListener('click', (e) => {
+            if (e.target.tagName.toLowerCase() === 'input' || e.target.tagName.toLowerCase() === 'button') {
+                return;
+            }
+            scrollToPage(bk.pageNumber);
+        });
+        
+        sidebarContent.appendChild(item);
+    });
+}
+
+
+function updateHighlightIndicatorsOnPage(hl) {
+    const pageDiv = document.querySelector(`.page[data-page-number="${hl.pageNumber}"]`);
+    if (pageDiv) {
+        pageDiv.querySelectorAll(`.note-indicator[data-hl-id="${hl.id}"]`).forEach(el => el.remove());
+        if (hl.note) {
+            // Remove existing rects and redraw them to place the indicator back correctly
+            pageDiv.querySelectorAll(`.custom-highlight[data-hl-id="${hl.id}"]`).forEach(el => el.remove());
+            drawHighlight(hl, pageDiv, pageDiv._viewport);
+        }
+    }
+}
+
+function scrollToHighlight(hl) {
+    if (!hl || !hl.rects || hl.rects.length === 0) return;
+    
+    const pageDiv = document.querySelector(`.page[data-page-number="${hl.pageNumber}"]`);
+    const container = document.getElementById('viewerContainer');
+    
+    if (pageDiv && pageDiv._viewport) {
+        // Target specific Y position within the page
+        const firstRect = hl.rects[0];
+        const pt = pageDiv._viewport.convertToViewportPoint(firstRect.pdfX, firstRect.pdfY);
+        const yPosInPage = pt[1];
+        
+        container.scrollTop = pageDiv.offsetTop + yPosInPage - (container.clientHeight / 2);
+        
+        // Briefly flash active highlight
+        document.querySelectorAll('.custom-highlight.active').forEach(el => el.classList.remove('active'));
+        pageDiv.querySelectorAll(`.custom-highlight[data-hl-id="${hl.id}"]`).forEach(el => {
+            el.classList.add('active');
+            setTimeout(() => el.classList.remove('active'), 2000);
+        });
+        
+    } else {
+        // Page not loaded yet, just scroll to page
+        scrollToPage(hl.pageNumber);
+    }
+}
+
+function renderOutline(outline) {
+    if (!outline || outline.length === 0) {
+        contentOutline.innerHTML = '<div style="color:#666; text-align:center; margin-top:20px; font-size:13px;">No outline available.</div>';
+        return;
+    }
+    
+    contentOutline.innerHTML = '';
+    
+    const renderItems = (items, container) => {
+        items.forEach(item => {
+            const itemDiv = document.createElement('div');
+            itemDiv.className = 'outline-item';
+            
+            const titleRow = document.createElement('div');
+            titleRow.className = 'outline-item-title';
+            
+            // Toggle chevron
+            const toggle = document.createElement('span');
+            toggle.className = 'outline-toggle';
+            if (item.items && item.items.length > 0) {
+                toggle.textContent = '▼';
+            } else {
+                toggle.textContent = '';
+                toggle.style.cursor = 'default';
+            }
+            titleRow.appendChild(toggle);
+            
+            // Title text
+            const titleLink = document.createElement('a');
+            titleLink.textContent = item.title;
+            titleLink.title = item.title;
+            titleLink.href = 'javascript:void(0)';
+            
+            if (item.bold) titleLink.style.fontWeight = 'bold';
+            if (item.italic) titleLink.style.fontStyle = 'italic';
+            
+            titleRow.appendChild(titleLink);
+            itemDiv.appendChild(titleRow);
+            
+            // Children container
+            let childrenContainer = null;
+            if (item.items && item.items.length > 0) {
+                childrenContainer = document.createElement('div');
+                childrenContainer.className = 'outline-children';
+                renderItems(item.items, childrenContainer);
+                itemDiv.appendChild(childrenContainer);
+                
+                toggle.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    childrenContainer.classList.toggle('hidden');
+                    toggle.classList.toggle('collapsed');
+                });
+            }
+            
+            // Click to navigate
+            titleRow.addEventListener('click', async (e) => {
+                if (e.target === toggle) return; // ignore toggle clicks
+                
+                if (item.url) {
+                    window.open(item.url, '_blank', 'noopener,noreferrer');
+                } else if (item.dest) {
+                    try {
+                        let dest = item.dest;
+                        if (typeof dest === 'string') {
+                            dest = await pdfDoc.getDestination(dest);
+                        }
+                        if (dest && dest[0]) {
+                            const pageIndex = await pdfDoc.getPageIndex(dest[0]);
+                            scrollToPage(pageIndex + 1);
+                        }
+                    } catch (err) {
+                        console.error("Error resolving outline destination:", err);
+                    }
+                }
+            });
+            
+            container.appendChild(itemDiv);
+        });
+    };
+    
+    renderItems(outline, contentOutline);
+}
+
+// --- NEW: Trackpad Pinch-to-Zoom Support ---
+let pinchZoomTimeout = null;
+let currentPinchScale = 1.0;
+let initialScaleBeforePinch = 1.0;
+let isPinching = false;
+
+document.getElementById('viewerContainer').addEventListener('wheel', (e) => {
+    if (e.ctrlKey) {
+        e.preventDefault(); // Prevent default browser zoom
+        isPinching = true;
+        
+        if (pinchZoomTimeout === null) {
+             initialScaleBeforePinch = scale;
+        }
+
+        // Adjust scale smoothly based on delta
+        const delta = -e.deltaY * 0.01;
+        let newScale = scale * Math.exp(delta);
+        
+        if (newScale < 0.5) newScale = 0.5;
+        if (newScale > 3.0) newScale = 3.0;
+        
+        scale = newScale;
+        
+        // Update UI
+        const zoomSpan = document.getElementById('zoom_level');
+        if(zoomSpan) {
+            zoomSpan.textContent = Math.round(scale * 100) + "%";
+        }
+        
+        // Visual feedback using CSS transform for smoothness
+        currentPinchScale = scale / initialScaleBeforePinch;
+        const viewer = document.getElementById('viewer');
+        if (viewer) {
+            // Set transform origin based on mouse position relative to viewer
+            const rect = viewer.getBoundingClientRect();
+            const originX = e.clientX - rect.left;
+            const originY = e.clientY - rect.top;
+            
+            // Only set origin once at start of pinch to prevent jitter
+            if (!viewer.style.transformOrigin || pinchZoomTimeout === null) {
+                viewer.style.transformOrigin = `${originX}px ${originY}px`;
+            }
+            
+            viewer.style.transform = `scale(${currentPinchScale})`;
+        }
+
+        clearTimeout(pinchZoomTimeout);
+        pinchZoomTimeout = setTimeout(() => {
+            isPinching = false;
+            if (viewer) {
+                viewer.style.transform = 'none';
+                viewer.style.transformOrigin = ''; // reset
+            }
+            pinchZoomTimeout = null;
+            renderAllPages(); // Re-render at new crisp resolution
+        }, 200);
+    } else if (isPinching) {
+        // Prevent accidental scrolling while the user is actively pinching
+        e.preventDefault();
+    }
+}, { passive: false });
