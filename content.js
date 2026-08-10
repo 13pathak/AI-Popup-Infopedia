@@ -865,6 +865,10 @@ function renderMessages(instance) {
   const contentWrapper = popup.querySelector('#ai-popup-content');
   if (!contentWrapper) return;
 
+  // Save current scroll position
+  const isNearBottom = contentWrapper.scrollHeight - contentWrapper.scrollTop - contentWrapper.clientHeight < 30;
+  const previousScrollTop = contentWrapper.scrollTop;
+
   // Clear existing content
   contentWrapper.innerHTML = '';
 
@@ -935,10 +939,17 @@ function renderMessages(instance) {
       }
     });
 
-    // Automatically scroll to bottom if it overflows
-    // if (contentWrapper.scrollHeight > contentWrapper.clientHeight) {
-    //    contentWrapper.scrollTop = contentWrapper.scrollHeight;
-    // }
+    // Auto-scroll logic
+    const lastMsg = instance.messages[instance.messages.length - 1];
+    const isNewMessage = lastMsg && (lastMsg.role === 'user' || lastMsg.isThinking);
+    
+    if (isNewMessage || isNearBottom) {
+       // Scroll to bottom if it's a new follow-up OR if the user was already at the bottom
+       contentWrapper.scrollTop = contentWrapper.scrollHeight;
+    } else {
+       // Otherwise, restore the user's previous scroll position
+       contentWrapper.scrollTop = previousScrollTop;
+    }
   } catch (err) {
     console.error("Popup render loop crashed:", err);
     contentWrapper.insertAdjacentHTML('beforeend', `<div style="color: red;">Error rendering messages: ${err.message}</div>`);
