@@ -430,7 +430,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
       
       try {
-        const response = await fetch(endpointUrl, {
+        const response = await fetchWithTimeout(endpointUrl, {
           method: 'POST',
           headers: headers,
           body: JSON.stringify(payload)
@@ -475,32 +475,39 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 });
 
+let historySavePromise = Promise.resolve();
+
 // --- UPDATED to accept source URL and title ---
 function saveToHistory(word, definition, listId, modelName, promptName, sourceUrl, sourceTitle, citations, callback) {
-  chrome.storage.local.get(['history'], (result) => {
-    let history = result.history || [];
+  historySavePromise = historySavePromise.then(() => {
+    return new Promise((resolve) => {
+      chrome.storage.local.get(['history'], (result) => {
+        let history = result.history || [];
 
-    // Create new history item
-    const newItem = {
-      word: word,
-      definition: definition,
-      timestamp: new Date().toISOString(),
-      listId: listId,
-      modelName: modelName,
-      promptName: promptName,
-      sourceUrl: sourceUrl || '',
-      sourceTitle: sourceTitle || '',
-      citations: Array.isArray(citations) ? citations.slice(0, 5) : []
-    };
+        // Create new history item
+        const newItem = {
+          word: word,
+          definition: definition,
+          timestamp: new Date().toISOString(),
+          listId: listId,
+          modelName: modelName,
+          promptName: promptName,
+          sourceUrl: sourceUrl || '',
+          sourceTitle: sourceTitle || '',
+          citations: Array.isArray(citations) ? citations.slice(0, 5) : []
+        };
 
-    // Add new item to the beginning of the array
-    history.unshift(newItem);
+        // Add new item to the beginning of the array
+        history.unshift(newItem);
 
-    // --- NEW: Save back history AND the lastUsedListId ---
-    chrome.storage.local.set({ history: history, lastUsedListId: listId }, () => {
-      if (callback) {
-        callback();
-      }
+        // --- NEW: Save back history AND the lastUsedListId ---
+        chrome.storage.local.set({ history: history, lastUsedListId: listId }, () => {
+          if (callback) {
+            callback();
+          }
+          resolve();
+        });
+      });
     });
   });
 }
