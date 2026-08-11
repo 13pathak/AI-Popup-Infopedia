@@ -1535,6 +1535,12 @@ function createFollowupInput(instance, word) {
   let activeMediaRecorder = null;
   let audioChunks = [];
   let nativeRecognition = null;
+
+  instance.stopMic = () => {
+    if (activeMediaRecorder && activeMediaRecorder.state !== 'inactive') activeMediaRecorder.stop();
+    if (nativeRecognition) nativeRecognition.stop();
+    isRecording = false;
+  };
   
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (SpeechRecognition) {
@@ -1833,6 +1839,7 @@ function stopSpeechSafely() {
 function removeAllPopups() {
   activePopups = activePopups.filter(instance => {
     if (!instance.isPinned) {
+      if (instance.stopMic) instance.stopMic();
       if (instance.container) instance.container.remove();
       return false; // Remove from array
     }
@@ -1849,6 +1856,7 @@ function removeLastPopup() {
   for (let i = activePopups.length - 1; i >= 0; i--) {
     if (!activePopups[i].isPinned) {
       const instance = activePopups.splice(i, 1)[0];
+      if (instance.stopMic) instance.stopMic();
       if (instance.container) instance.container.remove();
       break;
     }
@@ -1862,6 +1870,7 @@ function removePopupInstance(instance) {
   const index = activePopups.indexOf(instance);
   if (index > -1) {
     activePopups.splice(index, 1);
+    if (instance.stopMic) instance.stopMic();
     if (instance.container) instance.container.remove();
   }
   if (activePopups.length === 0) {
