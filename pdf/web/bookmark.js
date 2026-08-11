@@ -314,7 +314,7 @@ if (addBtn && viewBtn) {
 
 if (closeBtn) {
   closeBtn.addEventListener("click", () => {
-    if (dialog) dialog.close();
+    dialog.close();
   });
 }
 
@@ -325,7 +325,7 @@ function removeBookmark(docId, pageToRemove) {
       bookmarks[docId] = bookmarks[docId].filter(p => p !== pageToRemove);
       chrome.storage.local.set({ pdf_bookmarks: bookmarks }, () => {
         // Re-render list if dialog is open
-        if (dialog && dialog.open && viewBtn) {
+        if (dialog.open && viewBtn) {
           viewBtn.click();
         }
       });
@@ -398,30 +398,30 @@ initAnnotationPersistence();
 // (UI moved to options.html)
 
 // Observe DOM for popupAnnotations to override "AI Popup Infopedia" and apply author name
-let cachedAuthorName = "Unknown";
-chrome.storage.local.get(['pdf_author_name'], (result) => {
-  cachedAuthorName = result.pdf_author_name || "Unknown";
-});
-chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === 'local' && changes.pdf_author_name) {
-    cachedAuthorName = changes.pdf_author_name.newValue || "Unknown";
-  }
-});
-
 const observer = new MutationObserver((mutations) => {
   mutations.forEach(mutation => {
     mutation.addedNodes.forEach(node => {
       if (node.nodeType === 1 && node.classList.contains("popup")) {
         const h1 = node.querySelector(".header h1");
-        if (h1 && (h1.textContent === "AI Popup Infopedia" || h1.textContent === "")) {
-          h1.textContent = cachedAuthorName;
+        if (h1) {
+          chrome.storage.local.get(['pdf_author_name'], (result) => {
+             const authorName = result.pdf_author_name || "Unknown";
+             if (h1.textContent === "AI Popup Infopedia" || h1.textContent === "") {
+               h1.textContent = authorName;
+             }
+          });
         }
       } else if (node.nodeType === 1 && node.querySelector) {
         const popups = node.querySelectorAll(".popup");
         popups.forEach(popup => {
           const h1 = popup.querySelector(".header h1");
-          if (h1 && (h1.textContent === "AI Popup Infopedia" || h1.textContent === "")) {
-            h1.textContent = cachedAuthorName;
+          if (h1) {
+            chrome.storage.local.get(['pdf_author_name'], (result) => {
+               const authorName = result.pdf_author_name || "Unknown";
+               if (h1.textContent === "AI Popup Infopedia" || h1.textContent === "") {
+                 h1.textContent = authorName;
+               }
+            });
           }
         });
       }

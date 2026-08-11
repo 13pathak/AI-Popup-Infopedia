@@ -2,15 +2,6 @@
 let activePopups = []; // Array of { container, popup, isInteracting, isClickInside }
 let baseZIndex = 2100000000;
 
-function escapeHTML(str) {
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
 // --- Styles (unchanged) ---
 const popupStyles = `
   #ai-definition-popup {
@@ -449,7 +440,8 @@ function createCustomDropdown(lists, currentValue, onChange, options = {}) {
     optionsContainer.classList.toggle('show');
   });
 
-  // Handle clicking outside custom dropdown is done per-instance via shadow root
+  // Adding document listener here won't work perfectly inside shadow root if we just listen on document,
+  // but we can listen on the shadow root document or window, we will fix this in populateListOptions.
 
   Object.defineProperty(container, 'value', {
     get: function() { return selectedId; },
@@ -467,17 +459,14 @@ document.addEventListener('mouseup', (event) => {
 
   // Check from top-most to bottom-most
   for (let i = activePopups.length - 1; i >= 0; i--) {
-    const popup = activePopups[i];
-    if (popup.container && popup.container.shadowRoot && popup.container.shadowRoot.contains(event.target)) {
-      const shadowRoot = popup.container.shadowRoot;
-      const selection = (typeof shadowRoot.getSelection === 'function') ? shadowRoot.getSelection() : window.getSelection();
-      if (selection && !selection.isCollapsed) {
-        const text = selection.toString().trim();
-        if (text.length > 0) {
-          selectedText = text;
-          selectionRect = selection.getRangeAt(0).getBoundingClientRect();
-          break; // Found a nested selection, stop looking
-        }
+    const shadowRoot = activePopups[i].container.shadowRoot;
+    const selection = shadowRoot.getSelection();
+    if (selection && !selection.isCollapsed) {
+      const text = selection.toString().trim();
+      if (text.length > 0) {
+        selectedText = text;
+        selectionRect = selection.getRangeAt(0).getBoundingClientRect();
+        break; // Found a nested selection, stop looking
       }
     }
   }
@@ -584,9 +573,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 function initiateEmptyPopupSequence() {
   const popupInstance = showPopup(0, 0, "Initializing...");
-  if (popupInstance && popupInstance.popup) {
-    popupInstance.popup.style.visibility = 'hidden';
-  }
   popupInstance.sourceText = ""; 
   popupInstance.sourceWord = "Custom Question";
 
@@ -607,10 +593,6 @@ function initiateEmptyPopupSequence() {
     
     adjustPopupPosition(popupInstance, null);
     
-    if (popupInstance.popup) {
-      popupInstance.popup.style.visibility = 'visible';
-    }
-
     setTimeout(() => {
       const input = popupInstance.popup.querySelector('#ai-popup-followup-input');
       if (input) input.focus();
@@ -714,8 +696,8 @@ function initiatePopupSequence(rect, selectedText, customPrompt) {
       }
 
       if (response && response.error) {
-        const errorId = `retry-btn-${Date.now()}`;
-        const errorHtml = `<span style="color:red;">Error: ${escapeHTML(String(response.error || 'Unknown error'))}</span> <button id="${errorId}-retry" class="ai-popup-retry-btn" style="background:#4db6ac; color:white; border:none; border-radius:3px; cursor:pointer; padding:2px 6px; font-size:11px; margin-left:5px;">Reload</button>`;
+        const errorId = 'error-' + Date.now();
+        const errorHtml = `<span style="color:red;">Error: ${response.error}</span> <button id="${errorId}-retry" class="ai-popup-retry-btn" style="background:#4db6ac; color:white; border:none; border-radius:3px; cursor:pointer; padding:2px 6px; font-size:11px; margin-left:5px;">Reload</button>`;
         
         // Temporarily put error in messages to render it
         popupInstance.messages = [
@@ -1048,8 +1030,6 @@ function retryMessage(instance, messageIndex) {
   // because we are rewriting the assistant's previous answer at `messageIndex`.
   const messagesContext = instance.messages.slice(0, messageIndex);
   
-  instance.messages.length = messageIndex + 1; // Drop orphaned follow-ups
-  
   // Set the message state to loading
   instance.messages[messageIndex] = { role: 'assistant', content: '<i>Thinking...</i>', isError: false, needsRetry: false };
   renderMessages(instance);
@@ -1070,7 +1050,7 @@ function retryMessage(instance, messageIndex) {
       } else {
         instance.messages[messageIndex] = { 
            role: 'assistant', 
-           content: `<span style="color:red;">Error retrying message: ${escapeHTML(String(response?.error || 'Unknown error'))}</span>`, 
+           content: `<span style="color:red;">Error retrying message: ${response?.error || 'Unknown error'}</span>`, 
            isError: true 
         };
       }
@@ -1181,11 +1161,7 @@ function createSelectors(instance, models, prompts, currentModelId, currentPromp
   function triggerRedefine() {
     const newModelId = modelSelector.value;
     const newPromptContent = promptSelector.value;
-    let actualSelectedText = selectedText;
-    if (actualSelectedText === "Custom Question" && instance.messages.length > 0 && instance.messages[0].role === 'user') {
-       actualSelectedText = instance.messages[0].content;
-    }
-    redefineWithModelAndPrompt(instance, actualSelectedText, newModelId, newPromptContent);
+    redefineWithModelAndPrompt(instance, selectedText, newModelId, newPromptContent);
   }
 }
 
@@ -1225,8 +1201,8 @@ function redefineWithModelAndPrompt(instance, word, modelId, promptContent) {
         }
 
         if (response && response.error) {
-          const errorId = `retry-btn-${Date.now()}`;
-          const errorHtml = `<span style="color:red;">Error: ${escapeHTML(String(response.error || 'Unknown error'))}</span> <button id="${errorId}-retry" class="ai-popup-retry-btn" style="background:#4db6ac; color:white; border:none; border-radius:3px; cursor:pointer; padding:2px 6px; font-size:11px; margin-left:5px;">Reload</button>`;
+          const errorId = 'error-' + Date.now();
+          const errorHtml = `<span style="color:red;">Error: ${response.error}</span> <button id="${errorId}-retry" class="ai-popup-retry-btn" style="background:#4db6ac; color:white; border:none; border-radius:3px; cursor:pointer; padding:2px 6px; font-size:11px; margin-left:5px;">Reload</button>`;
           
           // Temporarily put error in messages to render it
           instance.messages = [
@@ -1388,11 +1364,7 @@ function createActionButtons(instance, word, definition, modelName, promptName, 
     // 2. Create list selector using Custom Dropdown Component
     let listSelector;
     function recreateDropdown(listsToUse, currentVal) {
-      let parent = null;
-      let nextSibling = null;
       if (listSelector && listSelector.parentNode) {
-        parent = listSelector.parentNode;
-        nextSibling = listSelector.nextSibling;
         listSelector.parentNode.removeChild(listSelector);
       }
       listSelector = createCustomDropdown(listsToUse, currentVal, (val) => {
@@ -1426,10 +1398,6 @@ function createActionButtons(instance, word, definition, modelName, promptName, 
           if (optionsContainer) optionsContainer.classList.remove('show');
         }
       });
-      
-      if (parent) {
-        parent.insertBefore(listSelector, nextSibling);
-      }
     }
 
     recreateDropdown(lists, lastUsedListId || (lists.length ? lists[0].id : null));
@@ -1567,13 +1535,6 @@ function createFollowupInput(instance, word) {
   let activeMediaRecorder = null;
   let audioChunks = [];
   let nativeRecognition = null;
-  
-  instance.stopRecording = () => {
-    try {
-      if (activeMediaRecorder && activeMediaRecorder.state !== 'inactive') activeMediaRecorder.stop();
-      if (nativeRecognition) nativeRecognition.stop();
-    } catch(e) {}
-  };
   
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (SpeechRecognition) {
@@ -1818,9 +1779,9 @@ function createFollowupInput(instance, word) {
           });
         } else {
           // Add error message with retry button to history
-          const errorId = `retry-btn-${Date.now()}`;
-          const errorHtml = `<span style="color:red;">Error: ${escapeHTML(String(response.error || 'Unknown error'))}</span> <button id="${errorId}-retry" class="ai-popup-retry-btn" style="background:#4db6ac; color:white; border:none; border-radius:3px; cursor:pointer; padding:2px 6px; font-size:11px; margin-left:5px;">Reload</button>`;
-          instance.messages.push({ role: 'assistant', content: errorHtml, isError: true, errorId: errorId, retryContext: { word: word, modelId: modelId } });
+          const errorId = 'error-' + Date.now();
+          const errorHtml = `<span style="color:red;">Error: ${response?.error || 'Unknown error'}</span> <button id="${errorId}-retry" class="ai-popup-retry-btn" style="background:#4db6ac; color:white; border:none; border-radius:3px; cursor:pointer; padding:2px 6px; font-size:11px; margin-left:5px;">Reload</button>`;
+          instance.messages.push({ role: 'assistant', content: errorHtml, isError: true, errorId: errorId });
         }
 
         try {
@@ -1841,8 +1802,8 @@ function createFollowupInput(instance, word) {
                    e.target.style.opacity = "0.7";
                    e.target.style.cursor = "wait";
                    setTimeout(() => {
-                     // Remove the specific error message by its ID, to avoid race conditions
-                     instance.messages = instance.messages.filter(m => m.errorId !== lastMsg.errorId);
+                     // Pop off the error
+                     instance.messages.pop();
                      performFetch();
                    }, 150);
                 });
@@ -1872,7 +1833,6 @@ function stopSpeechSafely() {
 function removeAllPopups() {
   activePopups = activePopups.filter(instance => {
     if (!instance.isPinned) {
-      if (instance.stopRecording) instance.stopRecording();
       if (instance.container) instance.container.remove();
       return false; // Remove from array
     }
@@ -1888,9 +1848,8 @@ function removeLastPopup() {
   // Find the last non-pinned popup from the end
   for (let i = activePopups.length - 1; i >= 0; i--) {
     if (!activePopups[i].isPinned) {
-      if (activePopups[i].stopRecording) activePopups[i].stopRecording();
-      if (activePopups[i].container) activePopups[i].container.remove();
-      activePopups.splice(i, 1);
+      const instance = activePopups.splice(i, 1)[0];
+      if (instance.container) instance.container.remove();
       break;
     }
   }
@@ -1903,7 +1862,6 @@ function removePopupInstance(instance) {
   const index = activePopups.indexOf(instance);
   if (index > -1) {
     activePopups.splice(index, 1);
-    if (instance.stopRecording) instance.stopRecording();
     if (instance.container) instance.container.remove();
   }
   if (activePopups.length === 0) {
@@ -1914,32 +1872,28 @@ function removePopupInstance(instance) {
 // --- Text-to-Speech Logic (per-instance speaking state) ---
 
 function toggleSpeech(instance, text) {
-  try {
-    if (typeof window === 'undefined' || !window.speechSynthesis) return;
+  const popup = instance.popup;
+  const btn = popup.querySelector('#ai-popup-speak-btn'); // Only controls THIS popup's button
 
-    const popup = instance.popup;
-    const btn = popup.querySelector('#ai-popup-speak-btn'); // Only controls THIS popup's button
+  if (instance.isSpeaking) {
+    window.speechSynthesis.cancel();
+    instance.isSpeaking = false;
+    if (btn) btn.innerHTML = '🔊';
+    // Reset all buttons just in case? Or just the active one?
+    // Let's reset all check to simple state
+  } else {
+    // Start speaking
+    chrome.storage.sync.get(['ttsSettings'], (data) => {
+      const settings = data.ttsSettings || { rate: 1.0, voiceURI: null };
 
-    if (instance.isSpeaking) {
+      // Cancel any previous speech
       window.speechSynthesis.cancel();
-      instance.isSpeaking = false;
-      if (btn) btn.innerHTML = '🔊';
-    } else {
-      // Start speaking
-      chrome.storage.sync.get(['ttsSettings'], (data) => {
-        const settings = data.ttsSettings || { rate: 1.0, voiceURI: null };
 
-        // Cancel any previous speech
-        window.speechSynthesis.cancel();
+      // Prepare text: Remove markdown for cleaner reading
+      const cleanText = text.replace(/\*\*/g, '').replace(/<br>/g, ' ').replace(/\n/g, ' ');
 
-        // Prepare text: Remove markdown and strip HTML tags
-        let cleanText = text.replace(/\*\*/g, '').replace(/<br>/g, ' ').replace(/\n/g, ' ');
-        const tempDiv = document.createElement('div');
-        tempDiv.innerHTML = cleanText;
-        cleanText = tempDiv.textContent || tempDiv.innerText || "";
-
-        const utterance = new SpeechSynthesisUtterance(cleanText);
-        utterance.rate = settings.rate;
+      const utterance = new SpeechSynthesisUtterance(cleanText);
+      utterance.rate = settings.rate;
 
       if (settings.voiceURI) {
         const voices = window.speechSynthesis.getVoices();
@@ -1964,9 +1918,6 @@ function toggleSpeech(instance, text) {
       instance.isSpeaking = true;
       if (btn) btn.innerHTML = '⏹'; // Stop icon
     });
-  }
-  } catch (e) {
-    console.error("Speech Synthesis Error:", e);
   }
 }
 
@@ -2101,7 +2052,7 @@ function triggerVerification(popupInstance, originalPrompt, aiResponse) {
     let detailsHtml = '';
     if (response.result && response.result.reasoning) {
        detailsHtml = `<a href="#" id="${verifyId}-toggle" style="margin-left: 10px; font-size: 11px; text-decoration: underline; color: inherit; opacity: 0.7;">View reasoning</a>
-       <div style="margin-top: 8px; font-size: 11px; color: inherit; opacity: 0.9; border-top: 1px solid rgba(128,128,128,0.3); padding-top: 6px; display: none;" id="${verifyId}-details"><strong>Reasoning:</strong> ${escapeHTML(String(response.result.reasoning))}</div>`;
+       <div style="margin-top: 8px; font-size: 11px; color: inherit; opacity: 0.9; border-top: 1px solid rgba(128,128,128,0.3); padding-top: 6px; display: none;" id="${verifyId}-details"><strong>Reasoning:</strong> ${response.result.reasoning}</div>`;
     }
 
     if (response.result && response.result.is_hallucinating) {
@@ -2110,7 +2061,7 @@ function triggerVerification(popupInstance, originalPrompt, aiResponse) {
       
       let correctionsHtml = '<ul style="margin:5px 0 0 20px; padding:0;">';
       if (Array.isArray(response.result.corrections)) {
-         response.result.corrections.forEach(c => { correctionsHtml += `<li style="margin-bottom:3px;">${escapeHTML(String(c))}</li>`; });
+         response.result.corrections.forEach(c => { correctionsHtml += `<li style="margin-bottom:3px;">${c}</li>`; });
       }
       correctionsHtml += '</ul>';
       
@@ -2171,3 +2122,22 @@ style.textContent = `
 .annotationEditorLayer .highlightEditor .editToolbar > .dropdown button:is(:hover, :active, :focus-visible) > .swatch { outline:2px solid var(--hover-outline-color, #666) !important; }
 `;
 document.head.appendChild(style);
+
+
+// DEBUG OBSERVER
+const obs = new MutationObserver(mutations => {
+  for (const mut of mutations) {
+    for (const node of mut.addedNodes) {
+      if (node.classList && node.classList.contains('highlightEditor')) {
+        console.log('[DEBUG] highlightEditor added!', node);
+        setTimeout(() => {
+          const hasToolbar = !!node.querySelector('.editToolbar');
+          const isSelected = node.classList.contains('selectedEditor');
+          console.log('[DEBUG] After 1s, hasToolbar:', hasToolbar, 'isSelected:', isSelected);
+        }, 1000);
+      }
+    }
+  }
+});
+obs.observe(document.body, { childList: true, subtree: true });
+

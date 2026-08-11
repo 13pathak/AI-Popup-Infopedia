@@ -357,8 +357,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // --- Case 2.5: Open PDF Tab ---
   if (request.type === "openPdfTab") {
     chrome.tabs.create({ url: "data:text/html;charset=utf-8," + encodeURIComponent(request.htmlContent) });
-    sendResponse({ success: true });
-    return false;
   }
 
   // --- Case 3: Get all word lists ---
