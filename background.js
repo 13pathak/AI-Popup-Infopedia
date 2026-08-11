@@ -95,7 +95,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       if (request.messages && Array.isArray(request.messages)) {
          safeMessagesText = request.messages.map(m => ({ role: m.role, content: m.content }));
       } else {
-         safeMessagesText = [{ role: "user", content: prompt }];
+         if (modelToUse.enableSearchGrounding) {
+            safeMessagesText = [
+               { role: "system", content: "You are an AI assistant. You have access to a web_search tool. You MUST use the web_search tool to find accurate and up-to-date information if the user's prompt is about recent news, current events, or requires factual verification before answering." },
+               { role: "user", content: prompt }
+            ];
+         } else {
+            safeMessagesText = [{ role: "user", content: prompt }];
+         }
       }
 
       // Create the OpenAI-style payload
@@ -120,6 +127,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             }
           }
         }];
+        payload.tool_choice = "auto";
       }
 
       try {

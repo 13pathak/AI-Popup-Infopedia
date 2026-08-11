@@ -134,6 +134,7 @@ async function renderPageContent(pageDiv) {
     };
     
     // Render text and canvas in parallel
+    const pageNum = parseInt(pageDiv.dataset.pageNumber);
     const renderTask = page.render(renderContext);
     pendingRenderTasks.set(pageNum, renderTask);
     
