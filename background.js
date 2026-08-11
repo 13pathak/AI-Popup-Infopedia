@@ -13,7 +13,7 @@ async function fetchWithTimeout(url, options, timeoutMs = 30000) {
     return await fetch(url, { ...options, signal: controller.signal });
   } catch (error) {
     if (error.name === 'AbortError') {
-      throw new Error('Request timed out after 30 seconds. Please try again.');
+      throw new Error(`Request timed out after ${timeoutMs / 1000} seconds. Please try again.`);
     }
     throw error;
   } finally {
@@ -239,7 +239,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               safeMessagesText.push({
                 role: "assistant",
                 content: data.choices[0].message.content || "",
-                tool_calls: data.choices[0].message.tool_calls
+                tool_calls: [toolCall] // Only include the single tool call we actually processed
               }); // Safely add the AI's tool request
               safeMessagesText.push({
                 role: "tool",
@@ -349,7 +349,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // --- Case 2.5: Open PDF Tab ---
   if (request.type === "openPdfTab") {
     chrome.tabs.create({ url: "data:text/html;charset=utf-8," + encodeURIComponent(request.htmlContent) });
-    return true;
+    sendResponse({ success: true });
+    return false;
   }
 
   // --- Case 3: Get all word lists ---
@@ -393,12 +394,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // --- NEW: Case 5: Check Backup manually (from Options) ---
   if (request.type === "checkBackupReminder") {
     performAutoBackupCheck();
+    sendResponse({ status: "checked" });
+    return false;
   }
 
   // --- NEW: Case 6: Force Manual Backup ---
   if (request.type === "manualBackup" || request.type === "testBackup") {
     // Force a backup regardless of time
     triggerBackup("Manual");
+    sendResponse({ status: "started" });
+    return false;
   }
 
   // --- Case 7: Verify AI Response ---
@@ -431,7 +436,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
       
       try {
-        const response = await fetch(endpointUrl, {
+        const response = await fetchWithTimeout(endpointUrl, {
           method: 'POST',
           headers: headers,
           body: JSON.stringify(payload)
@@ -476,32 +481,39 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 });
 
+let historySavePromise = Promise.resolve();
+
 // --- UPDATED to accept source URL and title ---
 function saveToHistory(word, definition, listId, modelName, promptName, sourceUrl, sourceTitle, citations, callback) {
-  chrome.storage.local.get(['history'], (result) => {
-    let history = result.history || [];
+  historySavePromise = historySavePromise.then(() => {
+    return new Promise((resolve) => {
+      chrome.storage.local.get(['history'], (result) => {
+        let history = result.history || [];
 
-    // Create new history item
-    const newItem = {
-      word: word,
-      definition: definition,
-      timestamp: new Date().toISOString(),
-      listId: listId,
-      modelName: modelName,
-      promptName: promptName,
-      sourceUrl: sourceUrl || '',
-      sourceTitle: sourceTitle || '',
-      citations: Array.isArray(citations) ? citations.slice(0, 5) : []
-    };
+        // Create new history item
+        const newItem = {
+          word: word,
+          definition: definition,
+          timestamp: new Date().toISOString(),
+          listId: listId,
+          modelName: modelName,
+          promptName: promptName,
+          sourceUrl: sourceUrl || '',
+          sourceTitle: sourceTitle || '',
+          citations: Array.isArray(citations) ? citations.slice(0, 5) : []
+        };
 
-    // Add new item to the beginning of the array
-    history.unshift(newItem);
+        // Add new item to the beginning of the array
+        history.unshift(newItem);
 
-    // --- NEW: Save back history AND the lastUsedListId ---
-    chrome.storage.local.set({ history: history, lastUsedListId: listId }, () => {
-      if (callback) {
-        callback();
-      }
+        // --- NEW: Save back history AND the lastUsedListId ---
+        chrome.storage.local.set({ history: history, lastUsedListId: listId }, () => {
+          if (callback) {
+            callback();
+          }
+          resolve();
+        });
+      });
     });
   });
 }
@@ -544,15 +556,18 @@ function performAutoBackupCheck() {
       return;
     }
 
-    chrome.storage.local.get({ lastBackupTime: 0 }, (localData) => {
+    chrome.storage.local.get({ lastBackupTime: 0, pendingBackupId: null }, (localData) => {
       const lastBackup = localData.lastBackupTime;
       const now = Date.now();
       const msPerDay = 24 * 60 * 60 * 1000;
       const daysSinceBackup = (now - lastBackup) / msPerDay;
 
-      // If time has passed, Trigger the Backup!
-      if (daysSinceBackup >= frequencyDays) {
-        triggerBackup("Auto");
+      // If time has passed and no backup is currently running, Trigger the Backup!
+      if (daysSinceBackup >= frequencyDays && !localData.pendingBackupId) {
+        // Optimistically set to prevent simultaneous calls
+        chrome.storage.local.set({ pendingBackupId: -1 }, () => {
+          triggerBackup("Auto");
+        });
       }
     });
   });
@@ -629,6 +644,12 @@ function triggerBackup(type = "Auto") {
 
       // 2. Create Data URI (Base64) - Service Worker safe
       const jsonString = JSON.stringify(backupData, null, 2);
+      
+      const byteSize = new TextEncoder().encode(jsonString).length;
+      if (byteSize > 1.5 * 1024 * 1024) { 
+         console.warn("Backup data is very large (>1.5MB). Data URI download might fail in Chrome.");
+      }
+      
       // Encode properly to handle Unicode characters without the deprecated `unescape`.
       const base64Content = base64EncodeUtf8(jsonString);
       const url = `data:application/json;base64,${base64Content}`;
@@ -662,7 +683,7 @@ function triggerBackup(type = "Auto") {
         }, (downloadId) => {
           if (chrome.runtime.lastError) {
             console.error("Auto-Backup Start Failed:", chrome.runtime.lastError);
-            chrome.storage.local.set({ lastBackupError: chrome.runtime.lastError.message });
+            chrome.storage.local.set({ lastBackupError: chrome.runtime.lastError.message, pendingBackupId: null });
           } else {
             console.log("Auto-Backup Started. ID:", downloadId);
             // --- CHANGED: Don't set success yet. Set "Pending". ---
@@ -675,7 +696,7 @@ function triggerBackup(type = "Auto") {
         });
       } catch (err) {
         console.error("Backup Exception:", err);
-        chrome.storage.local.set({ lastBackupError: err.message });
+        chrome.storage.local.set({ lastBackupError: err.message, pendingBackupId: null });
       }
     });
   });
@@ -697,6 +718,13 @@ function markRedirected(tabId, originalUrl) {
     }
   }, REDIRECT_TTL_MS);
 }
+
+// Clear guard when navigation finishes, preventing 10s back-button block
+chrome.webNavigation.onCompleted.addListener((details) => {
+  if (details.frameId === 0 && redirectedTabs.has(details.tabId)) {
+    redirectedTabs.delete(details.tabId);
+  }
+});
 
 function isAlreadyRedirected(tabId, url) {
   return redirectedTabs.get(tabId) === url;
@@ -728,6 +756,9 @@ chrome.webNavigation.onBeforeNavigate.addListener((details) => {
 });
 
 // --- NEW: Intercept any URL that returns a PDF Content-Type ---
+// Note: In MV3, we cannot easily use "blocking" to stop the PDF from downloading first 
+// without using declarativeNetRequest which is complex for dynamic content-type checks.
+// The browser will download the PDF stream before redirecting.
 chrome.webRequest.onHeadersReceived.addListener(
   (details) => {
     // ONLY intercept main frame navigations. Ignore xmlhttprequest/fetch from pdf.js
@@ -743,6 +774,5 @@ chrome.webRequest.onHeadersReceived.addListener(
     }
   },
   { urls: ["<all_urls>"] },
-  ["responseHeaders"]
+  ["responseHeaders"] // Cannot use "blocking" easily in MV3
 );
-

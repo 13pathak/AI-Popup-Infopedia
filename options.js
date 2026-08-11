@@ -236,6 +236,11 @@ function saveModel() {
     return;
   }
 
+  if (newModelConfig.endpointUrl.includes('openai.com') && newModelConfig.apiKey && !newModelConfig.apiKey.startsWith('sk-')) {
+    updateStatus('OpenAI API keys typically start with "sk-".', 'error');
+    return;
+  }
+
   chrome.storage.sync.get(['models', 'defaultModelId'], (data) => {
     let models = data.models || [];
     if (modelId) { // Editing existing
@@ -407,7 +412,7 @@ function savePdfAuthorName() {
   if (input) {
     const name = input.value.trim();
     chrome.storage.local.set({ pdf_author_name: name }, () => {
-      updateStatusGlobal('Custom Author Name saved successfully!');
+      updateStatus('Custom Author Name saved successfully!', 'success');
     });
   }
 }
@@ -613,37 +618,56 @@ function updateGlobalIOStatus(message, type = 'info') {
   statusEl.style.color = type === 'error' ? '#d9534f' : (type === 'success' ? '#5cb85c' : '#eee');
 
   setTimeout(() => {
+    statusEl.textContent = '';
   }, 5000);
 }
 
 // --- NEW: Helper to build a sorted tree array ---
 function getSortedTreeLists(lists) {
-  const listMap = {};
+  const tree = [];
+  const map = {};
+
   lists.forEach(l => {
-    l.children = [];
-    listMap[l.id] = l;
+    map[l.id] = { ...l, children: [] };
   });
 
-  const roots = [];
   lists.forEach(l => {
-    if (l.parentId && listMap[l.parentId]) {
-      listMap[l.parentId].children.push(l);
+    if (l.parentId && map[l.parentId]) {
+      map[l.parentId].children.push(map[l.id]);
     } else {
-      roots.push(l);
+      tree.push(map[l.id]);
     }
   });
+
+  const sortNode = (node) => {
+    node.children.sort((a, b) => a.order - b.order);
+    node.children.forEach(sortNode);
+  };
+
+  tree.sort((a, b) => a.order - b.order);
+  tree.forEach(sortNode);
 
   const sortedList = [];
   function traverse(node, depth) {
     sortedList.push({ ...node, depth });
     node.children.forEach(child => traverse(child, depth + 1));
   }
-  roots.forEach(root => traverse(root, 0));
+  tree.forEach(root => traverse(root, 0));
   return sortedList;
 }
 
 // --- NEW: Custom Dropdown Component ---
 function createCustomDropdown(lists, currentValue, onChange, options = {}) {
+  if (!window._hasCustomDropdownListener) {
+    window._hasCustomDropdownListener = true;
+    document.addEventListener('click', (e) => {
+      document.querySelectorAll('.custom-options.show').forEach(opt => {
+         if (!opt.parentElement.contains(e.target)) {
+            opt.classList.remove('show');
+         }
+      });
+    });
+  }
   const container = document.createElement('div');
   container.className = 'custom-select-container';
 
@@ -757,12 +781,6 @@ function createCustomDropdown(lists, currentValue, onChange, options = {}) {
   selectBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     optionsContainer.classList.toggle('show');
-  });
-
-  document.addEventListener('click', (e) => {
-    if (!container.contains(e.target)) {
-      optionsContainer.classList.remove('show');
-    }
   });
 
   Object.defineProperty(container, 'value', {
@@ -1025,9 +1043,9 @@ document.getElementById('reorder-save-btn')?.addEventListener('click', () => {
 function loadHistory(listId) {
   const historyList = document.getElementById('history-list');
   const noHistoryMessage = document.getElementById('no-history-message');
-  historyList.innerHTML = '';
 
   chrome.storage.local.get(['history'], (result) => {
+    historyList.innerHTML = '';
     // If no listId is provided (e.g., no lists exist), show no items.
     // Otherwise, filter for the selected list.
     const history = listId
@@ -1151,10 +1169,6 @@ function handleEditClick(event) {
   editWordInput.className = 'edit-word-input';
   editWordInput.value = currentWord;
 
-  // --- NEW: Create and populate list selector ---
-  const listSelector = document.createElement('select');
-  listSelector.className = 'edit-list-selector';
-
   // This container will hold the inputs and selector
   const editControlsContainer = document.createElement('div');
   editControlsContainer.className = 'edit-controls'; // For potential future styling
@@ -1245,7 +1259,7 @@ function updateHistoryItem(timestamp, newWord, newDefinition, newListId) {
     let history = result.history || [];
 
     const newHistory = history.map(item => {
-      if (item.timestamp === timestamp) {
+      if (String(item.timestamp) === String(timestamp)) {
         return {
           ...item,
           word: newWord,
@@ -1304,10 +1318,10 @@ function clearAllHistory() {
 function clearListHistory() {
   const listSelect = document.getElementById('list-select');
   const listId = listSelect.value;
-  const listName = listSelect.getText();
+  const listName = listSelect.querySelector('.selected-text') ? listSelect.querySelector('.selected-text').textContent : "Unknown List";
 
   // Ignore the "+ Create New List..." pseudo-option.
-  if (!listId || listId === "__create_new__") return;
+  if (!listId || listId === "__create_new__" || listId === "__all_lists__") return;
 
   if (confirm(`Are you sure you want to clear all words from the "${listName}" list? This cannot be undone.`)) {
     chrome.storage.local.get(['history'], (result) => {
@@ -1371,9 +1385,8 @@ function escapeCSV(str) {
 function exportHistory() {
   const listSelect = document.getElementById('list-select');
   const selectedListId = listSelect.value;
-  const selectedListName = listSelect.options[listSelect.selectedIndex]?.text;
 
-  if (!selectedListId || selectedListId === "__create_new__") {
+  if (!selectedListId || selectedListId === "__create_new__" || selectedListId === "__all_lists__") {
     updateIOStatus("No valid list selected to export.", "error");
     return;
   }
@@ -1391,9 +1404,10 @@ function exportHistory() {
 
     // --- REVISED: Filter history for the selected list ---
     const historyToExport = allHistory.filter(item => item.listId === selectedListId);
+    const listNameStr = listIdToNameMap[selectedListId] || "Unlisted";
 
     if (historyToExport.length === 0) {
-      updateIOStatus(`The list "${selectedListName}" is empty. Nothing to export.`, "error");
+      updateIOStatus(`The list "${listNameStr}" is empty. Nothing to export.`, "error");
       return;
     }
 
@@ -1421,7 +1435,7 @@ function exportHistory() {
     // --- FIX: Add UTF-8 BOM for Excel compatibility ---
     const blob = new Blob(['\uFEFF' + csvString], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
-    const safeFilename = selectedListName.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+    const safeFilename = listNameStr.replace(/[^a-z0-9]/gi, '_').toLowerCase();
     const link = document.createElement('a');
     link.href = url;
     link.download = `ai_infopedia_${safeFilename}.csv`; // --- REVISED: Dynamic filename ---
@@ -1432,7 +1446,7 @@ function exportHistory() {
     document.body.removeChild(link);
 
     URL.revokeObjectURL(url);
-    updateIOStatus(`List "${selectedListName}" exported successfully!`, "success");
+    updateIOStatus(`List "${listNameStr}" exported successfully!`, "success");
 
     // --- NEW: Reset backup reminder ---
     resetBackupReminder();
@@ -2149,7 +2163,7 @@ function restoreBackup() {
       let restoredCount = 0;
 
       for (const key in backupData) {
-        if (keysToRestore.includes(key) || key === 'history' || key === 'lists' || key === 'wordLists') {
+        if (keysToRestore.includes(key)) {
           dataToSave[key] = backupData[key];
           restoredCount++;
         }
@@ -2565,7 +2579,6 @@ function debounce(func, wait) {
   let timeout;
   return function executedFunction(...args) {
     const later = () => {
-      clearTimeout(timeout);
       func(...args);
     };
     clearTimeout(timeout);
