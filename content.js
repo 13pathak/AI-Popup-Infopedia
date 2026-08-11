@@ -571,12 +571,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       const selection = window.getSelection();
       const selectedText = selection.toString().trim();
       if (selectedText.length > 0) {
-        const wordCount = selectedText.split(/\s+/).filter(word => word.length > 0).length;
-        if (wordCount <= 6) {
-          const rect = selection.getRangeAt(0).getBoundingClientRect();
-          // For manual trigger, we can skip the Open button and just show the popup.
-          initiatePopupSequence(rect, selectedText);
-        }
+        const rect = selection.getRangeAt(0).getBoundingClientRect();
+        // For manual trigger, we can skip the Open button and just show the popup.
+        initiatePopupSequence(rect, selectedText);
       } else {
         // NEW: Trigger empty popup for questioning when no text is selected
         initiateEmptyPopupSequence();
@@ -610,6 +607,10 @@ function initiateEmptyPopupSequence() {
     
     adjustPopupPosition(popupInstance, null);
     
+    if (popupInstance.popup) {
+      popupInstance.popup.style.visibility = 'visible';
+    }
+
     setTimeout(() => {
       const input = popupInstance.popup.querySelector('#ai-popup-followup-input');
       if (input) input.focus();
