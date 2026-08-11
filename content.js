@@ -1050,7 +1050,7 @@ function retryMessage(instance, messageIndex) {
       } else {
         instance.messages[messageIndex] = { 
            role: 'assistant', 
-           content: `<span style="color:red;">Error retrying message: ${response?.error || 'Unknown error'}</span>`, 
+           content: `<span style="color:red;">Error retrying message: ${String(response?.error || 'Unknown error').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;')}</span>`, 
            isError: true 
         };
       }
@@ -2052,7 +2052,7 @@ function triggerVerification(popupInstance, originalPrompt, aiResponse) {
     let detailsHtml = '';
     if (response.result && response.result.reasoning) {
        detailsHtml = `<a href="#" id="${verifyId}-toggle" style="margin-left: 10px; font-size: 11px; text-decoration: underline; color: inherit; opacity: 0.7;">View reasoning</a>
-       <div style="margin-top: 8px; font-size: 11px; color: inherit; opacity: 0.9; border-top: 1px solid rgba(128,128,128,0.3); padding-top: 6px; display: none;" id="${verifyId}-details"><strong>Reasoning:</strong> ${response.result.reasoning}</div>`;
+       <div style="margin-top: 8px; font-size: 11px; color: inherit; opacity: 0.9; border-top: 1px solid rgba(128,128,128,0.3); padding-top: 6px; display: none;" id="${verifyId}-details"><strong>Reasoning:</strong> ${String(response.result.reasoning).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;')}</div>`;
     }
 
     if (response.result && response.result.is_hallucinating) {
@@ -2061,7 +2061,7 @@ function triggerVerification(popupInstance, originalPrompt, aiResponse) {
       
       let correctionsHtml = '<ul style="margin:5px 0 0 20px; padding:0;">';
       if (Array.isArray(response.result.corrections)) {
-         response.result.corrections.forEach(c => { correctionsHtml += `<li style="margin-bottom:3px;">${c}</li>`; });
+         response.result.corrections.forEach(c => { correctionsHtml += `<li style="margin-bottom:3px;">${String(c).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;')}</li>`; });
       }
       correctionsHtml += '</ul>';
       
