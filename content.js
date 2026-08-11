@@ -2,6 +2,15 @@
 let activePopups = []; // Array of { container, popup, isInteracting, isClickInside }
 let baseZIndex = 2100000000;
 
+function escapeHTML(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 // --- Styles (unchanged) ---
 const popupStyles = `
   #ai-definition-popup {
