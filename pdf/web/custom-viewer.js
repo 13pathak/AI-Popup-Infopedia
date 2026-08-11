@@ -244,12 +244,14 @@ async function calculateScaleAndRender() {
 }
 
 document.getElementById('zoom_in').addEventListener('click', () => {
+    if (!pdfDoc) return;
     currentZoomMode = 'custom';
     scale += 0.25;
     renderAllPages();
 });
 
 document.getElementById('zoom_out').addEventListener('click', () => {
+    if (!pdfDoc) return;
     currentZoomMode = 'custom';
     if (scale <= 0.5) return;
     scale -= 0.25;
@@ -257,11 +259,13 @@ document.getElementById('zoom_out').addEventListener('click', () => {
 });
 
 document.getElementById('fit_width').addEventListener('click', () => {
+    if (!pdfDoc) return;
     currentZoomMode = 'page-width';
     calculateScaleAndRender();
 });
 
 document.getElementById('fit_page').addEventListener('click', () => {
+    if (!pdfDoc) return;
     currentZoomMode = 'page-fit';
     calculateScaleAndRender();
 });
