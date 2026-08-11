@@ -697,7 +697,7 @@ function initiatePopupSequence(rect, selectedText, customPrompt) {
 
       if (response && response.error) {
         const errorId = 'error-' + Date.now();
-        const errorHtml = `<span style="color:red;">Error: ${response.error}</span> <button id="${errorId}-retry" class="ai-popup-retry-btn" style="background:#4db6ac; color:white; border:none; border-radius:3px; cursor:pointer; padding:2px 6px; font-size:11px; margin-left:5px;">Reload</button>`;
+        const errorHtml = `<span style="color:red;">Error: ${String(response.error).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;')}</span> <button id="${errorId}-retry" class="ai-popup-retry-btn" style="background:#4db6ac; color:white; border:none; border-radius:3px; cursor:pointer; padding:2px 6px; font-size:11px; margin-left:5px;">Reload</button>`;
         
         // Temporarily put error in messages to render it
         popupInstance.messages = [
@@ -1202,7 +1202,7 @@ function redefineWithModelAndPrompt(instance, word, modelId, promptContent) {
 
         if (response && response.error) {
           const errorId = 'error-' + Date.now();
-          const errorHtml = `<span style="color:red;">Error: ${response.error}</span> <button id="${errorId}-retry" class="ai-popup-retry-btn" style="background:#4db6ac; color:white; border:none; border-radius:3px; cursor:pointer; padding:2px 6px; font-size:11px; margin-left:5px;">Reload</button>`;
+          const errorHtml = `<span style="color:red;">Error: ${String(response.error).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;')}</span> <button id="${errorId}-retry" class="ai-popup-retry-btn" style="background:#4db6ac; color:white; border:none; border-radius:3px; cursor:pointer; padding:2px 6px; font-size:11px; margin-left:5px;">Reload</button>`;
           
           // Temporarily put error in messages to render it
           instance.messages = [
@@ -1780,7 +1780,7 @@ function createFollowupInput(instance, word) {
         } else {
           // Add error message with retry button to history
           const errorId = 'error-' + Date.now();
-          const errorHtml = `<span style="color:red;">Error: ${response?.error || 'Unknown error'}</span> <button id="${errorId}-retry" class="ai-popup-retry-btn" style="background:#4db6ac; color:white; border:none; border-radius:3px; cursor:pointer; padding:2px 6px; font-size:11px; margin-left:5px;">Reload</button>`;
+          const errorHtml = `<span style="color:red;">Error: ${String(response?.error || 'Unknown error').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;')}</span> <button id="${errorId}-retry" class="ai-popup-retry-btn" style="background:#4db6ac; color:white; border:none; border-radius:3px; cursor:pointer; padding:2px 6px; font-size:11px; margin-left:5px;">Reload</button>`;
           instance.messages.push({ role: 'assistant', content: errorHtml, isError: true, errorId: errorId });
         }
 
