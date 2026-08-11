@@ -1537,6 +1537,7 @@ function createFollowupInput(instance, word) {
   let nativeRecognition = null;
 
   instance.stopMic = () => {
+    instance.isDestroyed = true;
     if (activeMediaRecorder && activeMediaRecorder.state !== 'inactive') activeMediaRecorder.stop();
     if (nativeRecognition) nativeRecognition.stop();
     isRecording = false;
@@ -1584,6 +1585,10 @@ function createFollowupInput(instance, word) {
   async function startApiRecording() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (instance.isDestroyed) {
+        stream.getTracks().forEach(track => track.stop());
+        return;
+      }
       activeMediaRecorder = new MediaRecorder(stream);
       audioChunks = [];
       
@@ -1698,6 +1703,7 @@ function createFollowupInput(instance, word) {
     }
     
     chrome.storage.sync.get({ sttEngine: 'native' }, (items) => {
+      if (instance.isDestroyed) return;
       if (items.sttEngine === 'api') {
         startApiRecording();
       } else {
