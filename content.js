@@ -1117,6 +1117,20 @@ function createSelectors(instance, models, prompts, currentModelId, currentPromp
   promptSelector.id = 'ai-popup-prompt-selector';
 
   if (prompts && prompts.length > 0) {
+    // Add System Default option
+    const systemOption = document.createElement('option');
+    systemOption.value = ''; // Empty string represents system default
+    systemOption.textContent = defaultPromptId === 'system' ? 'System Default (Default)' : 'System Default';
+    
+    // Select the system option if it's explicitly the current one (empty string), or if no current one is set and it's the default.
+    if (currentPromptContent === '') {
+      systemOption.selected = true;
+    } else if (!currentPromptContent && defaultPromptId === 'system') {
+      systemOption.selected = true;
+    }
+    
+    promptSelector.appendChild(systemOption);
+
     prompts.forEach(prompt => {
       const option = document.createElement('option');
       option.value = prompt.content; // Use content as value for simplicity

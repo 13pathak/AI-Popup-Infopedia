@@ -88,7 +88,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
       }
 
-      const prompt = promptTemplate.replaceAll('{word}', word);
+      let prompt = promptTemplate.replaceAll('{word}', word);
+      if (!promptTemplate.includes('{word}')) {
+        prompt += `\n\nWord/Concept: ${word}`;
+      }
 
       // Sanitize the messages array for strict API compatibility
       let safeMessagesText = [];
