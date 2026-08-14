@@ -367,6 +367,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     chrome.tabs.create({ url: "data:text/html;charset=utf-8," + encodeURIComponent(request.htmlContent) });
   }
 
+  // --- Case 2.8: Test AI Connection & Setup ---
+  if (request.type === "testConnection") {
+    handleTestConnection(request, sendResponse);
+    return true; // async
+  }
+
   // --- Case 3: Get all word lists ---
   if (request.type === "getWordLists") {
     // --- UPDATED: Now also get the lastUsedListId ---
@@ -783,4 +789,326 @@ chrome.webRequest.onHeadersReceived.addListener(
   { urls: ["<all_urls>"] },
   ["responseHeaders"]
 );
+
+// --- Diagnostic Test Connection Handler ---
+async function handleTestConnection(request, sendResponse) {
+  try {
+    const data = await new Promise(resolve => {
+      chrome.storage.sync.get(['models', 'defaultModelId', 'tavilyApiKey'], resolve);
+    });
+
+    const { models = [], defaultModelId, tavilyApiKey } = data;
+    let modelToTest = null;
+
+    if (request.modelConfig) {
+      // Direct config passed from model form (testing before saving)
+      modelToTest = request.modelConfig;
+    } else if (request.modelId) {
+      modelToTest = models.find(m => m.id === request.modelId);
+    } else if (defaultModelId) {
+      modelToTest = models.find(m => m.id === defaultModelId);
+    } else if (models.length > 0) {
+      modelToTest = models[0];
+    }
+
+    const steps = [];
+
+    const failEarly = (configMsg, summaryMsg) => {
+      steps.push({
+        id: "config",
+        status: "fail",
+        title: "1. Storage & Configuration Check",
+        message: configMsg
+      });
+      steps.push({
+        id: "reachability",
+        status: "pending",
+        title: "2. Endpoint Reachability Check",
+        message: "Skipped (configuration check failed)."
+      });
+      steps.push({
+        id: "auth",
+        status: "pending",
+        title: "3. Authentication & Model Response Check",
+        message: "Skipped."
+      });
+      steps.push({
+        id: "search",
+        status: "pending",
+        title: "4. Web Search Integration Check",
+        message: "Skipped."
+      });
+      sendResponse({
+        success: false,
+        steps: steps,
+        summary: summaryMsg || `Setup test failed: ${configMsg}`
+      });
+    };
+
+    // Step 1: Storage & Configuration Check
+    if (!modelToTest) {
+      failEarly(
+        "No AI model is configured or selected.",
+        "Setup test failed: No AI model configured."
+      );
+      return;
+    }
+
+    const { endpointUrl, modelName, apiKey, name: configName, enableSearchGrounding } = modelToTest;
+
+    if (!endpointUrl || typeof endpointUrl !== 'string' || !endpointUrl.trim()) {
+      failEarly(
+        "Endpoint URL is missing. Please provide a valid API endpoint.",
+        "Setup test failed: Endpoint URL is missing."
+      );
+      return;
+    }
+
+    let parsedUrl;
+    try {
+      parsedUrl = new URL(endpointUrl.trim());
+      if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+        throw new Error("Invalid protocol");
+      }
+    } catch (e) {
+      failEarly(
+        `Endpoint URL is malformed: "${endpointUrl}". Must start with http:// or https://.`,
+        "Setup test failed: Endpoint URL is malformed."
+      );
+      return;
+    }
+
+    if (!modelName || typeof modelName !== 'string' || !modelName.trim()) {
+      failEarly(
+        "Model Name is missing. Please enter the model ID (e.g. gemini-1.5-flash, llama3, gpt-4o-mini).",
+        "Setup test failed: Model Name is missing."
+      );
+      return;
+    }
+
+    const isLocal = parsedUrl.hostname === 'localhost' || parsedUrl.hostname === '127.0.0.1';
+    let configDetail = `Config: "${configName || modelName}" | Host: ${parsedUrl.hostname} | Model: ${modelName.trim()}`;
+    if (!apiKey && !isLocal) {
+      configDetail += " (Notice: No API key set — make sure this provider allows unauthenticated requests)";
+    }
+    steps.push({
+      id: "config",
+      status: "pass",
+      title: "1. Storage & Configuration Check",
+      message: configDetail
+    });
+
+    // Step 2 & 3: Reachability & Auth/Model Verification
+    const headers = {
+      'Content-Type': 'application/json'
+    };
+    if (apiKey && apiKey.trim()) {
+      headers['Authorization'] = `Bearer ${apiKey.trim()}`;
+    }
+
+    const testPayload = {
+      model: modelName.trim(),
+      messages: [{ role: "user", content: "Hi" }],
+      max_tokens: 5,
+      stream: false
+    };
+
+    const startTime = Date.now();
+    let response;
+    try {
+      response = await fetchWithTimeout(endpointUrl.trim(), {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify(testPayload)
+      }, 15000);
+    } catch (networkError) {
+      const isTimeout = networkError.message && networkError.message.includes("timed out");
+      let reachabilityMsg = "";
+      if (isTimeout) {
+        reachabilityMsg = `Connection timed out after 15s when trying to reach ${parsedUrl.hostname}. Check if the server is responding.`;
+      } else if (isLocal) {
+        reachabilityMsg = `Could not connect to local server at ${parsedUrl.origin}. Is Ollama or your local LLM running? If using Ollama, make sure CORS is enabled (e.g., OLLAMA_ORIGINS="*").`;
+      } else {
+        reachabilityMsg = `Network connection failed when reaching ${parsedUrl.hostname}: ${networkError.message}. Check your internet connection or URL spelling.`;
+      }
+
+      steps.push({
+        id: "reachability",
+        status: "fail",
+        title: "2. Endpoint Reachability Check",
+        message: reachabilityMsg
+      });
+      steps.push({
+        id: "auth",
+        status: "pending",
+        title: "3. Authentication & Model Response Check",
+        message: "Skipped due to reachability failure."
+      });
+      steps.push({
+        id: "search",
+        status: "pending",
+        title: "4. Web Search Integration Check",
+        message: "Skipped."
+      });
+
+      sendResponse({
+        success: false,
+        steps: steps,
+        summary: `Setup test failed: ${reachabilityMsg}`
+      });
+      return;
+    }
+
+    const latencyMs = Date.now() - startTime;
+
+    // Passed reachability!
+    steps.push({
+      id: "reachability",
+      status: "pass",
+      title: "2. Endpoint Reachability Check",
+      message: `Successfully reached ${parsedUrl.hostname} (${latencyMs}ms roundtrip).`
+    });
+
+    // Step 3: Check response status & body
+    if (response.ok) {
+      let responseBody = null;
+      try {
+        responseBody = await response.json();
+      } catch (e) {
+        // Non-JSON response
+      }
+
+      steps.push({
+        id: "auth",
+        status: "pass",
+        title: "3. Authentication & Model Response Check",
+        message: `API Key & Model Verified! Model "${modelName}" responded successfully in ${latencyMs}ms.`
+      });
+    } else {
+      let errorDetail = "";
+      try {
+        const errorJson = await response.json();
+        errorDetail = (typeof errorJson.error === 'string' ? errorJson.error : errorJson.error?.message) || errorJson.message || errorJson.detail || JSON.stringify(errorJson);
+      } catch (e) {
+        try {
+          errorDetail = await response.text();
+        } catch (e2) {
+          errorDetail = response.statusText || `HTTP ${response.status}`;
+        }
+      }
+
+      let authMsg = "";
+      if (response.status === 401 || response.status === 403) {
+        authMsg = `Authentication Failed (HTTP ${response.status}): Your API key is invalid, expired, or missing permissions for this model. (Provider response: ${errorDetail})`;
+      } else if (response.status === 404) {
+        authMsg = `Model or Endpoint Not Found (HTTP 404): The endpoint URL path or the model name "${modelName}" is not recognized by the provider. (Provider response: ${errorDetail})`;
+      } else if (response.status === 429) {
+        authMsg = `Rate Limit or Quota Exceeded (HTTP 429): You have run out of API credits or exceeded the request rate limit. (Provider response: ${errorDetail})`;
+      } else if (response.status === 400 || response.status === 422) {
+        authMsg = `Bad Request (HTTP ${response.status}): Provider rejected the test request. Model name "${modelName}" may be invalid or deprecated. (Provider response: ${errorDetail})`;
+      } else {
+        authMsg = `Provider returned HTTP error ${response.status}: ${errorDetail}`;
+      }
+
+      steps.push({
+        id: "auth",
+        status: "fail",
+        title: "3. Authentication & Model Response Check",
+        message: authMsg
+      });
+
+      steps.push({
+        id: "search",
+        status: "pending",
+        title: "4. Web Search Integration Check",
+        message: "Skipped due to authentication failure."
+      });
+
+      sendResponse({
+        success: false,
+        steps: steps,
+        summary: `Setup test failed: ${authMsg}`
+      });
+      return;
+    }
+
+    // Step 4: Web Search Check
+    if (enableSearchGrounding) {
+      if (!tavilyApiKey || !tavilyApiKey.trim()) {
+        steps.push({
+          id: "search",
+          status: "warn",
+          title: "4. Web Search Integration Check",
+          message: "Web search is enabled for this model, but no Tavily API Key is configured in settings. Web grounding will not work until you add a Tavily key in Search API Settings."
+        });
+      } else {
+        try {
+          const tavilyRes = await fetchWithTimeout("https://api.tavily.com/search", {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ api_key: tavilyApiKey.trim(), query: "test", max_results: 1 })
+          }, 10000);
+
+          if (tavilyRes.ok) {
+            steps.push({
+              id: "search",
+              status: "pass",
+              title: "4. Web Search Integration Check",
+              message: "Tavily Web Search API is verified and operational."
+            });
+          } else {
+            steps.push({
+              id: "search",
+              status: "fail",
+              title: "4. Web Search Integration Check",
+              message: `Tavily Search check failed with HTTP ${tavilyRes.status}. Please check your Tavily API Key in Search API Settings.`
+            });
+          }
+        } catch (tavilyErr) {
+          steps.push({
+            id: "search",
+            status: "fail",
+            title: "4. Web Search Integration Check",
+            message: `Could not reach Tavily Search API: ${tavilyErr.message}`
+          });
+        }
+      }
+    } else {
+      steps.push({
+        id: "search",
+        status: "skipped",
+        title: "4. Web Search Integration Check",
+        message: "Web search is disabled for this model (Optional)."
+      });
+    }
+
+    const hasFailure = steps.some(s => s.status === "fail");
+    const hasWarning = steps.some(s => s.status === "warn");
+
+    let summaryText = "All checks passed! Infopedia is configured properly and ready to use.";
+    if (hasWarning) {
+      summaryText = "Core AI setup passed! Notice: Web search has a warning (check Tavily settings).";
+    }
+
+    sendResponse({
+      success: !hasFailure,
+      steps: steps,
+      summary: summaryText
+    });
+
+  } catch (unexpectedError) {
+    sendResponse({
+      success: false,
+      steps: [
+        {
+          id: "general",
+          status: "fail",
+          title: "Diagnostic Execution Error",
+          message: unexpectedError.message || String(unexpectedError)
+        }
+      ],
+      summary: `Diagnostic test failed: ${unexpectedError.message}`
+    });
+  }
+}
 

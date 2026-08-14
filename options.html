@@ -249,6 +249,108 @@
 
         /* Common Icon Button Style */
         
+        /* --- DIAGNOSTIC TEST STYLES --- */
+        .test-setup-card {
+            background-color: var(--input-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 18px;
+            margin-top: 20px;
+            margin-bottom: 25px;
+        }
+
+        .test-step-row {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            padding: 10px 12px;
+            border-radius: 6px;
+            background-color: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            margin-bottom: 8px;
+            transition: all 0.2s ease;
+        }
+
+        .test-step-row.pass {
+            border-left: 3px solid var(--secondary-color);
+        }
+
+        .test-step-row.fail {
+            border-left: 3px solid var(--danger-color);
+            background-color: rgba(239, 68, 68, 0.06);
+        }
+
+        .test-step-row.warn {
+            border-left: 3px solid #F59E0B;
+            background-color: rgba(245, 158, 11, 0.06);
+        }
+
+        .test-step-row.running {
+            border-left: 3px solid var(--primary-color);
+            background-color: rgba(59, 130, 246, 0.06);
+        }
+
+        .test-step-row.pending,
+        .test-step-row.skipped {
+            border-left: 3px solid var(--border-color);
+            background-color: transparent;
+            opacity: 0.6;
+        }
+
+        .test-step-icon {
+            font-size: 1.1em;
+            line-height: 1.2;
+            flex-shrink: 0;
+        }
+
+        .test-step-title {
+            font-weight: 600;
+            color: var(--text-color);
+            font-size: 0.95em;
+        }
+
+        .test-step-detail {
+            color: var(--text-muted);
+            font-size: 0.85em;
+            margin-top: 3px;
+            line-height: 1.4;
+            word-break: break-word;
+        }
+
+        .test-summary-box {
+            margin-top: 14px;
+            padding: 12px 14px;
+            border-radius: 8px;
+            font-size: 0.9em;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .test-summary-box.success {
+            background-color: rgba(16, 185, 129, 0.12);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            color: #34D399;
+        }
+
+        .test-summary-box.failure {
+            background-color: rgba(239, 68, 68, 0.12);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: #F87171;
+        }
+
+        @keyframes pulseSpinner {
+            0% { transform: scale(0.95); opacity: 0.7; }
+            50% { transform: scale(1.1); opacity: 1; }
+            100% { transform: scale(0.95); opacity: 0.7; }
+        }
+
+        .test-spinner {
+            display: inline-block;
+            animation: pulseSpinner 1s infinite ease-in-out;
+        }
+
         /* --- STATS DASHBOARD STYLES --- */
         .dashboard-grid {
             display: grid;
@@ -650,6 +752,59 @@
         <p id="no-models-message" style="display: none; margin-top: 10px;">No models configured. Click '+' to add one.
         </p>
 
+        <!-- Test Connection & Setup Diagnostic Card -->
+        <div id="test-setup-container" class="test-setup-card">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+                <div style="flex: 1; min-width: 250px;">
+                    <h4 style="margin: 0; display: flex; align-items: center; gap: 8px; color: var(--text-color); font-size: 1.05em;">
+                        <span>⚡</span> Test Connection & Setup
+                    </h4>
+                    <p style="margin: 4px 0 0 0; color: var(--text-muted); font-size: 0.85em;">
+                        Verify model configuration, API credentials, server reachability, and web search in real time.
+                    </p>
+                </div>
+                <button id="run-test-setup-btn" style="background-color: var(--primary-color); padding: 8px 16px; font-weight: 600; display: flex; align-items: center; gap: 6px; white-space: nowrap;">
+                    <span id="test-btn-icon">▶</span> <span id="test-btn-label">Run Diagnostic Test</span>
+                </button>
+            </div>
+            
+            <div id="test-setup-results" style="display: none; margin-top: 16px; border-top: 1px solid var(--border-color); padding-top: 14px;">
+                <div id="test-step-config" class="test-step-row">
+                    <span class="test-step-icon">⚪</span>
+                    <div class="test-step-body" style="flex-grow: 1;">
+                        <div class="test-step-title">1. Storage & Configuration Check</div>
+                        <div class="test-step-detail">Waiting to start...</div>
+                    </div>
+                </div>
+                
+                <div id="test-step-reachability" class="test-step-row">
+                    <span class="test-step-icon">⚪</span>
+                    <div class="test-step-body" style="flex-grow: 1;">
+                        <div class="test-step-title">2. Endpoint Reachability Check</div>
+                        <div class="test-step-detail">Waiting...</div>
+                    </div>
+                </div>
+                
+                <div id="test-step-auth" class="test-step-row">
+                    <span class="test-step-icon">⚪</span>
+                    <div class="test-step-body" style="flex-grow: 1;">
+                        <div class="test-step-title">3. Authentication & Model Response Check</div>
+                        <div class="test-step-detail">Waiting...</div>
+                    </div>
+                </div>
+                
+                <div id="test-step-search" class="test-step-row">
+                    <span class="test-step-icon">⚪</span>
+                    <div class="test-step-body" style="flex-grow: 1;">
+                        <div class="test-step-title">4. Web Search Integration Check</div>
+                        <div class="test-step-detail">Waiting...</div>
+                    </div>
+                </div>
+
+                <div id="test-final-summary" class="test-summary-box" style="display: none;"></div>
+            </div>
+        </div>
+
         <div id="model-form-container" style="display: none;">
             <h3 id="form-title">Add New Model</h3>
             <input type="hidden" id="model-id">
@@ -676,6 +831,7 @@
             </div>
             <div id="model-form-actions">
                 <button id="save-model-btn" style="background-color: var(--primary-color);">Save Model</button>
+                <button id="test-form-model-btn" type="button" style="background-color: var(--button-bg);">⚡ Test Inputs</button>
                 <button id="cancel-model-btn">Cancel</button>
             </div>
         </div>

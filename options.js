@@ -85,6 +85,8 @@ document.addEventListener('DOMContentLoaded', () => {
   safeAddListener('enable-hallucination-guard', 'change', saveHallucinationGuardSettings);
   safeAddListener('verification-model-select', 'change', saveHallucinationGuardSettings);
   safeAddListener('save-tavily-btn', 'click', saveSearchApiSettings);
+  safeAddListener('run-test-setup-btn', 'click', () => runDiagnosticTest());
+  safeAddListener('test-form-model-btn', 'click', () => runFormDiagnosticTest());
 
   safeAddListener('export-history', 'click', exportHistory);
   safeAddListener('import-history', 'click', () => document.getElementById('import-file-input').click());
@@ -3233,6 +3235,194 @@ function saveSTTSettings() {
       statusEl.textContent = 'Settings saved successfully!';
       statusEl.style.color = 'var(--secondary-color)';
       setTimeout(() => { statusEl.textContent = ''; }, 3000);
+    }
+  });
+}
+
+// --- DIAGNOSTIC CONNECTION & SETUP TEST ---
+function runDiagnosticTest(targetModelId = null) {
+  const modelId = targetModelId || document.getElementById('model-select')?.value;
+  executeDiagnosticCheck({ modelId });
+}
+
+function runFormDiagnosticTest() {
+  const endpoint = document.getElementById('endpoint')?.value?.trim() || '';
+  const modelName = document.getElementById('modelName')?.value?.trim() || '';
+
+  if (!endpoint || !modelName) {
+    alert("Please enter both an Endpoint URL and a Model Name to run the diagnostic test.");
+    return;
+  }
+
+  const modelConfig = {
+    name: document.getElementById('configName')?.value?.trim() || 'New Model',
+    endpointUrl: endpoint,
+    modelName: modelName,
+    apiKey: document.getElementById('apiKey')?.value?.trim() || '',
+    enableSearchGrounding: document.getElementById('enableSearchGrounding')?.checked || false
+  };
+
+  executeDiagnosticCheck({ modelConfig });
+}
+
+function executeDiagnosticCheck(requestData) {
+  const resultsContainer = document.getElementById('test-setup-results');
+  const runBtn = document.getElementById('run-test-setup-btn');
+  const btnIcon = document.getElementById('test-btn-icon');
+  const btnLabel = document.getElementById('test-btn-label');
+  const formTestBtn = document.getElementById('test-form-model-btn');
+  const summaryBox = document.getElementById('test-final-summary');
+
+  if (!resultsContainer) return;
+
+  resultsContainer.style.display = 'block';
+  if (summaryBox) {
+    summaryBox.style.display = 'none';
+    summaryBox.className = 'test-summary-box';
+  }
+
+  // Reset steps to initial state
+  const stepIds = ['config', 'reachability', 'auth', 'search'];
+  stepIds.forEach(id => {
+    const row = document.getElementById(`test-step-${id}`);
+    if (row) {
+      row.className = 'test-step-row running';
+      const icon = row.querySelector('.test-step-icon');
+      const detail = row.querySelector('.test-step-detail');
+      if (icon) icon.innerHTML = '<span class="test-spinner">⏳</span>';
+      if (detail) detail.textContent = 'Checking...';
+    }
+  });
+
+  if (runBtn) {
+    runBtn.disabled = true;
+    if (btnIcon) btnIcon.textContent = '⏳';
+    if (btnLabel) btnLabel.textContent = 'Testing...';
+  }
+  if (formTestBtn) {
+    formTestBtn.disabled = true;
+    formTestBtn.textContent = '⏳ Testing...';
+  }
+
+  chrome.runtime.sendMessage({
+    type: "testConnection",
+    ...requestData
+  }, (response) => {
+    if (runBtn) {
+      runBtn.disabled = false;
+      if (btnIcon) btnIcon.textContent = '▶';
+      if (btnLabel) btnLabel.textContent = 'Run Diagnostic Test';
+    }
+    if (formTestBtn) {
+      formTestBtn.disabled = false;
+      formTestBtn.textContent = '⚡ Test Inputs';
+    }
+
+    if (chrome.runtime.lastError) {
+      stepIds.forEach(id => {
+        const row = document.getElementById(`test-step-${id}`);
+        if (row) {
+          row.className = 'test-step-row fail';
+          const icon = row.querySelector('.test-step-icon');
+          const detail = row.querySelector('.test-step-detail');
+          if (icon) icon.textContent = '❌';
+          if (detail) detail.textContent = `Extension error: ${chrome.runtime.lastError.message}`;
+        }
+      });
+      return;
+    }
+
+    if (!response || !response.steps) {
+      if (summaryBox) {
+        summaryBox.style.display = 'flex';
+        summaryBox.className = 'test-summary-box failure';
+        summaryBox.innerHTML = '<span>❌</span><span>Failed to receive diagnostic test results from background worker.</span>';
+      }
+      return;
+    }
+
+    // Reset all step rows from running state before rendering response
+    stepIds.forEach(id => {
+      const row = document.getElementById(`test-step-${id}`);
+      if (row) {
+        row.className = 'test-step-row pending';
+        const icon = row.querySelector('.test-step-icon');
+        const detail = row.querySelector('.test-step-detail');
+        if (icon) icon.textContent = '⚪';
+        if (detail) detail.textContent = 'Skipped.';
+      }
+    });
+
+    // Render each step from response
+    response.steps.forEach(step => {
+      const row = document.getElementById(`test-step-${step.id}`);
+      if (row) {
+        row.className = `test-step-row ${step.status}`;
+        const icon = row.querySelector('.test-step-icon');
+        const detail = row.querySelector('.test-step-detail');
+
+        if (icon) {
+          if (step.status === 'pass') icon.textContent = '✅';
+          else if (step.status === 'fail') icon.textContent = '❌';
+          else if (step.status === 'warn') icon.textContent = '⚠️';
+          else icon.textContent = '⚪';
+        }
+
+        if (detail) {
+          detail.textContent = step.message;
+
+          // 1-Click Action Buttons for instant fixes
+          if (step.id === 'config' && step.status === 'fail' && step.message.includes('No AI model is configured')) {
+            const addBtn = document.createElement('button');
+            addBtn.className = 'test-action-btn';
+            addBtn.innerHTML = '➕ Add Model Configuration';
+            addBtn.style.cssText = 'margin-top: 8px; background-color: var(--secondary-color); padding: 6px 14px; font-size: 0.88em; font-weight: 600; border-radius: 6px; border: none; color: #fff; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;';
+            addBtn.onclick = () => {
+              showModelForm(false);
+              document.getElementById('model-form-container')?.scrollIntoView({ behavior: 'smooth' });
+            };
+            detail.appendChild(document.createElement('br'));
+            detail.appendChild(addBtn);
+          } else if (step.id === 'auth' && step.status === 'fail') {
+            const editBtn = document.createElement('button');
+            editBtn.className = 'test-action-btn';
+            editBtn.innerHTML = '✏️ Edit Model & API Key';
+            editBtn.style.cssText = 'margin-top: 8px; background-color: var(--primary-color); padding: 6px 14px; font-size: 0.88em; font-weight: 600; border-radius: 6px; border: none; color: #fff; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;';
+            editBtn.onclick = () => {
+              editSelectedModel();
+              document.getElementById('model-form-container')?.scrollIntoView({ behavior: 'smooth' });
+            };
+            detail.appendChild(document.createElement('br'));
+            detail.appendChild(editBtn);
+          } else if (step.id === 'search' && step.status === 'warn') {
+            const tavilyBtn = document.createElement('button');
+            tavilyBtn.className = 'test-action-btn';
+            tavilyBtn.innerHTML = '🔑 Open Search API Settings';
+            tavilyBtn.style.cssText = 'margin-top: 8px; background-color: #F59E0B; padding: 6px 14px; font-size: 0.88em; font-weight: 600; border-radius: 6px; border: none; color: #000; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;';
+            tavilyBtn.onclick = () => {
+              const searchSection = document.getElementById('search-api-container');
+              if (searchSection) {
+                searchSection.scrollIntoView({ behavior: 'smooth' });
+                document.getElementById('tavily-api-key')?.focus();
+              }
+            };
+            detail.appendChild(document.createElement('br'));
+            detail.appendChild(tavilyBtn);
+          }
+        }
+      }
+    });
+
+    // Render final summary
+    if (summaryBox) {
+      summaryBox.style.display = 'flex';
+      if (response.success) {
+        summaryBox.className = 'test-summary-box success';
+        summaryBox.innerHTML = `<span>✅</span><span>${escapeHTML(response.summary || 'All checks passed!')}</span>`;
+      } else {
+        summaryBox.className = 'test-summary-box failure';
+        summaryBox.innerHTML = `<span>❌</span><span>${escapeHTML(response.summary || 'One or more diagnostic checks failed.')}</span>`;
+      }
     }
   });
 }
