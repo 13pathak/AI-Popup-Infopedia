@@ -1458,19 +1458,21 @@ function createActionButtons(instance, word, definition, modelName, promptName, 
         sourceTitle: document.title,
         citations: citationsToSave
       }, (saveResponse) => {
-        if (saveResponse && saveResponse.status === 'saved') {
+        actionsContainer.innerHTML = ''; // Clear the controls
+        const savedText = document.createElement('span');
+        if (chrome.runtime.lastError || (saveResponse && saveResponse.status === 'error')) {
+          console.error('Failed to save definition:', chrome.runtime.lastError || saveResponse?.error);
+          savedText.textContent = '✕ Failed to save';
+          savedText.style.color = '#ff8585';
+        } else {
           console.log('Definition saved to list.');
+          savedText.textContent = '✓ Saved to list';
+          savedText.style.color = '#b7f7eb';
         }
+        savedText.style.opacity = '0.8';
+        savedText.style.fontWeight = '600';
+        actionsContainer.appendChild(savedText);
       });
-
-      // Update UI to show "Saved!"
-      actionsContainer.innerHTML = ''; // Clear the controls
-      const savedText = document.createElement('span');
-      savedText.textContent = '✓ Saved to list';
-      savedText.style.opacity = '0.8';
-      savedText.style.color = '#b7f7eb';
-      savedText.style.fontWeight = '600';
-      actionsContainer.appendChild(savedText);
 
       // --- REMOVED: Auto-close logic ---
       // We keep the popup open so the user can continue interacting.

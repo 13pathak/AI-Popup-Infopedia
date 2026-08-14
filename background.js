@@ -204,9 +204,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         // The Orchestrator Loop
         while (loopCount < maxLoops) {
+          const choice = data.choices && data.choices.length > 0 ? data.choices[0] : null;
+          const message = choice ? choice.message : null;
+
+          if (!message) {
+            aiText = "The AI returned an empty response or the response was filtered.";
+            break;
+          }
+
           // Check if AI wants to use a tool
-          if (data.choices && data.choices[0].message.tool_calls) {
-            const toolCall = data.choices[0].message.tool_calls[0];
+          if (message.tool_calls && message.tool_calls.length > 0) {
+            const toolCall = message.tool_calls[0];
             
             if (toolCall.function.name === "web_search" && tavilyApiKey) {
               // 1. Extract the query
@@ -241,8 +249,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               // 3. Append to history and make next API call
               safeMessagesText.push({
                 role: "assistant",
-                content: data.choices[0].message.content || "",
-                tool_calls: data.choices[0].message.tool_calls
+                content: message.content || "",
+                tool_calls: message.tool_calls
               }); // Safely add the AI's tool request
               safeMessagesText.push({
                 role: "tool",
@@ -316,14 +324,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             }
           } else {
             // Standard text response received!
-            aiText = data.choices[0].message.content;
+            aiText = message.content || "The AI returned an empty response.";
             break;
           }
         }
         
         // Fallback if it looped too many times or content was null
         if (!aiText) {
-          aiText = data.choices[0].message.content || "The AI reached maximum search depth or returned an empty response.";
+          const fallbackContent = data?.choices?.[0]?.message?.content;
+          aiText = fallbackContent || "The AI reached maximum search depth or returned an empty response.";
         }
 
         sendResponse({ definition: aiText, usedWebSearch: usedWebSearch, citations: citations, usedPrompt: prompt, models: models, defaultModelId: defaultModelId, customPrompts: customPrompts || [], defaultPromptId: defaultPromptId, promptName: promptName });
@@ -342,8 +351,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // --- Case 2: Save an item to history ---
   if (request.type === "saveToHistory") {
     // We pass sendResponse as a callback to run *after* saving
-    saveToHistory(request.word, request.definition, request.listId, request.modelName, request.promptName, request.sourceUrl, request.sourceTitle, request.citations, () => {
-      sendResponse({ status: "saved" });
+    saveToHistory(request.word, request.definition, request.listId, request.modelName, request.promptName, request.sourceUrl, request.sourceTitle, request.citations, (err) => {
+      if (err) {
+        sendResponse({ status: "error", error: err.message });
+      } else {
+        sendResponse({ status: "saved" });
+      }
     });
     // Return true to tell Chrome this is an async operation
     return true;
@@ -485,6 +498,15 @@ function saveToHistory(word, definition, listId, modelName, promptName, sourceUr
   historySavePromise = historySavePromise.then(() => {
     return new Promise((resolve) => {
       chrome.storage.local.get(['history'], (result) => {
+        if (chrome.runtime.lastError) {
+          console.error("Failed to read history from storage:", chrome.runtime.lastError);
+          if (callback) {
+            callback(chrome.runtime.lastError);
+          }
+          resolve();
+          return;
+        }
+
         let history = result.history || [];
 
         // Create new history item
@@ -505,8 +527,15 @@ function saveToHistory(word, definition, listId, modelName, promptName, sourceUr
 
         // --- NEW: Save back history AND the lastUsedListId ---
         chrome.storage.local.set({ history: history, lastUsedListId: listId }, () => {
-          if (callback) {
-            callback();
+          if (chrome.runtime.lastError) {
+            console.error("Failed to save history to storage:", chrome.runtime.lastError);
+            if (callback) {
+              callback(chrome.runtime.lastError);
+            }
+          } else {
+            if (callback) {
+              callback(null);
+            }
           }
           resolve();
         });

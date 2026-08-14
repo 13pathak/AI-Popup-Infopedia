@@ -5,6 +5,7 @@
   "description": "Select a word to get an AI-powered explanation.",
   "permissions": [
     "storage",
+    "unlimitedStorage",
     "alarms",
     "downloads",
     "webNavigation",
