@@ -48,6 +48,11 @@ document.addEventListener('DOMContentLoaded', () => {
       if (tab.dataset.tab === "stt-content") {
         loadSTTSettings();
       }
+
+      // --- NEW: Load Support & Diagnostic info when tab is clicked ---
+      if (tab.dataset.tab === "support-content") {
+        loadSupportDiagnosticInfo();
+      }
     });
   });
 
@@ -61,6 +66,29 @@ document.addEventListener('DOMContentLoaded', () => {
   loadHallucinationGuardSettings(); // Load Hallucination Guard settings
   loadSearchApiSettings(); // Load Search API settings
   loadPdfAuthorName(); // Load Custom Author Name
+
+  // Check if a specific tab was requested (e.g. from popup troubleshooting action)
+  function activateRequestedTab(tabName) {
+    const targetBtn = document.querySelector(`.tab-button[data-tab="${tabName}"]`);
+    if (targetBtn) {
+      targetBtn.click();
+      targetBtn.scrollIntoView({ behavior: 'smooth' });
+    }
+    chrome.storage.local.remove('activeOptionsTab');
+  }
+
+  chrome.storage.local.get(['activeOptionsTab'], (data) => {
+    if (data.activeOptionsTab) {
+      activateRequestedTab(data.activeOptionsTab);
+    }
+  });
+
+  // Also listen for changes so deep-linking works when options page is already open
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && changes.activeOptionsTab && changes.activeOptionsTab.newValue) {
+      activateRequestedTab(changes.activeOptionsTab.newValue);
+    }
+  });
 
   // Helper helper to safely add listeners
   function safeAddListener(id, event, handler) {
@@ -87,6 +115,23 @@ document.addEventListener('DOMContentLoaded', () => {
   safeAddListener('save-tavily-btn', 'click', saveSearchApiSettings);
   safeAddListener('run-test-setup-btn', 'click', () => runDiagnosticTest());
   safeAddListener('test-form-model-btn', 'click', () => runFormDiagnosticTest());
+  safeAddListener('copy-diag-btn', 'click', copyDiagnosticInfo);
+  safeAddListener('support-run-test-btn', 'click', () => {
+    const settingsTab = document.querySelector('.tab-button[data-tab="settings-content"]');
+    if (settingsTab) settingsTab.click();
+    runDiagnosticTest();
+    document.getElementById('test-setup-container')?.scrollIntoView({ behavior: 'smooth' });
+  });
+
+  // Init FAQ Accordion handlers
+  document.querySelectorAll('.faq-question').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const item = btn.closest('.faq-item');
+      if (item) {
+        item.classList.toggle('active');
+      }
+    });
+  });
 
   safeAddListener('export-history', 'click', exportHistory);
   safeAddListener('import-history', 'click', () => document.getElementById('import-file-input').click());
@@ -199,8 +244,8 @@ function showModelForm(isEdit = false, model = {}) {
   document.getElementById('form-title').textContent = isEdit ? 'Edit Model' : 'Add New Model';
   document.getElementById('model-id').value = model.id || '';
   document.getElementById('configName').value = model.name || '';
-  document.getElementById('endpoint').value = model.endpointUrl || 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
-  document.getElementById('modelName').value = model.modelName || 'gemini-1.5-flash-latest';
+  document.getElementById('endpoint').value = model.endpointUrl || '';
+  document.getElementById('modelName').value = model.modelName || '';
   document.getElementById('apiKey').value = model.apiKey || '';
   document.getElementById('enableSearchGrounding').checked = model.enableSearchGrounding || false;
 
@@ -3424,5 +3469,108 @@ function executeDiagnosticCheck(requestData) {
         summaryBox.innerHTML = `<span>❌</span><span>${escapeHTML(response.summary || 'One or more diagnostic checks failed.')}</span>`;
       }
     }
+  });
+}
+
+// --- SUPPORT & DIAGNOSTIC HELPERS ---
+function loadSupportDiagnosticInfo() {
+  const manifest = chrome.runtime.getManifest();
+  const version = manifest?.version || '8.0';
+  const diagExtVer = document.getElementById('diag-ext-version');
+  if (diagExtVer) diagExtVer.textContent = `v${version}`;
+
+  // Browser detection
+  const ua = navigator.userAgent;
+  let browserStr = 'Chrome';
+  if (ua.includes('Edg/')) {
+    const match = ua.match(/Edg\/([\d.]+)/);
+    browserStr = match ? `Edge ${match[1].split('.')[0]}` : 'Microsoft Edge';
+  } else if (ua.includes('Brave/')) {
+    browserStr = 'Brave';
+  } else if (ua.includes('OPR/') || ua.includes('Opera/')) {
+    browserStr = 'Opera';
+  } else {
+    const match = ua.match(/Chrome\/([\d.]+)/);
+    browserStr = match ? `Chrome ${match[1].split('.')[0]}` : 'Chromium';
+  }
+  const diagBrowser = document.getElementById('diag-browser-version');
+  if (diagBrowser) diagBrowser.textContent = browserStr;
+
+  // OS detection
+  let osStr = 'Unknown OS';
+  if (ua.includes('Win')) osStr = 'Windows';
+  else if (ua.includes('Mac')) osStr = 'macOS';
+  else if (ua.includes('Linux')) osStr = 'Linux';
+  else if (ua.includes('CrOS')) osStr = 'ChromeOS';
+  const diagOs = document.getElementById('diag-os-platform');
+  if (diagOs) diagOs.textContent = osStr;
+
+  // Active Model & Setup Status
+  chrome.storage.sync.get(['models', 'defaultModelId', 'tavilyApiKey'], (data) => {
+    const models = data.models || [];
+    const defaultModelId = data.defaultModelId;
+    const activeModel = models.find(m => m.id === defaultModelId) || (models.length > 0 ? models[0] : null);
+
+    const diagModel = document.getElementById('diag-active-model');
+    const diagStatus = document.getElementById('diag-setup-status');
+
+    if (activeModel) {
+      if (diagModel) diagModel.textContent = activeModel.name || activeModel.modelName;
+      if (diagStatus) {
+        diagStatus.textContent = 'Configured ✓';
+        diagStatus.style.color = 'var(--secondary-color)';
+      }
+    } else {
+      if (diagModel) diagModel.textContent = 'None';
+      if (diagStatus) {
+        diagStatus.textContent = 'Needs Setup ⚠';
+        diagStatus.style.color = '#F59E0B';
+      }
+    }
+  });
+}
+
+function copyDiagnosticInfo() {
+  const manifest = chrome.runtime.getManifest();
+  const version = manifest?.version || '8.0';
+  const browser = document.getElementById('diag-browser-version')?.textContent || 'Chrome';
+  const os = document.getElementById('diag-os-platform')?.textContent || 'Windows';
+  const model = document.getElementById('diag-active-model')?.textContent || 'None';
+  const status = document.getElementById('diag-setup-status')?.textContent || 'Unknown';
+
+  chrome.storage.sync.get(['models', 'defaultModelId', 'tavilyApiKey'], (data) => {
+    const models = data.models || [];
+    const activeModel = models.find(m => m.id === data.defaultModelId) || (models.length > 0 ? models[0] : null);
+    let endpointHost = 'None';
+    if (activeModel?.endpointUrl) {
+      try {
+        endpointHost = new URL(activeModel.endpointUrl).hostname;
+      } catch (e) {
+        endpointHost = 'Invalid URL';
+      }
+    }
+
+    const diagText = [
+      '### Infopedia Diagnostic Information',
+      `- **Extension Version:** v${version}`,
+      `- **Browser:** ${browser}`,
+      `- **Operating System:** ${os}`,
+      `- **Configured Model:** ${model}`,
+      `- **Endpoint Host:** ${endpointHost}`,
+      `- **Search Grounding:** ${activeModel?.enableSearchGrounding ? 'Enabled' : 'Disabled'}`,
+      `- **Status:** ${status}`,
+      `- **Date:** ${new Date().toUTCString()}`
+    ].join('\n');
+
+    navigator.clipboard.writeText(diagText).then(() => {
+      const copyStatus = document.getElementById('copy-diag-status');
+      if (copyStatus) {
+        copyStatus.textContent = '✓ Diagnostic info copied to clipboard! You can paste it into an email or issue.';
+        setTimeout(() => { copyStatus.textContent = ''; }, 4000);
+      }
+    }).catch((err) => {
+      console.error('Failed to copy diagnostics:', err);
+      prompt('Could not copy automatically. You can copy the diagnostic info below:', diagText);
+    });
   });
 }

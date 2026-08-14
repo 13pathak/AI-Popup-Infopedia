@@ -290,6 +290,75 @@ const popupStyles = `
   #ai-open-button-popup:hover {
     background-color: #62c3b8;
   }
+
+  /* --- Feedback Prompt Banner Styles --- */
+  .ai-feedback-banner {
+    margin-top: 10px;
+    padding: 10px 12px;
+    background: rgba(15, 23, 42, 0.9);
+    border: 1px solid rgba(125, 211, 252, 0.28);
+    border-radius: 8px;
+    font-size: 12px;
+    line-height: 1.4;
+    box-sizing: border-box;
+    animation: ai-popup-enter 180ms ease-out;
+  }
+  .ai-feedback-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    font-weight: 600;
+    color: #e2e8f0;
+    font-size: 12px;
+  }
+  .ai-feedback-close {
+    background: none;
+    border: none;
+    color: #94a3b8;
+    cursor: pointer;
+    font-size: 14px;
+    padding: 0 4px;
+    line-height: 1;
+    border-radius: 4px;
+  }
+  .ai-feedback-close:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.1);
+  }
+  .ai-feedback-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .ai-feedback-btn {
+    background: #1e293b;
+    border: 1px solid #475569;
+    border-radius: 6px;
+    color: #f1f5f9;
+    padding: 5px 9px;
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-family: inherit;
+    transition: all 0.15s ease;
+  }
+  .ai-feedback-btn:hover {
+    background: #334155;
+    border-color: #64748b;
+    color: #fff;
+  }
+  .ai-feedback-btn.primary {
+    background: #0284c7;
+    border-color: #38bdf8;
+    color: #fff;
+  }
+  .ai-feedback-btn.primary:hover {
+    background: #0369a1;
+  }
 `;
 
 // --- NEW: Custom Dropdown Helpers ---
@@ -751,6 +820,9 @@ function initiatePopupSequence(rect, selectedText, customPrompt) {
             }
           }
         });
+
+        // --- Milestone-Based Feedback Prompt Check (5th successful lookup) ---
+        checkAndShowFeedbackPrompt(popupInstance);
       }
       adjustPopupPosition(popupInstance, rect);
     });
@@ -2171,4 +2243,162 @@ const obs = new MutationObserver(mutations => {
   }
 });
 obs.observe(document.body, { childList: true, subtree: true });
+
+// --- Milestone-Based Feedback Prompt Helper Functions ---
+function checkAndShowFeedbackPrompt(instance) {
+  if (!instance || !instance.popup) return;
+
+  chrome.storage.local.get([
+    'successfulLookupsCount',
+    'feedbackPromptDismissed',
+    'feedbackPromptDismissedAt'
+  ], (data) => {
+    if (chrome.runtime.lastError) return;
+
+    // Guard: popup may have been closed while storage was reading
+    if (!activePopups.includes(instance) || !instance.popup) return;
+
+    const currentCount = (data.successfulLookupsCount || 0) + 1;
+
+    // Save incremented count
+    chrome.storage.local.set({ successfulLookupsCount: currentCount });
+
+    // Dismissal check: if dismissed within 30 days, do not show
+    const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+    const isDismissedRecently = data.feedbackPromptDismissed && (Date.now() - (data.feedbackPromptDismissedAt || 0) < thirtyDaysMs);
+    if (isDismissedRecently) {
+      return;
+    }
+
+    // Trigger condition: at 5th lookup, then every 25 lookups thereafter
+    const isEligible = (currentCount === 5) || (currentCount > 5 && currentCount % 25 === 0);
+    if (!isEligible) {
+      return;
+    }
+
+    // Prevent duplicate banners in the same popup
+    if (instance.popup.querySelector('.ai-feedback-banner')) {
+      return;
+    }
+
+    renderFeedbackBanner(instance);
+  });
+}
+
+function dismissFeedbackPrompt(bannerElement) {
+  chrome.storage.local.set({
+    feedbackPromptDismissed: true,
+    feedbackPromptDismissedAt: Date.now()
+  });
+  if (bannerElement) {
+    bannerElement.style.opacity = '0';
+    bannerElement.style.transform = 'translateY(4px)';
+    bannerElement.style.transition = 'all 0.2s ease';
+    setTimeout(() => bannerElement.remove(), 200);
+  }
+}
+
+function renderFeedbackBanner(instance) {
+  const popup = instance.popup;
+  if (!popup) return;
+
+  const banner = document.createElement('div');
+  banner.className = 'ai-feedback-banner';
+
+  const showInitialView = () => {
+    banner.innerHTML = `
+      <div class="ai-feedback-header">
+        <span>How's Infopedia working for you?</span>
+        <button class="ai-feedback-close" title="Dismiss">✕</button>
+      </div>
+      <div class="ai-feedback-actions">
+        <button class="ai-feedback-btn" data-action="good">👍 Working well</button>
+        <button class="ai-feedback-btn" data-action="trouble">👎 Something isn't working</button>
+        <button class="ai-feedback-btn" data-action="feedback">💬 Send feedback</button>
+      </div>
+    `;
+
+    banner.querySelector('.ai-feedback-close')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      dismissFeedbackPrompt(banner);
+    });
+
+    banner.querySelector('[data-action="good"]')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      showGoodView();
+    });
+
+    banner.querySelector('[data-action="trouble"]')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      showTroubleView();
+    });
+
+    banner.querySelector('[data-action="feedback"]')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      dismissFeedbackPrompt(banner);
+      window.open('https://github.com/13pathak/AI-Popup-Infopedia/issues/new', '_blank');
+    });
+  };
+
+  const showGoodView = () => {
+    banner.innerHTML = `
+      <div class="ai-feedback-header">
+        <span>Glad to hear it! Thanks for using Infopedia.</span>
+        <button class="ai-feedback-close" title="Dismiss">✕</button>
+      </div>
+      <div class="ai-feedback-actions">
+        <button class="ai-feedback-btn primary" data-action="review">⭐ Optional: Leave a review on Chrome Web Store</button>
+        <button class="ai-feedback-btn" data-action="dismiss">Dismiss</button>
+      </div>
+    `;
+
+    banner.querySelector('.ai-feedback-close')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      dismissFeedbackPrompt(banner);
+    });
+
+    banner.querySelector('[data-action="dismiss"]')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      dismissFeedbackPrompt(banner);
+    });
+
+    banner.querySelector('[data-action="review"]')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      dismissFeedbackPrompt(banner);
+      window.open('https://chromewebstore.google.com/detail/ai-popup-infopedia/jejfdgeiihgomipkhjkbplikgkcjcpab/reviews', '_blank');
+    });
+  };
+
+  const showTroubleView = () => {
+    banner.innerHTML = `
+      <div class="ai-feedback-header">
+        <span>Sorry to hear that! Let us help you get it running.</span>
+        <button class="ai-feedback-close" title="Dismiss">✕</button>
+      </div>
+      <div class="ai-feedback-actions">
+        <button class="ai-feedback-btn primary" data-action="troubleshoot">⚡ Open Troubleshooting & Support</button>
+        <button class="ai-feedback-btn" data-action="dismiss">Dismiss</button>
+      </div>
+    `;
+
+    banner.querySelector('.ai-feedback-close')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      dismissFeedbackPrompt(banner);
+    });
+
+    banner.querySelector('[data-action="dismiss"]')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      dismissFeedbackPrompt(banner);
+    });
+
+    banner.querySelector('[data-action="troubleshoot"]')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      dismissFeedbackPrompt(banner);
+      chrome.runtime.sendMessage({ type: "openOptionsTab", tab: "support-content" });
+    });
+  };
+
+  showInitialView();
+  popup.appendChild(banner);
+}
 

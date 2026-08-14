@@ -373,6 +373,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true; // async
   }
 
+  // --- Case 2.9: Open Options Page Tab (e.g. support-content) ---
+  if (request.type === "openOptionsTab") {
+    const targetTab = request.tab || 'support-content';
+    chrome.storage.local.set({ activeOptionsTab: targetTab }, () => {
+      chrome.runtime.openOptionsPage();
+    });
+  }
+
   // --- Case 3: Get all word lists ---
   if (request.type === "getWordLists") {
     // --- UPDATED: Now also get the lastUsedListId ---
