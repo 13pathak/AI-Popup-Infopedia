@@ -811,14 +811,22 @@ document.getElementById('edit-btn-trash').addEventListener('click', () => {
     hidePopups();
 });
 
-// Convert hex color to rgb ratios for pdf-lib
+// Convert hex color to rgb ratios for pdf-lib (returns { r: 0-1, g: 0-1, b: 0-1 })
 function hexToRgb(hex) {
-    var result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    const defaultColor = { r: 1, g: 1, b: 152 / 255 }; // Default yellow #FFFF98
+    if (!hex || typeof hex !== 'string') {
+        return defaultColor;
+    }
+    let cleanHex = hex.trim().replace(/^#/, '');
+    if (cleanHex.length === 3 || cleanHex.length === 4) {
+        cleanHex = cleanHex.slice(0, 3).split('').map(c => c + c).join('');
+    }
+    const result = /^([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})/i.exec(cleanHex);
     return result ? {
         r: parseInt(result[1], 16) / 255,
         g: parseInt(result[2], 16) / 255,
         b: parseInt(result[3], 16) / 255
-    } : null;
+    } : defaultColor;
 }
 
 document.getElementById('export_md').addEventListener('click', () => {
