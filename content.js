@@ -1100,7 +1100,8 @@ function retryMessage(instance, messageIndex) {
 
   // The conversation context we send should be everything UP TO the user's prompt (which is messageIndex - 1)
   // because we are rewriting the assistant's previous answer at `messageIndex`.
-  const messagesContext = instance.messages.slice(0, messageIndex);
+  // Error placeholders are raw display HTML, never real assistant replies, so drop them.
+  const messagesContext = instance.messages.slice(0, messageIndex).filter(m => !m.isError);
   
   // Set the message state to loading
   instance.messages[messageIndex] = { role: 'assistant', content: '<i>Thinking...</i>', isError: false, needsRetry: false };
@@ -1861,7 +1862,7 @@ function createFollowupInput(instance, word) {
     const modelId = selectedModelOpt ? selectedModelOpt.value : null;
 
     chrome.runtime.sendMessage(
-      { type: "getAiDefinition", word: word, modelId: modelId, messages: instance.messages.filter(m => !m.isThinking) },
+      { type: "getAiDefinition", word: word, modelId: modelId, messages: instance.messages.filter(m => !m.isThinking && !m.isError) },
       (response) => {
         if (!activePopups.includes(instance)) return;
 
@@ -1892,35 +1893,32 @@ function createFollowupInput(instance, word) {
           const errorId = 'error-' + Date.now();
           const errorHtml = `<span style="color:red;">Error: ${String(response?.error || 'Unknown error').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;')}</span> <button id="${errorId}-retry" class="ai-popup-retry-btn" style="background:#4db6ac; color:white; border:none; border-radius:3px; cursor:pointer; padding:2px 6px; font-size:11px; margin-left:5px;">Reload</button>`;
           instance.messages.push({ role: 'assistant', content: errorHtml, isError: true, errorId: errorId });
+
+          // Setup the error retry button (errorId is unique to this error)
+          setTimeout(() => {
+            const retryBtn = popup.querySelector(`#${errorId}-retry`);
+            if (retryBtn) {
+              retryBtn.addEventListener('click', (e) => {
+                 e.preventDefault();
+                 e.stopPropagation();
+                 e.target.textContent = "Working...";
+                 e.target.style.opacity = "0.7";
+                 e.target.style.cursor = "wait";
+                 setTimeout(() => {
+                   // Remove only this error message — anything appended after it
+                   // (a newer follow-up, indicators) must survive.
+                   const idx = instance.messages.findIndex(m => m.errorId === errorId);
+                   if (idx !== -1) instance.messages.splice(idx, 1);
+                   performFetch();
+                 }, 150);
+              });
+            }
+          }, 0);
         }
 
         try {
           renderMessages(instance);
         } catch(e) { console.error("render crashed on post-fetch", e); }
-
-        // Setup the error retry button
-        if (response && response.error) {
-          setTimeout(() => {
-            const lastMsg = instance.messages[instance.messages.length - 1];
-            if (lastMsg && lastMsg.errorId) {
-              const retryBtn = popup.querySelector(`#${lastMsg.errorId}-retry`);
-              if (retryBtn) {
-                retryBtn.addEventListener('click', (e) => {
-                   e.preventDefault();
-                   e.stopPropagation();
-                   e.target.textContent = "Working...";
-                   e.target.style.opacity = "0.7";
-                   e.target.style.cursor = "wait";
-                   setTimeout(() => {
-                     // Pop off the error
-                     instance.messages.pop();
-                     performFetch();
-                   }, 150);
-                });
-              }
-            }
-          }, 0);
-        }
       }
     );
   }
