@@ -28,9 +28,13 @@ if (!fileUrl) {
     fileUrl = '../../test.pdf';
 }
 
+function hasChromeStorage() {
+    return typeof chrome !== 'undefined' && Boolean(chrome && chrome.storage && chrome.storage.local);
+}
+
 async function loadStorageData() {
     return new Promise((resolve) => {
-        if (!chrome || !chrome.storage) {
+        if (!hasChromeStorage()) {
             resolve(); // Not running in extension context
             return;
         }
@@ -39,17 +43,22 @@ async function loadStorageData() {
         const bookmarksKey = 'pdf_bookmarks_' + fileUrl;
         const lastPageKey = 'pdf_lastpage_' + fileUrl;
         
-        chrome.storage.local.get([highlightsKey, bookmarksKey, lastPageKey], (result) => {
+        chrome.storage.local.get([highlightsKey, bookmarksKey, lastPageKey, 'pdf_dark_mode'], (result) => {
+            if (result.pdf_dark_mode) {
+                document.body.classList.add('dark-mode');
+                const darkBtn = document.getElementById('dark_mode_toggle');
+                if (darkBtn) darkBtn.innerHTML = '☀️ Light Mode';
+            }
             if (result[highlightsKey]) {
                 highlights = result[highlightsKey];
                 if (highlights.length > 0) {
-                    highlightCounter = Math.max(...highlights.map(h => h.id || 0));
+                    highlightCounter = highlights.reduce((max, h) => Math.max(max, (h && h.id) || 0), 0);
                 }
             }
             if (result[bookmarksKey]) {
                 bookmarks = result[bookmarksKey];
                 if (bookmarks.length > 0) {
-                    bookmarkCounter = Math.max(...bookmarks.map(b => b.id || 0));
+                    bookmarkCounter = bookmarks.reduce((max, b) => Math.max(max, (b && b.id) || 0), 0);
                 }
             }
             if (result[lastPageKey]) {
@@ -63,21 +72,21 @@ async function loadStorageData() {
 }
 
 function saveHighlights() {
-    if (!chrome || !chrome.storage) return;
+    if (!hasChromeStorage()) return;
     const storageKey = 'pdf_highlights_' + fileUrl;
     chrome.storage.local.set({ [storageKey]: highlights });
     if (typeof renderSidebar === 'function') renderSidebar();
 }
 
 function saveBookmarks() {
-    if (!chrome || !chrome.storage) return;
+    if (!hasChromeStorage()) return;
     const storageKey = 'pdf_bookmarks_' + fileUrl;
     chrome.storage.local.set({ [storageKey]: bookmarks });
     if (typeof renderBookmarks === 'function') renderBookmarks();
 }
 
 function saveLastPage(pageNum) {
-    if (!chrome || !chrome.storage) return;
+    if (!hasChromeStorage()) return;
     const storageKey = 'pdf_lastpage_' + fileUrl;
     chrome.storage.local.set({ [storageKey]: pageNum });
 }
@@ -676,6 +685,9 @@ document.getElementById('dark_mode_toggle').addEventListener('click', () => {
     const isDark = document.body.classList.contains('dark-mode');
     const btn = document.getElementById('dark_mode_toggle');
     btn.innerHTML = isDark ? '☀️ Light Mode' : '🌙 Dark Mode';
+    if (hasChromeStorage()) {
+        chrome.storage.local.set({ 'pdf_dark_mode': isDark });
+    }
 });
 
 document.getElementById('bookmark_page').addEventListener('click', () => {
@@ -1313,7 +1325,7 @@ function renderSidebar() {
     sidebarContent.innerHTML = '';
     
     if (highlights.length === 0) {
-        sidebarContent.innerHTML = '<div style="color:#666; text-align:center; margin-top:20px; font-size:13px;">No comments or highlights yet.</div>';
+        sidebarContent.innerHTML = '<div class="sidebar-empty-msg">No comments or highlights yet.</div>';
         return;
     }
     
@@ -1413,7 +1425,7 @@ function renderBookmarks() {
     sidebarContent.innerHTML = '';
     
     if (bookmarks.length === 0) {
-        sidebarContent.innerHTML = '<div style="color:#666; text-align:center; margin-top:20px; font-size:13px;">No bookmarks yet.</div>';
+        sidebarContent.innerHTML = '<div class="sidebar-empty-msg">No bookmarks yet.</div>';
         return;
     }
     
@@ -1521,7 +1533,7 @@ function scrollToHighlight(hl) {
 
 function renderOutline(outline) {
     if (!outline || outline.length === 0) {
-        contentOutline.innerHTML = '<div style="color:#666; text-align:center; margin-top:20px; font-size:13px;">No outline available.</div>';
+        contentOutline.innerHTML = '<div class="sidebar-empty-msg">No outline available.</div>';
         return;
     }
     
