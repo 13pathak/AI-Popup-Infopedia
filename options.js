@@ -567,6 +567,14 @@ async function exportAllSettings() {
     // --- NEW: Exclude Anki settings from this export ---
     delete syncData.ankiSettings;
 
+    // syncData includes live secrets (each model's apiKey, tavilyApiKey,
+    // sttApiKey/sttCustomHeaders) so the file is self-contained for restore.
+    // Make the plaintext-secrets consequence explicit before writing the file.
+    if (!confirm("The export file will contain your API keys in plain text (model keys, web-search key, and speech-to-text key).\n\nStore it securely and do not share it. Continue with the export?")) {
+      updateGlobalIOStatus('Export cancelled.', 'info');
+      return;
+    }
+
     // 2. Create the settings object
     const allSettings = {
       syncData: syncData,

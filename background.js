@@ -664,6 +664,10 @@ function triggerBackup(type = "Auto") {
   chrome.storage.local.get(['history', 'wordLists'], (localData) => {
     chrome.storage.sync.get(['models', 'customPrompts', 'defaultModelId', 'defaultPromptId', 'ankiSettings', 'ttsSettings', 'backupReminderFrequency', 'backupSubfolder', 'followupCustomMessage', 'showUserQuestions', 'sttEngine', 'sttApiKey', 'sttApiUrl', 'sttModel', 'sttCustomHeaders', 'sttCustomFormData'], (syncData) => {
 
+      // SECURITY NOTE: this backup intentionally includes secrets (each
+      // model's apiKey, sttApiKey, sttCustomHeaders) so that restores are
+      // self-contained. The file is written unencrypted to the user's
+      // Downloads folder — backups must be treated as credentials.
       const backupData = {
         history: localData.history || [],
         wordLists: localData.wordLists || [],
