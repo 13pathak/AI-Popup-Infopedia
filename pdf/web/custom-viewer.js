@@ -112,58 +112,56 @@ async function setupPage(num) {
 }
 
 async function renderPageContent(pageDiv) {
-    if (pageDiv.dataset.loaded === "true") return;
-    pageDiv.dataset.loaded = "true";
+    if (pageDiv.dataset.loaded === "true" || pageDiv.dataset.loaded === "rendering") return;
+    pageDiv.dataset.loaded = "rendering";
 
-    const page = pageDiv._pdfPage;
-    const viewport = pageDiv._viewport;
-    // Ensure ultra-crisp text by rendering at a higher internal resolution (at least 2x)
-    const outputScale = Math.max(window.devicePixelRatio || 1, 2);
+    try {
+        // Clean up any leftover DOM nodes from a previous failed attempt
+        pageDiv.innerHTML = '';
 
-    // Create canvas
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    canvas.width = Math.floor(viewport.width * outputScale);
-    canvas.height = Math.floor(viewport.height * outputScale);
-    
-    // Use exact floating point dimensions for CSS to avoid subpixel scaling blur
-    canvas.style.width = viewport.width + "px";
-    canvas.style.height = viewport.height + "px";
-    pageDiv.appendChild(canvas);
+        const page = pageDiv._pdfPage;
+        const viewport = pageDiv._viewport;
+        const outputScale = Math.max(window.devicePixelRatio || 1, 2);
 
-    // Create text layer
-    const textLayerDiv = document.createElement('div');
-    textLayerDiv.className = 'textLayer';
-    textLayerDiv.style.width = `${viewport.width}px`;
-    textLayerDiv.style.height = `${viewport.height}px`;
-    textLayerDiv.style.setProperty('--scale-factor', viewport.scale);
-    pageDiv.appendChild(textLayerDiv);
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = Math.floor(viewport.width * outputScale);
+        canvas.height = Math.floor(viewport.height * outputScale);
+        canvas.style.width = viewport.width + "px";
+        canvas.style.height = viewport.height + "px";
+        pageDiv.appendChild(canvas);
 
-    // Render PDF page into canvas context
-    const transform = outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : null;
-    const renderContext = {
-        canvasContext: ctx,
-        transform: transform,
-        viewport: viewport
-    };
-    
-    // Render text and canvas in parallel
-    const renderTask = page.render(renderContext).promise;
-    
-    const textContent = await page.getTextContent();
-    const textLayer = new pdfjsLib.TextLayer({
-        textContentSource: textContent,
-        container: textLayerDiv,
-        viewport: viewport,
-        textDivs: []
-    });
-    
-    await Promise.all([renderTask, textLayer.render()]);
-    
-    // Draw existing highlights for this page
-    drawHighlightsForPage(parseInt(pageDiv.dataset.pageNumber), pageDiv, viewport);
-    drawSearchHighlightsForPage(parseInt(pageDiv.dataset.pageNumber), pageDiv, viewport);
-    renderLinkAnnotations(page, pageDiv, viewport);
+        const textLayerDiv = document.createElement('div');
+        textLayerDiv.className = 'textLayer';
+        textLayerDiv.style.width = `${viewport.width}px`;
+        textLayerDiv.style.height = `${viewport.height}px`;
+        textLayerDiv.style.setProperty('--scale-factor', viewport.scale);
+        pageDiv.appendChild(textLayerDiv);
+
+        const transform = outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : null;
+        const renderContext = { canvasContext: ctx, transform, viewport };
+
+        const renderTask = page.render(renderContext).promise;
+        const textContent = await page.getTextContent();
+        const textLayer = new pdfjsLib.TextLayer({
+            textContentSource: textContent,
+            container: textLayerDiv,
+            viewport: viewport,
+            textDivs: []
+        });
+
+        await Promise.all([renderTask, textLayer.render()]);
+
+        drawHighlightsForPage(parseInt(pageDiv.dataset.pageNumber), pageDiv, viewport);
+        drawSearchHighlightsForPage(parseInt(pageDiv.dataset.pageNumber), pageDiv, viewport);
+        renderLinkAnnotations(page, pageDiv, viewport);
+
+        pageDiv.dataset.loaded = "true";
+    } catch (err) {
+        console.error(`Error rendering page ${pageDiv.dataset.pageNumber}:`, err);
+        pageDiv.innerHTML = '';
+        pageDiv.dataset.loaded = "error";
+    }
 }
 
 const pageObserver = new IntersectionObserver((entries) => {
