@@ -324,9 +324,13 @@ document.getElementById('fit_page').addEventListener('click', () => {
     calculateScaleAndRender();
 });
 
+let resizeTimeout = null;
 window.addEventListener('resize', () => {
     if (currentZoomMode !== 'custom') {
-        calculateScaleAndRender();
+        if (resizeTimeout) clearTimeout(resizeTimeout);
+        resizeTimeout = setTimeout(() => {
+            calculateScaleAndRender();
+        }, 100);
     }
 });
 // Update page number based on scroll
