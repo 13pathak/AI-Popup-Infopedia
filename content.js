@@ -1488,13 +1488,20 @@ function createActionButtons(instance, word, definition, modelName, promptName, 
       // created. `selectorsContainer` is scoped to createSelectors(), so using
       // it here previously threw a ReferenceError and stopped this callback.
 
-      // Handle clicking outside custom dropdown (inside shadow root)
-      instance.container.shadowRoot.addEventListener('click', (e) => {
-        if (!listSelector.contains(e.target)) {
-          const optionsContainer = listSelector.querySelector('.custom-options');
-          if (optionsContainer) optionsContainer.classList.remove('show');
-        }
-      });
+      // Handle clicking outside custom dropdown (inside shadow root).
+      // Registered once per popup instance; the handler resolves the live
+      // dropdown at click time, so recreateDropdown() never stacks listeners
+      // or keeps detached dropdowns alive via stale closures.
+      if (!instance.listDropdownOutsideClickBound) {
+        instance.listDropdownOutsideClickBound = true;
+        instance.container.shadowRoot.addEventListener('click', (e) => {
+          const dropdown = instance.container.shadowRoot.querySelector('.custom-select-container');
+          if (dropdown && !dropdown.contains(e.target)) {
+            const optionsContainer = dropdown.querySelector('.custom-options');
+            if (optionsContainer) optionsContainer.classList.remove('show');
+          }
+        });
+      }
     }
 
     recreateDropdown(lists, lastUsedListId || (lists.length ? lists[0].id : null));
