@@ -336,7 +336,7 @@ document.addEventListener('mouseup', (e) => {
     }
 
     const selection = window.getSelection();
-    if (!selection || selection.isCollapsed) {
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
         // If they just clicked (no selection), hide the color picker
         // Don't hide edit popup here, click handler deals with it
         document.getElementById('color-picker-popup').classList.add('hidden');
@@ -357,8 +357,16 @@ document.addEventListener('mouseup', (e) => {
     }
 
     const pageDiv = textLayerDiv.closest('.page');
+    if (!pageDiv || !pageDiv.dataset.pageNumber || !pdfDoc) {
+        return;
+    }
     const pageNumber = parseInt(pageDiv.dataset.pageNumber);
     const selectedText = selection.toString();
+    const clientRects = Array.from(range.getClientRects());
+
+    if (clientRects.length === 0) {
+        return;
+    }
 
     // Get viewport to convert coordinates
     pdfDoc.getPage(pageNumber).then(page => {
@@ -366,10 +374,8 @@ document.addEventListener('mouseup', (e) => {
         
         // Get bounding rects relative to the page div
         const pageRect = pageDiv.getBoundingClientRect();
-        const range = selection.getRangeAt(0);
-        const rects = Array.from(range.getClientRects());
         
-        const relativeRects = rects.map(r => {
+        const relativeRects = clientRects.map(r => {
             // CSS pixels relative to page container
             const left = r.left - pageRect.left;
             const top = r.top - pageRect.top;
@@ -399,8 +405,12 @@ document.addEventListener('mouseup', (e) => {
         };
 
         // Show popups near the last rect
-        const lastRect = rects[rects.length - 1];
-        showColorPicker(lastRect.left + window.scrollX, lastRect.bottom + window.scrollY);
+        const lastRect = clientRects[clientRects.length - 1];
+        if (lastRect) {
+            showColorPicker(lastRect.left + window.scrollX, lastRect.bottom + window.scrollY);
+        }
+    }).catch(err => {
+        console.error("Error obtaining page for selection:", err);
     });
 });
 
