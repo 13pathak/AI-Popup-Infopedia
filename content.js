@@ -2209,19 +2209,24 @@ function triggerVerification(popupInstance, originalPrompt, aiResponse) {
 }
 
 
-// NEW: Unselect PDF.js editors when clicking outside in NONE mode
-document.addEventListener('mousedown', (e) => {
-  if (!e.target.closest('.highlightEditor') && !e.target.closest('.editToolbar')) {
-    document.querySelectorAll('.highlightEditor.selectedEditor').forEach(el => {
-      el.classList.remove('selectedEditor');
-      const toolbar = el.querySelector('.editToolbar');
-      if (toolbar) toolbar.classList.add('hidden');
-    });
-  }
-}, true);
-// INJECT CSS VIA JS TO AVOID CACHING ISSUES
-const style = document.createElement('style');
-style.textContent = `
+// NEW: Unselect PDF.js editors when clicking outside in NONE mode.
+// These editor fixes only apply inside the extension's bundled PDF viewer
+// (pdf/web/custom-viewer.html); on ordinary pages the selectors can never
+// match, so skip the listeners and CSS injection entirely.
+if (window.location.pathname.includes('custom-viewer.html')) {
+  document.addEventListener('mousedown', (e) => {
+    if (!e.target.closest('.highlightEditor') && !e.target.closest('.editToolbar')) {
+      document.querySelectorAll('.highlightEditor.selectedEditor').forEach(el => {
+        el.classList.remove('selectedEditor');
+        const toolbar = el.querySelector('.editToolbar');
+        if (toolbar) toolbar.classList.add('hidden');
+      });
+    }
+  }, true);
+
+  // INJECT CSS VIA JS TO AVOID CACHING ISSUES
+  const style = document.createElement('style');
+  style.textContent = `
 /* FIX FOR PDF.JS COLOR PICKER BUG (INJECTED) */
 .annotationEditorLayer .highlightEditor .editToolbar { display: flex !important; visibility: visible !important; opacity: 1 !important; pointer-events: auto !important; z-index: 99999 !important; }
 .annotationEditorLayer .highlightEditor .editToolbar > .dropdown { position:absolute !important; display:flex !important; justify-content:center !important; align-items:center !important; flex-direction:column !important; gap:11px !important; padding-block:8px !important; border-radius:6px !important; background-color:var(--editor-toolbar-bg-color, #f0f0f4) !important; border:1px solid var(--editor-toolbar-border-color, #ccc) !important; box-shadow:var(--editor-toolbar-shadow, 0 2px 6px rgba(0,0,0,0.2)) !important; inset-block-start:calc(100% + 4px) !important; width:calc(100% + 2 * var(--editor-toolbar-padding, 4px)) !important; z-index: 100000 !important; pointer-events: auto !important; }
@@ -2232,25 +2237,9 @@ style.textContent = `
 .annotationEditorLayer .highlightEditor .editToolbar > .dropdown button[aria-selected='true'] > .swatch { outline:2px solid var(--selected-outline-color, #000) !important; }
 .annotationEditorLayer .highlightEditor .editToolbar > .dropdown button:is(:hover, :active, :focus-visible) > .swatch { outline:2px solid var(--hover-outline-color, #666) !important; }
 `;
-document.head.appendChild(style);
-
-
-// DEBUG OBSERVER
-const obs = new MutationObserver(mutations => {
-  for (const mut of mutations) {
-    for (const node of mut.addedNodes) {
-      if (node.classList && node.classList.contains('highlightEditor')) {
-        console.log('[DEBUG] highlightEditor added!', node);
-        setTimeout(() => {
-          const hasToolbar = !!node.querySelector('.editToolbar');
-          const isSelected = node.classList.contains('selectedEditor');
-          console.log('[DEBUG] After 1s, hasToolbar:', hasToolbar, 'isSelected:', isSelected);
-        }, 1000);
-      }
-    }
-  }
-});
-obs.observe(document.body, { childList: true, subtree: true });
+  // about:blank frames (match_about_blank) may lack <head>; never let this throw.
+  (document.head || document.documentElement).appendChild(style);
+}
 
 // --- Milestone-Based Feedback Prompt Helper Functions ---
 function checkAndShowFeedbackPrompt(instance) {
