@@ -94,21 +94,16 @@ function saveLastPage(pageNum) {
 async function setupPage(num) {
     const page = await pdfDoc.getPage(num);
     const viewport = page.getViewport({ scale: scale });
-
-    // Create wrapper for this page
     const pageDiv = document.createElement('div');
     pageDiv.className = 'page';
     pageDiv.style.width = `${viewport.width}px`;
     pageDiv.style.height = `${viewport.height}px`;
     pageDiv.dataset.pageNumber = num;
     pageDiv.dataset.loaded = "false";
-    
-    // Store page and viewport for lazy loading
+
     pageDiv._pdfPage = page;
     pageDiv._viewport = viewport;
-
-    viewerContainer.appendChild(pageDiv);
-    pageObserver.observe(pageDiv);
+    return pageDiv;
 }
 
 async function renderPageContent(pageDiv) {
@@ -213,19 +208,56 @@ async function loadPDF() {
 }
 
 async function renderAllPages() {
+    if (!pdfDoc) return;
+
     const scrollContainer = document.getElementById('viewerContainer');
     const scrollRatio = scrollContainer.scrollHeight > 0 ? (scrollContainer.scrollTop / scrollContainer.scrollHeight) : 0;
-    
-    viewerContainer.innerHTML = ''; // clear
-    pageObserver.disconnect();
+
     zoomLevelSpan.textContent = Math.round(scale * 100) + "%";
-    
-    // Setup page containers without rendering content
-    for (let i = 1; i <= pdfDoc.numPages; i++) {
-        await setupPage(i);
+    const existingPageDivs = viewerContainer.querySelectorAll('.page');
+
+    // Case 1: Zoom / scale change on an already-built document ->
+    // fast in-place resize, no DOM destruction, no flash.
+    if (existingPageDivs.length === pdfDoc.numPages) {
+        existingPageDivs.forEach(pageDiv => {
+            if (pageDiv._pdfPage) {
+                const newViewport = pageDiv._pdfPage.getViewport({ scale: scale });
+                pageDiv._viewport = newViewport;
+                pageDiv.style.width = `${newViewport.width}px`;
+                pageDiv.style.height = `${newViewport.height}px`;
+            }
+            unloadPageContent(pageDiv);
+
+            // Resizing alone doesn't cross an IntersectionObserver threshold
+            // for pages that were already visible, so it won't re-fire the
+            // callback on its own. Re-observing forces a fresh check of
+            // current intersection state, so visible pages actually redraw.
+            pageObserver.unobserve(pageDiv);
+            pageObserver.observe(pageDiv);
+        });
+
+        scrollContainer.scrollTop = scrollContainer.scrollHeight * scrollRatio;
+        updatePageNumber();
+        return;
     }
-    
-    // Restore scroll position
+
+    // Case 2: Initial load -> fetch all pages in parallel, build off-DOM,
+    // insert in a single mutation.
+    viewerContainer.innerHTML = '';
+    pageObserver.disconnect();
+
+    const pagePromises = [];
+    for (let i = 1; i <= pdfDoc.numPages; i++) {
+        pagePromises.push(setupPage(i));
+    }
+    const pageElements = await Promise.all(pagePromises);
+
+    const fragment = document.createDocumentFragment();
+    pageElements.forEach(pageDiv => fragment.appendChild(pageDiv));
+    viewerContainer.appendChild(fragment);
+
+    pageElements.forEach(pageDiv => pageObserver.observe(pageDiv));
+
     scrollContainer.scrollTop = scrollContainer.scrollHeight * scrollRatio;
     updatePageNumber();
 }
