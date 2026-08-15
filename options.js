@@ -1076,105 +1076,6 @@ document.getElementById('reorder-save-btn')?.addEventListener('click', () => {
 });
 
 
-// --- loadHistory ---
-function loadHistory(listId) {
-  const historyList = document.getElementById('history-list');
-  const noHistoryMessage = document.getElementById('no-history-message');
-  historyList.innerHTML = '';
-
-  chrome.storage.local.get(['history'], (result) => {
-    // If no listId is provided (e.g., no lists exist), show no items.
-    // Otherwise, filter for the selected list.
-    const history = listId
-      ? (result.history || []).filter(item => item.listId === listId)
-      : [];
-
-    if (history.length === 0) {
-      noHistoryMessage.style.display = 'block';
-      historyList.style.display = 'none';
-    } else {
-      noHistoryMessage.style.display = 'none';
-      historyList.style.display = 'block';
-
-      history.forEach(item => {
-        const itemElement = document.createElement('div');
-        itemElement.className = 'history-item';
-        itemElement.dataset.timestamp = histId(item);
-        itemElement.dataset.listId = item.listId; // Add listId to the element
-
-        let formattedDefinition = escapeHTML(item.definition)
-          .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-          .replace(/\n/g, '<br>');
-
-        const displayView = document.createElement('div');
-        displayView.className = 'display-view';
-
-        // Build source link HTML if available
-        let sourceHtml = '';
-        if (item.sourceUrl) {
-          const displayTitle = item.sourceTitle || (item.sourceUrl.length > 40 ? item.sourceUrl.substring(0, 40) + '...' : item.sourceUrl);
-          sourceHtml = ` | <a href="${escapeHTML(item.sourceUrl)}" target="_blank" style="color: #61afef; text-decoration: none;" title="${escapeHTML(item.sourceUrl)}">Source: ${escapeHTML(displayTitle)}</a>`;
-        }
-
-        displayView.innerHTML = `
-          <div class="history-word">${escapeHTML(item.word)}</div>
-          <div class="history-definition">${formattedDefinition}</div>
-          <div class="history-model" style="font-size: 0.8em; color: #888; margin-top: 4px;">
-            Model: ${escapeHTML(item.modelName || 'Unknown')} | 
-            Prompt: ${escapeHTML(item.promptName || 'Unknown')} | 
-            Date: ${new Date(item.timestamp).toLocaleDateString()}${sourceHtml}
-          </div>
-        `;
-        itemElement.appendChild(displayView);
-
-        // --- NEW: Add Anki Button ---
-        const ankiButton = document.createElement('button');
-        ankiButton.className = 'anki-item-btn';
-        ankiButton.innerHTML = '<strong>A</strong>'; // 'A' for Anki
-        ankiButton.title = 'Send to Anki';
-        ankiButton.dataset.timestamp = histId(item);
-        ankiButton.addEventListener('click', handleSendToAnkiClick);
-        itemElement.appendChild(ankiButton);
-        // --- END NEW ---
-
-        // --- NEW: Add Star/Favorite Button ---
-        const starButton = document.createElement('button');
-        starButton.className = 'star-item-btn' + (item.favorite ? ' favorited' : '');
-        starButton.innerHTML = item.favorite ? '★' : '☆';
-        starButton.title = item.favorite ? 'Remove from favorites' : 'Add to favorites';
-        starButton.dataset.timestamp = histId(item);
-        starButton.addEventListener('click', handleToggleFavoriteClick);
-        itemElement.appendChild(starButton);
-
-        // --- NEW: Add Bulk Selection Checkbox ---
-        const bulkCheckbox = document.createElement('input');
-        bulkCheckbox.type = 'checkbox';
-        bulkCheckbox.className = 'bulk-checkbox';
-        bulkCheckbox.dataset.timestamp = histId(item);
-        bulkCheckbox.addEventListener('change', updateSelectedCount);
-        itemElement.appendChild(bulkCheckbox);
-
-        const editButton = document.createElement('button');
-        editButton.className = 'edit-item-btn';
-        editButton.innerHTML = '&#9998;';
-        editButton.title = 'Edit this item';
-        editButton.dataset.timestamp = histId(item);
-        editButton.addEventListener('click', handleEditClick);
-        itemElement.appendChild(editButton);
-
-        const deleteButton = document.createElement('button');
-        deleteButton.className = 'delete-item-btn';
-        deleteButton.innerHTML = '&#128465;';
-        deleteButton.title = 'Delete this item';
-        deleteButton.dataset.timestamp = histId(item);
-        deleteButton.addEventListener('click', handleDeleteClick);
-
-        itemElement.appendChild(deleteButton);
-        historyList.appendChild(itemElement);
-      });
-    }
-  });
-}
 
 // --- handleEditClick ---
 function handleEditClick(event) {
@@ -1372,7 +1273,7 @@ function clearListHistory() {
 
       chrome.storage.local.set({ history: newHistory }, () => {
         updateIOStatus(`History for "${listName}" cleared.`, 'success');
-        loadHistory(listId); // Reload the view for the current list
+        applyFilters(); // Reload the view (reads the current list selection itself)
       });
     });
   }
@@ -2787,7 +2688,7 @@ function renderFilteredHistory(history, scrollTopToRestore = null) {
       `;
       itemElement.appendChild(displayView);
 
-      // Add buttons (same as in loadHistory)
+      // Add buttons (same pattern as the edit/delete/favorite rows above)
       const ankiButton = document.createElement('button');
       ankiButton.className = 'anki-item-btn';
       ankiButton.innerHTML = '<strong>A</strong>';
