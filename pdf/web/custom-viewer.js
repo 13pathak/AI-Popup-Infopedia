@@ -164,15 +164,30 @@ async function renderPageContent(pageDiv) {
     }
 }
 
+function unloadPageContent(pageDiv) {
+    if (pageDiv.dataset.loaded !== "true") return;
+
+    const canvas = pageDiv.querySelector('canvas');
+    if (canvas) {
+        canvas.width = 0;
+        canvas.height = 0;
+    }
+
+    pageDiv.innerHTML = '';
+    pageDiv.dataset.loaded = "false";
+}
+
 const pageObserver = new IntersectionObserver((entries) => {
     entries.forEach(entry => {
         if (entry.isIntersecting) {
             renderPageContent(entry.target);
+        } else {
+            unloadPageContent(entry.target);
         }
     });
 }, {
     root: document.getElementById('viewerContainer'),
-    rootMargin: '100% 0px 100% 0px' // Load 1 viewport above and below
+    rootMargin: '200% 0px 200% 0px' // Buffer 2 viewports above and below
 });
 
 async function loadPDF() {
