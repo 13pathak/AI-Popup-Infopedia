@@ -691,7 +691,9 @@ document.getElementById('dark_mode_toggle').addEventListener('click', () => {
 });
 
 document.getElementById('bookmark_page').addEventListener('click', () => {
+    if (!pdfDoc) return;
     const pageNum = parseInt(document.getElementById('page_num').value) || 1;
+    if (pageNum < 1 || pageNum > pdfDoc.numPages) return;
     
     // Check if already bookmarked
     if (bookmarks.some(b => b.pageNumber === pageNum)) {
@@ -716,7 +718,9 @@ document.getElementById('bookmark_page').addEventListener('click', () => {
 });
 
 document.getElementById('summarize_page').addEventListener('click', async () => {
+    if (!pdfDoc) return;
     const pageNum = parseInt(document.getElementById('page_num').value) || 1;
+    if (pageNum < 1 || pageNum > pdfDoc.numPages) return;
     const page = await pdfDoc.getPage(pageNum);
     const textContent = await page.getTextContent();
     const pageText = textContent.items.map(i => i.str).join(' ');
@@ -981,6 +985,7 @@ if (findInput) {
 }
 
 async function performSearch(query) {
+    if (!pdfDoc) return;
     if (!query) {
         clearSearch();
         return;
