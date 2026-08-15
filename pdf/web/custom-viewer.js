@@ -893,7 +893,14 @@ document.getElementById('export_md').addEventListener('click', () => {
 
 document.getElementById('save_pdf').addEventListener('click', async () => {
     try {
-        const existingPdfBytes = await fetch(fileUrl).then(res => res.arrayBuffer());
+        if (!fileUrl) {
+            throw new Error("No PDF file URL specified.");
+        }
+        const res = await fetch(fileUrl);
+        if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText || 'Failed to fetch PDF file'}`);
+        }
+        const existingPdfBytes = await res.arrayBuffer();
         const pdfDoc = await PDFLib.PDFDocument.load(existingPdfBytes);
         
         // Add highlights
