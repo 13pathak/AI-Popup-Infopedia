@@ -507,6 +507,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 let historySavePromise = Promise.resolve();
 
+// Unique identity for history items. A millisecond ISO timestamp is NOT
+// unique (bulk saves, stacked popups), and identity operations elsewhere
+// (edit/delete/favorite/merge) must not conflate two items saved in the
+// same millisecond.
+function generateHistoryItemId() {
+  return 'h_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+}
+
 // --- UPDATED to accept source URL and title ---
 function saveToHistory(word, definition, listId, modelName, promptName, sourceUrl, sourceTitle, citations, callback) {
   historySavePromise = historySavePromise.then(() => {
@@ -525,6 +533,7 @@ function saveToHistory(word, definition, listId, modelName, promptName, sourceUr
 
         // Create new history item
         const newItem = {
+          id: generateHistoryItemId(),
           word: word,
           definition: definition,
           timestamp: new Date().toISOString(),

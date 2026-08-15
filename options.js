@@ -1092,7 +1092,7 @@ function loadHistory(listId) {
       history.forEach(item => {
         const itemElement = document.createElement('div');
         itemElement.className = 'history-item';
-        itemElement.dataset.timestamp = item.timestamp;
+        itemElement.dataset.timestamp = histId(item);
         itemElement.dataset.listId = item.listId; // Add listId to the element
 
         let formattedDefinition = escapeHTML(item.definition)
@@ -1125,7 +1125,7 @@ function loadHistory(listId) {
         ankiButton.className = 'anki-item-btn';
         ankiButton.innerHTML = '<strong>A</strong>'; // 'A' for Anki
         ankiButton.title = 'Send to Anki';
-        ankiButton.dataset.timestamp = item.timestamp;
+        ankiButton.dataset.timestamp = histId(item);
         ankiButton.addEventListener('click', handleSendToAnkiClick);
         itemElement.appendChild(ankiButton);
         // --- END NEW ---
@@ -1135,7 +1135,7 @@ function loadHistory(listId) {
         starButton.className = 'star-item-btn' + (item.favorite ? ' favorited' : '');
         starButton.innerHTML = item.favorite ? '★' : '☆';
         starButton.title = item.favorite ? 'Remove from favorites' : 'Add to favorites';
-        starButton.dataset.timestamp = item.timestamp;
+        starButton.dataset.timestamp = histId(item);
         starButton.addEventListener('click', handleToggleFavoriteClick);
         itemElement.appendChild(starButton);
 
@@ -1143,7 +1143,7 @@ function loadHistory(listId) {
         const bulkCheckbox = document.createElement('input');
         bulkCheckbox.type = 'checkbox';
         bulkCheckbox.className = 'bulk-checkbox';
-        bulkCheckbox.dataset.timestamp = item.timestamp;
+        bulkCheckbox.dataset.timestamp = histId(item);
         bulkCheckbox.addEventListener('change', updateSelectedCount);
         itemElement.appendChild(bulkCheckbox);
 
@@ -1151,7 +1151,7 @@ function loadHistory(listId) {
         editButton.className = 'edit-item-btn';
         editButton.innerHTML = '&#9998;';
         editButton.title = 'Edit this item';
-        editButton.dataset.timestamp = item.timestamp;
+        editButton.dataset.timestamp = histId(item);
         editButton.addEventListener('click', handleEditClick);
         itemElement.appendChild(editButton);
 
@@ -1159,7 +1159,7 @@ function loadHistory(listId) {
         deleteButton.className = 'delete-item-btn';
         deleteButton.innerHTML = '&#128465;';
         deleteButton.title = 'Delete this item';
-        deleteButton.dataset.timestamp = item.timestamp;
+        deleteButton.dataset.timestamp = histId(item);
         deleteButton.addEventListener('click', handleDeleteClick);
 
         itemElement.appendChild(deleteButton);
@@ -1272,13 +1272,13 @@ function handleEditClick(event) {
 function handleSaveClick(event) {
   const btn = event.currentTarget;
   const itemElement = btn.closest('.history-item');
-  const timestamp = itemElement.dataset.timestamp;
+  const itemKey = itemElement.dataset.timestamp;
 
   const newWord = itemElement.querySelector('.edit-word-input').value;
   const newListId = itemElement.querySelector('.edit-list-selector').value;
   const newDefinition = itemElement.querySelector('.edit-definition-textarea').value;
 
-  updateHistoryItem(timestamp, newWord, newDefinition, newListId);
+  updateHistoryItem(itemKey, newWord, newDefinition, newListId);
 }
 
 // --- handleCancelClick ---
@@ -1288,12 +1288,12 @@ function handleCancelClick(event) {
 }
 
 // --- updateHistoryItem ---
-function updateHistoryItem(timestamp, newWord, newDefinition, newListId) {
+function updateHistoryItem(itemKey, newWord, newDefinition, newListId) {
   chrome.storage.local.get(['history'], (result) => {
     let history = result.history || [];
 
     const newHistory = history.map(item => {
-      if (item.timestamp === timestamp) {
+      if (histId(item) === itemKey) {
         return {
           ...item,
           word: newWord,
@@ -1314,15 +1314,15 @@ function updateHistoryItem(timestamp, newWord, newDefinition, newListId) {
 // --- handleDeleteClick ---
 function handleDeleteClick(event) {
   const btn = event.currentTarget;
-  const timestamp = btn.dataset.timestamp;
+  const itemKey = btn.dataset.timestamp;
 
-  if (timestamp) {
-    deleteHistoryItem(timestamp);
+  if (itemKey) {
+    deleteHistoryItem(itemKey);
   }
 }
 
 // --- deleteHistoryItem ---
-function deleteHistoryItem(timestamp) {
+function deleteHistoryItem(itemKey) {
   // Rebuilding the list replaces its contents and would otherwise reset this
   // scrollable element to the top.
   const historyList = document.getElementById('history-list');
@@ -1330,7 +1330,7 @@ function deleteHistoryItem(timestamp) {
 
   chrome.storage.local.get(['history'], (result) => {
     let history = result.history || [];
-    const newHistory = history.filter(item => item.timestamp !== timestamp);
+    const newHistory = history.filter(item => histId(item) !== itemKey);
     chrome.storage.local.set({ history: newHistory }, () => {
       applyFilters(scrollTop);
     });
@@ -1382,6 +1382,32 @@ function escapeHTML(str) {
       "'": '&#039;'
     }[m];
   });
+}
+
+// --- History item identity ---
+// Timestamps are millisecond ISO strings and collide under bulk saves; every
+// item carries a unique id used for identity (edit/delete/favorite/bulk/merge).
+// The timestamp is kept for display, sorting, and CSV round-trips, and serves
+// as a legacy fallback for items created before ids existed.
+function generateHistoryId() {
+  return 'h_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+}
+
+function histId(item) {
+  return item.id || item.timestamp;
+}
+
+// Assign ids to legacy items (pre-id storage or restored old backups).
+// Mutates in place; returns true when anything changed so the caller persists.
+function ensureHistoryIds(history) {
+  let changed = false;
+  history.forEach(item => {
+    if (!item.id) {
+      item.id = generateHistoryId();
+      changed = true;
+    }
+  });
+  return changed;
 }
 
 
@@ -1716,8 +1742,18 @@ function mergeHistory(newItems, parseErrors) {
   chrome.storage.local.get(['history', 'wordLists'], (result) => {
     const oldHistory = result.history || [];
 
+    // Legacy items may lack ids; assign before keying the map by identity.
+    // (The ids persist via the merged-history write below.)
+    ensureHistoryIds(oldHistory);
+
     const historyMap = new Map();
-    oldHistory.forEach(item => historyMap.set(item.timestamp, item));
+    oldHistory.forEach(item => historyMap.set(histId(item), item));
+
+    // CSV rows carry timestamps but no ids, so duplicate detection against
+    // existing (and already-imported) rows still runs on timestamps.
+    const seenTimestamps = new Set(
+      oldHistory.map(item => item.timestamp).filter(Boolean)
+    );
 
     let added = 0;
     let duplicates = 0;
@@ -1803,8 +1839,10 @@ function mergeHistory(newItems, parseErrors) {
         item.listId = null;
       }
 
-      if (isNew || !historyMap.has(timestamp)) {
-        historyMap.set(timestamp, item);
+      if (isNew || !seenTimestamps.has(timestamp)) {
+        item.id = generateHistoryId();
+        seenTimestamps.add(timestamp);
+        historyMap.set(item.id, item);
         added++;
       } else {
         duplicates++;
@@ -2031,7 +2069,7 @@ async function loadAnkiSettings() {
  */
 async function handleSendToAnkiClick(event) {
   const btn = event.currentTarget;
-  const timestamp = btn.dataset.timestamp;
+  const itemKey = btn.dataset.timestamp;
 
   btn.disabled = true;
   btn.innerHTML = '<strong>...</strong>'; // <-- UPDATED
@@ -2047,7 +2085,7 @@ async function handleSendToAnkiClick(event) {
 
     // 2. Get History Item
     const historyData = await new Promise(resolve => chrome.storage.local.get('history', resolve));
-    const item = (historyData.history || []).find(i => i.timestamp === timestamp);
+    const item = (historyData.history || []).find(i => histId(i) === itemKey);
 
     if (!item) {
       throw new Error('History item not found.');
@@ -2642,6 +2680,13 @@ function applyFilters(scrollTopToRestore = null) {
   chrome.storage.local.get(['history'], (result) => {
     let history = result.history || [];
 
+    // Migration: legacy items (pre-id era, or restored from an old backup)
+    // get a stable unique id before any identity operation can run against
+    // them. Fire-and-forget persist; the in-memory array is what renders.
+    if (ensureHistoryIds(history)) {
+      chrome.storage.local.set({ history: history });
+    }
+
     // Filter by list first
     if (showAllLists) {
       // No list filter — keep everything (incl. null/unlisted items).
@@ -2708,7 +2753,7 @@ function renderFilteredHistory(history, scrollTopToRestore = null) {
     history.forEach(item => {
       const itemElement = document.createElement('div');
       itemElement.className = 'history-item';
-      itemElement.dataset.timestamp = item.timestamp;
+      itemElement.dataset.timestamp = histId(item);
       itemElement.dataset.listId = item.listId;
 
       let formattedDefinition = escapeHTML(item.definition)
@@ -2740,7 +2785,7 @@ function renderFilteredHistory(history, scrollTopToRestore = null) {
       ankiButton.className = 'anki-item-btn';
       ankiButton.innerHTML = '<strong>A</strong>';
       ankiButton.title = 'Send to Anki';
-      ankiButton.dataset.timestamp = item.timestamp;
+      ankiButton.dataset.timestamp = histId(item);
       ankiButton.addEventListener('click', handleSendToAnkiClick);
       itemElement.appendChild(ankiButton);
 
@@ -2748,14 +2793,14 @@ function renderFilteredHistory(history, scrollTopToRestore = null) {
       starButton.className = 'star-item-btn' + (item.favorite ? ' favorited' : '');
       starButton.innerHTML = item.favorite ? '★' : '☆';
       starButton.title = item.favorite ? 'Remove from favorites' : 'Add to favorites';
-      starButton.dataset.timestamp = item.timestamp;
+      starButton.dataset.timestamp = histId(item);
       starButton.addEventListener('click', handleToggleFavoriteClick);
       itemElement.appendChild(starButton);
 
       const bulkCheckbox = document.createElement('input');
       bulkCheckbox.type = 'checkbox';
       bulkCheckbox.className = 'bulk-checkbox';
-      bulkCheckbox.dataset.timestamp = item.timestamp;
+      bulkCheckbox.dataset.timestamp = histId(item);
       bulkCheckbox.addEventListener('change', updateSelectedCount);
       itemElement.appendChild(bulkCheckbox);
 
@@ -2763,7 +2808,7 @@ function renderFilteredHistory(history, scrollTopToRestore = null) {
       editButton.className = 'edit-item-btn';
       editButton.innerHTML = '&#9998;';
       editButton.title = 'Edit this item';
-      editButton.dataset.timestamp = item.timestamp;
+      editButton.dataset.timestamp = histId(item);
       editButton.addEventListener('click', handleEditClick);
       itemElement.appendChild(editButton);
 
@@ -2771,7 +2816,7 @@ function renderFilteredHistory(history, scrollTopToRestore = null) {
       deleteButton.className = 'delete-item-btn';
       deleteButton.innerHTML = '&#128465;';
       deleteButton.title = 'Delete this item';
-      deleteButton.dataset.timestamp = item.timestamp;
+      deleteButton.dataset.timestamp = histId(item);
       deleteButton.addEventListener('click', handleDeleteClick);
       itemElement.appendChild(deleteButton);
 
@@ -2789,13 +2834,13 @@ function renderFilteredHistory(history, scrollTopToRestore = null) {
 
 function handleToggleFavoriteClick(event) {
   const btn = event.currentTarget;
-  const timestamp = btn.dataset.timestamp;
+  const itemKey = btn.dataset.timestamp;
 
   chrome.storage.local.get(['history'], (result) => {
     let history = result.history || [];
 
     history = history.map(item => {
-      if (item.timestamp === timestamp) {
+      if (histId(item) === itemKey) {
         return { ...item, favorite: !item.favorite };
       }
       return item;
@@ -2803,7 +2848,7 @@ function handleToggleFavoriteClick(event) {
 
     chrome.storage.local.set({ history: history }, () => {
       // Update button visually
-      const item = history.find(i => i.timestamp === timestamp);
+      const item = history.find(i => histId(i) === itemKey);
       if (item) {
         btn.innerHTML = item.favorite ? '★' : '☆';
         btn.className = 'star-item-btn' + (item.favorite ? ' favorited' : '');
@@ -2871,7 +2916,7 @@ function bulkDelete() {
 
   chrome.storage.local.get(['history'], (result) => {
     let history = result.history || [];
-    history = history.filter(item => !timestamps.includes(item.timestamp));
+    history = history.filter(item => !timestamps.includes(histId(item)));
 
     chrome.storage.local.set({ history: history }, () => {
       updateIOStatus(`${timestamps.length} item(s) deleted.`, 'success');
@@ -2913,7 +2958,7 @@ function bulkMove() {
       let history = result.history || [];
 
       history = history.map(item => {
-        if (timestamps.includes(item.timestamp)) {
+        if (timestamps.includes(histId(item))) {
           return { ...item, listId: targetListId };
         }
         return item;
@@ -2946,7 +2991,7 @@ async function bulkExportToAnki() {
   // Get history items
   const historyData = await new Promise(resolve => chrome.storage.local.get('history', resolve));
   const history = historyData.history || [];
-  const itemsToExport = history.filter(item => timestamps.includes(item.timestamp));
+  const itemsToExport = history.filter(item => timestamps.includes(histId(item)));
 
   let successCount = 0;
 
@@ -3118,7 +3163,7 @@ function rateFlashcard(rating) {
     let history = result.history || [];
 
     history = history.map(item => {
-      if (item.timestamp === card.timestamp) {
+      if (histId(item) === histId(card)) {
         return {
           ...item,
           nextReview: nextReview,
