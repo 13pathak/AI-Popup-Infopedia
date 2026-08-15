@@ -1461,9 +1461,7 @@ function createActionButtons(instance, word, definition, modelName, promptName, 
     // 2. Create list selector using Custom Dropdown Component
     let listSelector;
     function recreateDropdown(listsToUse, currentVal) {
-      if (listSelector && listSelector.parentNode) {
-        listSelector.parentNode.removeChild(listSelector);
-      }
+      const previousSelector = listSelector;
       listSelector = createCustomDropdown(listsToUse, currentVal, (val) => {
         if (val === "__create_new__") {
           instance.isInteracting = true;
@@ -1484,6 +1482,14 @@ function createActionButtons(instance, word, definition, modelName, promptName, 
           }
         }
       }, { showCreateNew: true });
+
+      // On re-creation (e.g. after "Create New List"), swap the new dropdown
+      // in where the old one sat. The initial append happens below, alongside
+      // the other action controls, after this function has returned.
+      if (previousSelector && previousSelector.parentNode) {
+        previousSelector.parentNode.replaceChild(listSelector, previousSelector);
+      }
+
       // It is appended with the other action controls once they have all been
       // created. `selectorsContainer` is scoped to createSelectors(), so using
       // it here previously threw a ReferenceError and stopped this callback.
