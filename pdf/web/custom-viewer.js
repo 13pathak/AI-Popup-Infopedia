@@ -1253,7 +1253,9 @@ document.addEventListener('keydown', (e) => {
         return;
     }
     
-    if (!isInput) {
+    // Arrow-key page navigation needs a loaded document (pdfDoc is null
+    // until loadPDF() resolves; the zoom buttons guard the same way).
+    if (!isInput && pdfDoc) {
         // Page Navigation with Left/Right Arrows
         if (e.key === 'ArrowRight') {
             e.preventDefault();
@@ -1704,7 +1706,10 @@ document.getElementById('viewerContainer').addEventListener('wheel', (e) => {
     if (e.ctrlKey) {
         e.preventDefault(); // Prevent default browser zoom
         isPinching = true;
-        
+        // A manual zoom overrides fit-width/fit-page; otherwise the next
+        // window resize would snap back to the fitted scale.
+        currentZoomMode = 'custom';
+
         if (pinchZoomTimeout === null) {
              initialScaleBeforePinch = scale;
         }
