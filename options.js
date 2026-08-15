@@ -617,15 +617,44 @@ function importAllSettings(event) {
       // --- NEW: Get Anki settings to preserve them ---
       const ankiSettings = await new Promise(resolve => chrome.storage.sync.get('ankiSettings', resolve));
 
-      // Clear existing sync storage before importing
-      await new Promise(resolve => chrome.storage.sync.clear(resolve));
+      // storage.set callbacks fire even on failure (quota etc.) unless
+      // runtime.lastError is inspected — wrap so failures actually reject.
+      const storageSet = (items) => new Promise((resolve, reject) => {
+        chrome.storage.sync.set(items, () => {
+          if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+          else resolve();
+        });
+      });
 
-      // Import new data into sync storage
-      await new Promise(resolve => chrome.storage.sync.set(settings.syncData, resolve));
+      // Snapshot everything before the destructive clear so a failed import
+      // (e.g. sync's per-item quota rejecting the new data) can be rolled back.
+      const snapshot = await new Promise(resolve => chrome.storage.sync.get(null, resolve));
+
+      try {
+        // Clear existing sync storage before importing
+        await new Promise((resolve, reject) => {
+          chrome.storage.sync.clear(() => {
+            if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+            else resolve();
+          });
+        });
+
+        // Import new data into sync storage
+        await storageSet(settings.syncData);
+      } catch (writeErr) {
+        // Storage was already cleared (or the import was rejected) — put the
+        // previous contents back before reporting the failure.
+        try {
+          await storageSet(snapshot);
+        } catch (restoreErr) {
+          console.error("Failed to restore previous sync settings after failed import:", restoreErr);
+        }
+        throw writeErr;
+      }
 
       // --- NEW: Restore Anki settings ---
       if (ankiSettings.ankiSettings) {
-        await new Promise(resolve => chrome.storage.sync.set(ankiSettings, resolve));
+        await storageSet(ankiSettings);
       }
 
       updateGlobalIOStatus('Settings imported successfully! Reloading...', 'success');
@@ -864,6 +893,12 @@ function addList() {
   if (listName && listName.trim()) {
     chrome.storage.local.get({ wordLists: [] }, (data) => {
       const lists = data.wordLists;
+      // Duplicate names break the name->id mapping used by CSV import;
+      // the background's createList handler enforces the same rule.
+      if (lists.some(l => l.name === listName.trim())) {
+        updateStatus('A list with this name already exists.', 'error');
+        return;
+      }
       const newList = { id: `list_${new Date().getTime()}`, name: listName.trim() };
       lists.push(newList);
       chrome.storage.local.set({ wordLists: lists }, () => {
@@ -885,6 +920,11 @@ function addSubList() {
   if (listName && listName.trim()) {
     chrome.storage.local.get({ wordLists: [] }, (data) => {
       const lists = data.wordLists;
+      // Same uniqueness rule as addList — names are the import mapping key.
+      if (lists.some(l => l.name === listName.trim())) {
+        updateStatus('A list with this name already exists.', 'error');
+        return;
+      }
       const newList = { id: `list_${new Date().getTime()}`, name: listName.trim(), parentId: parentId };
       lists.push(newList);
       chrome.storage.local.set({ wordLists: lists }, () => {
@@ -905,6 +945,11 @@ function renameList() {
 
   if (newName && newName.trim() && newName.trim() !== currentName) {
     chrome.storage.local.get({ wordLists: [] }, (data) => {
+      // Exclude the list being renamed from the duplicate check.
+      if (data.wordLists.some(l => l.name === newName.trim() && l.id !== listId)) {
+        updateStatus('A list with this name already exists.', 'error');
+        return;
+      }
       const lists = data.wordLists.map(list =>
         list.id === listId ? { ...list, name: newName.trim() } : list
       );
