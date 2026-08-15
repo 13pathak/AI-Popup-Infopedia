@@ -335,21 +335,42 @@ window.addEventListener('resize', () => {
 });
 // Update page number based on scroll
 const container = document.getElementById('viewerContainer');
-container.addEventListener('scroll', updatePageNumber);
+let pageNumberRafId = null;
+container.addEventListener('scroll', () => {
+    // Reading offsetTop/clientHeight forces layout; coalesce scroll
+    // bursts into at most one update per rendered frame.
+    if (pageNumberRafId !== null) return;
+    pageNumberRafId = requestAnimationFrame(() => {
+        pageNumberRafId = null;
+        updatePageNumber();
+    });
+}, { passive: true });
 let scrollSaveTimeout = null;
 
 function updatePageNumber() {
     // Do not update while the user is actively typing in the input
     if (document.activeElement === document.getElementById('page_num')) return;
-    
+
     const pages = document.querySelectorAll('.page');
+    if (pages.length === 0) return;
     const containerCenter = container.scrollTop + (container.clientHeight / 2);
-    
-    for (const page of pages) {
-        if (page.offsetTop <= containerCenter && (page.offsetTop + page.clientHeight) > containerCenter) {
+
+    // Pages are stacked in document order, so offsetTop increases
+    // monotonically; binary search avoids touching every page on
+    // every scroll frame in large documents.
+    let lo = 0;
+    let hi = pages.length - 1;
+    while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        const page = pages[mid];
+        if (page.offsetTop > containerCenter) {
+            hi = mid - 1;
+        } else if (page.offsetTop + page.clientHeight <= containerCenter) {
+            lo = mid + 1;
+        } else {
             const currentNum = parseInt(page.dataset.pageNumber, 10);
             document.getElementById('page_num').value = currentNum;
-            
+
             // Auto-resume save logic (debounced to avoid spamming storage)
             if (autoSavedLastPage !== currentNum) {
                 autoSavedLastPage = currentNum;
@@ -358,7 +379,7 @@ function updatePageNumber() {
                     saveLastPage(currentNum);
                 }, 1000);
             }
-            break;
+            return;
         }
     }
 }
@@ -1028,7 +1049,7 @@ document.getElementById('save_pdf').addEventListener('click', async () => {
 let currentSearchQuery = '';
 let searchResults = [];
 let activeMatchIndex = -1;
-let isSearching = false;
+let searchGeneration = 0;
 
 const findInput = document.getElementById('findInput');
 const findResultsSpan = document.getElementById('findResults');
@@ -1057,8 +1078,9 @@ async function performSearch(query) {
         return;
     }
     
-    if (isSearching) return;
-    isSearching = true;
+    // Start a new generation so any search still in flight aborts at
+    // its next check instead of clobbering this one's state or scrolling.
+    const gen = ++searchGeneration;
     currentSearchQuery = query;
     searchResults = [];
     activeMatchIndex = -1;
@@ -1069,7 +1091,8 @@ async function performSearch(query) {
     for (let i = 1; i <= pdfDoc.numPages; i++) {
         const page = await pdfDoc.getPage(i);
         const textContent = await page.getTextContent();
-        
+        if (gen !== searchGeneration) return; // superseded or cleared
+
         let pageText = '';
         const textItems = [];
         
@@ -1120,8 +1143,8 @@ async function performSearch(query) {
         }
     }
     
-    isSearching = false;
-    
+    if (gen !== searchGeneration) return;
+
     if (searchResults.length > 0) {
         activeMatchIndex = 0;
         updateSearchUI();
@@ -1134,6 +1157,7 @@ async function performSearch(query) {
 }
 
 function clearSearch() {
+    searchGeneration++; // abort any search still in flight
     currentSearchQuery = '';
     searchResults = [];
     activeMatchIndex = -1;
