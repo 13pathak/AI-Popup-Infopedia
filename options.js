@@ -652,6 +652,8 @@ function importAllSettings(event) {
   reader.readAsText(file);
 }
 
+let globalIOStatusTimeout = null;
+
 function updateGlobalIOStatus(message, type = 'info') {
   const statusEl = document.getElementById('global-io-status');
   if (!statusEl) return;
@@ -659,7 +661,12 @@ function updateGlobalIOStatus(message, type = 'info') {
   statusEl.textContent = message;
   statusEl.style.color = type === 'error' ? '#d9534f' : (type === 'success' ? '#5cb85c' : '#eee');
 
-  setTimeout(() => {
+  // Clear message after 5 seconds; cancel any pending clear so an older
+  // timer can't wipe out a newer message early.
+  if (globalIOStatusTimeout) clearTimeout(globalIOStatusTimeout);
+  globalIOStatusTimeout = setTimeout(() => {
+    statusEl.textContent = '';
+    globalIOStatusTimeout = null;
   }, 5000);
 }
 

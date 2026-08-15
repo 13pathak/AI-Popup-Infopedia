@@ -1678,6 +1678,9 @@ function createFollowupInput(instance, word) {
       console.error('Speech recognition error:', e.error);
       isRecording = false;
       micBtn.classList.remove('recording');
+      // Reset like onend does — the end event is not guaranteed to follow
+      // an error, and a stuck flag would block closing the popup.
+      setTimeout(() => { instance.isInteracting = false; }, 200);
     };
     
     nativeRecognition.onresult = (e) => {
