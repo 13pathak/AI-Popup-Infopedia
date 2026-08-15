@@ -736,26 +736,79 @@ function triggerBackup(type = "Auto") {
 // --- NEW: Intercept PDF URLs and redirect to custom PDF.js viewer ---
 // Track tabs that we have already redirected for the current navigation so the
 // webNavigation and webRequest listeners don't double-redirect the same URL.
-// Map of tabId -> original URL that was redirected to the viewer.
-const redirectedTabs = new Map();
+// MV3 service workers are killed within seconds of idle, which silently wipes
+// in-memory state and its cleanup timers. The dedupe state therefore lives in
+// chrome.storage.session (persists across SW restarts, cleared when the
+// browser closes), mirrored into a synchronous in-memory Map as the fast
+// path. Entries expire lazily by timestamp — no setTimeout to lose.
 const REDIRECT_TTL_MS = 10000; // forget the entry after 10s as a safety net
+const redirectedTabs = new Map(); // tabId -> { url, ts }
 
-function markRedirected(tabId, originalUrl) {
-  redirectedTabs.set(tabId, originalUrl);
-  setTimeout(() => {
-    // Only clear if it still points at this URL (avoid clearing a newer entry)
-    if (redirectedTabs.get(tabId) === originalUrl) {
-      redirectedTabs.delete(tabId);
+const sessionStore = (chrome.storage && chrome.storage.session) || null;
+
+// Warm the in-memory copy whenever the SW (re)starts, dropping expired entries.
+const redirectedTabsLoaded = (async () => {
+  if (!sessionStore) return;
+  try {
+    const data = await sessionStore.get('redirectedTabs');
+    const stored = data && data.redirectedTabs;
+    if (!stored) return;
+    const now = Date.now();
+    for (const key of Object.keys(stored)) {
+      const entry = stored[key];
+      if (entry && typeof entry.url === 'string' && now - entry.ts < REDIRECT_TTL_MS) {
+        redirectedTabs.set(Number(key), { url: entry.url, ts: entry.ts });
+      }
     }
-  }, REDIRECT_TTL_MS);
+  } catch (e) {}
+})();
+
+function persistRedirectedTabs() {
+  if (!sessionStore) return;
+  const obj = {};
+  for (const [tabId, entry] of redirectedTabs) {
+    obj[String(tabId)] = entry;
+  }
+  try {
+    const p = sessionStore.set({ redirectedTabs: obj });
+    if (p && p.catch) p.catch(() => {});
+  } catch (e) {}
 }
 
 function isAlreadyRedirected(tabId, url) {
-  return redirectedTabs.get(tabId) === url;
+  const entry = redirectedTabs.get(tabId);
+  if (!entry) return false;
+  if (Date.now() - entry.ts >= REDIRECT_TTL_MS) {
+    redirectedTabs.delete(tabId); // lazy expiry replaces the lost timer
+    return false;
+  }
+  return entry.url === url;
 }
 
-// Common helper that performs the actual redirect once.
-function redirectToPdfViewer(tabId, originalUrl) {
+function markRedirected(tabId, originalUrl) {
+  const now = Date.now();
+  // Sweep expired entries while we're here so neither the Map nor
+  // storage.session accumulates dead tabs between navigations.
+  for (const [id, entry] of redirectedTabs) {
+    if (now - entry.ts >= REDIRECT_TTL_MS) redirectedTabs.delete(id);
+  }
+  redirectedTabs.set(tabId, { url: originalUrl, ts: now });
+  persistRedirectedTabs();
+}
+
+// Closed tabs release their entries immediately instead of lingering to TTL.
+chrome.tabs.onRemoved.addListener((tabId) => {
+  if (redirectedTabs.delete(tabId)) {
+    persistRedirectedTabs();
+  }
+});
+
+// Common helper that performs the actual redirect once. It awaits the
+// session warm-up so a freshly restarted cold SW still sees marks made by its
+// predecessor; the check-then-mark sequence after the await is synchronous,
+// so near-simultaneous events cannot interleave between check and mark.
+async function redirectToPdfViewer(tabId, originalUrl) {
+  await redirectedTabsLoaded;
   if (isAlreadyRedirected(tabId, originalUrl)) return; // dedupe across listeners
   markRedirected(tabId, originalUrl);
   const viewerUrl = chrome.runtime.getURL('pdf/web/custom-viewer.html?file=' + encodeURIComponent(originalUrl));
