@@ -1719,7 +1719,13 @@ function createFollowupInput(instance, word) {
         micBtn.classList.remove('recording');
         micBtn.style.opacity = '0.5'; // Visual feedback for processing
         
-        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+        // Label the upload with the recorder's actual container type — strict
+        // transcription APIs reject or mis-decode a mislabeled extension
+        // (e.g. webm bytes appended as 'audio.wav'). Strip any ";codecs=..."
+        // suffix so both the blob type and filename stay plain container IDs.
+        const recordedType = ((activeMediaRecorder && activeMediaRecorder.mimeType) || 'audio/webm').split(';')[0].trim();
+        const recordedExt = recordedType.split('/')[1] || 'webm';
+        const audioBlob = new Blob(audioChunks, { type: recordedType });
         
         // Stop all tracks to release mic
         stream.getTracks().forEach(track => track.stop());
@@ -1741,7 +1747,7 @@ function createFollowupInput(instance, word) {
           }
           
           const formData = new FormData();
-          formData.append('file', audioBlob, 'audio.wav');
+          formData.append('file', audioBlob, `audio.${recordedExt}`);
           formData.append('model', settings.sttModel);
           
           if (settings.sttCustomFormData) {
