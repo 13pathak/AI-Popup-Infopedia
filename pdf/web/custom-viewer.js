@@ -1122,9 +1122,10 @@ function scrollToActiveMatch() {
     } else {
         // Find approximate position if page not rendered yet
         const container = document.getElementById('viewerContainer');
-        // We know roughly 800px per page or just scroll by percentage
         const scrollHeight = container.scrollHeight;
-        container.scrollTop = (match.pageNumber / pdfDoc.numPages) * scrollHeight;
+        if (pdfDoc && pdfDoc.numPages) {
+            container.scrollTop = ((match.pageNumber - 1) / pdfDoc.numPages) * scrollHeight;
+        }
     }
 }
 
