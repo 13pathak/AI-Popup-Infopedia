@@ -984,7 +984,8 @@ function renderReorderLists() {
     handle.innerHTML = '&#8942;&#8942;'; // :: icon
     
     const nameSpan = document.createElement('span');
-    nameSpan.innerHTML = indent + list.name;
+    nameSpan.innerHTML = indent;
+    nameSpan.appendChild(document.createTextNode(list.name));
     
     item.appendChild(handle);
     item.appendChild(nameSpan);
@@ -1372,7 +1373,7 @@ function clearListHistory() {
 
 // --- escapeHTML ---
 function escapeHTML(str) {
-  return str.replace(/[&<>"']/g, function (m) {
+  return String(str || '').replace(/[&<>"']/g, function (m) {
     return {
       '&': '&amp;',
       '<': '&lt;',
@@ -1418,7 +1419,7 @@ function escapeCSV(str) {
 function exportHistory() {
   const listSelect = document.getElementById('list-select');
   const selectedListId = listSelect.value;
-  const selectedListName = listSelect.options[listSelect.selectedIndex]?.text;
+  const selectedListName = listSelect.getText();
 
   if (!selectedListId || selectedListId === "__create_new__") {
     updateIOStatus("No valid list selected to export.", "error");
@@ -3067,7 +3068,7 @@ function showCurrentCard() {
 function showFlashcardAnswer() {
   const card = flashcardQueue[currentCardIndex];
 
-  let formattedDef = card.definition
+  let formattedDef = escapeHTML(card.definition)
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     .replace(/\n/g, '<br>');
 

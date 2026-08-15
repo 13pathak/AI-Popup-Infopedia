@@ -1247,6 +1247,16 @@ function createSelectors(instance, models, prompts, currentModelId, currentPromp
   function triggerRedefine() {
     const newModelId = modelSelector.value;
     const newPromptContent = promptSelector.value;
+
+    // The empty hotkey popup has no real word; "Custom Question" is a sentinel.
+    // Redefining would query that literal string and wipe the conversation, so
+    // only record the choice — follow-ups read the selectors live.
+    if (selectedText === "Custom Question") {
+      instance.lastModelId = newModelId;
+      instance.lastModelName = models.find(m => m.id === newModelId)?.name;
+      return;
+    }
+
     redefineWithModelAndPrompt(instance, selectedText, newModelId, newPromptContent);
   }
 }
