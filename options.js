@@ -153,7 +153,6 @@ document.addEventListener('DOMContentLoaded', () => {
   safeAddListener('import-all-history', 'click', () => document.getElementById('import-file-input').click());
 
   safeAddListener('clear-history', 'click', clearAllHistory);
-  safeAddListener('clear-list-history', 'click', clearListHistory);
 
   safeAddListener('export-all-settings-btn', 'click', exportAllSettings);
   safeAddListener('import-all-settings-btn', 'click', () => document.getElementById('import-settings-file-input').click());
@@ -211,8 +210,12 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // --- NEW: PDF File Access Check ---
-  if (chrome.extension && chrome.extension.isAllowedFileSchemeAccess) {
-    chrome.extension.isAllowedFileSchemeAccess((isAllowed) => {
+  // MV3 removed chrome.extension (and with it isAllowedFileSchemeAccess);
+  // the granted-state check goes through the generic chrome.permissions
+  // API instead. The file:///* origin counts as granted only while the
+  // per-extension "Allow access to file URLs" toggle is enabled.
+  if (chrome.permissions && chrome.permissions.contains) {
+    chrome.permissions.contains({ origins: ['file:///*'] }, (isAllowed) => {
       if (isAllowed) {
         document.getElementById('file-access-success').style.display = 'block';
         document.getElementById('file-access-warning').style.display = 'none';
@@ -414,9 +417,10 @@ function deleteSelectedModel() {
 
   if (!confirm('Are you sure you want to delete the selected model configuration?')) return;
 
-  chrome.storage.sync.get(['models', 'defaultModelId'], (data) => {
+  chrome.storage.sync.get(['models', 'defaultModelId', 'verificationModelId'], (data) => {
     let models = data.models || [];
     let defaultModelId = data.defaultModelId;
+    let verificationModelId = data.verificationModelId;
 
     models = models.filter(m => m.id !== modelIdToDelete);
 
@@ -424,8 +428,14 @@ function deleteSelectedModel() {
     if (defaultModelId === modelIdToDelete) {
       defaultModelId = models.length > 0 ? models[0].id : null;
     }
+    // Same for the Hallucination Guard's verifier: a dangling id makes
+    // every guarded answer error ("Verification model not found") while
+    // the guard settings still show a healthy-looking selection.
+    if (verificationModelId === modelIdToDelete) {
+      verificationModelId = models.length > 0 ? models[0].id : null;
+    }
 
-    chrome.storage.sync.set({ models, defaultModelId }, () => {
+    chrome.storage.sync.set({ models, defaultModelId, verificationModelId }, () => {
       updateStatus('Model deleted.', 'success');
       loadModels();
     });
@@ -436,7 +446,6 @@ function setDefaultModel(modelId) {
   chrome.storage.sync.set({ defaultModelId: modelId }, () => {
     updateStatus('Default model updated.', 'success');
     loadModels();
-    checkLocalPdfAccess();
   });
 }
 
@@ -527,6 +536,17 @@ function loadDefaultPromptSelect() {
     }
 
     let isAnySelected = false;
+
+    // The built-in system default is always a valid choice; 'system' is
+    // also what deletePrompt stores when the default prompt is removed.
+    const systemOption = document.createElement('option');
+    systemOption.value = 'system';
+    systemOption.textContent = 'System Default';
+    if (defaultPromptId === 'system') {
+      systemOption.selected = true;
+      isAnySelected = true;
+    }
+    select.appendChild(systemOption);
 
     prompts.forEach(prompt => {
       const option = document.createElement('option');
@@ -667,11 +687,12 @@ function importAllSettings(event) {
 
       updateGlobalIOStatus('Settings imported successfully! Reloading...', 'success');
 
-      // Reload only the relevant data on the page
-      setTimeout(() => {
-        loadModels();
-        loadDefaultPromptSelect();
-      }, 1000);
+      // The import cleared and replaced sync storage wholesale, so
+      // refreshing individual selects leaves every other section showing
+      // the values read at startup. Reload the page (as restoreBackup
+      // does) — DOMContentLoaded re-populates everything from the
+      // imported data.
+      setTimeout(() => location.reload(), 1000);
 
     } catch (error) {
       console.error("Error importing settings:", error);
@@ -708,19 +729,23 @@ function updateGlobalIOStatus(message, type = 'info') {
 }
 
 // --- NEW: Helper to build a sorted tree array ---
+// Works on shallow copies: the reorder modal's currentLists ARE the
+// objects later written back to storage, and mutating them here would
+// persist children arrays — duplicating every sub-list inside its parent
+// on top of its top-level entry.
 function getSortedTreeLists(lists) {
   const listMap = {};
   lists.forEach(l => {
-    l.children = [];
-    listMap[l.id] = l;
+    listMap[l.id] = { ...l, children: [] };
   });
 
   const roots = [];
   lists.forEach(l => {
-    if (l.parentId && listMap[l.parentId]) {
-      listMap[l.parentId].children.push(l);
+    const node = listMap[l.id];
+    if (l.parentId && listMap[l.parentId] && l.parentId !== l.id) {
+      listMap[l.parentId].children.push(node);
     } else {
-      roots.push(l);
+      roots.push(node);
     }
   });
 
@@ -978,7 +1003,7 @@ function deleteList() {
   }
 
   // Check actual wordLists array length, not options count (which includes "+ Create New List...")
-  chrome.storage.local.get({ wordLists: [] }, (data) => {
+  chrome.storage.local.get({ wordLists: [], history: [] }, (data) => {
     if (data.wordLists.length <= 1) {
       alert("You cannot delete the last remaining list.");
       return;
@@ -1006,7 +1031,13 @@ function deleteList() {
     }
 
     const lists = data.wordLists.filter(list => !listsToDelete.has(list.id));
-    chrome.storage.local.set({ wordLists: lists }, () => {
+    // History items keep their data but become Unlisted instead of
+    // holding ids no list will ever match again — dangling ids vanish
+    // from every real list view and per-list export.
+    const history = data.history.map(item =>
+      listsToDelete.has(item.listId) ? { ...item, listId: null } : item
+    );
+    chrome.storage.local.set({ wordLists: lists, history }, () => {
       updateStatus('List and sub-lists deleted.', 'success');
       loadLists();
     });
@@ -1130,6 +1161,28 @@ document.getElementById('reorder-save-btn')?.addEventListener('click', () => {
 
 
 
+// Rebuild the raw stored text from a rendered definition div. Text nodes
+// carry already-decoded characters, so & < > and U+00A0 survive the edit
+// round-trip; only the display transforms (<br>, <strong>) are reversed.
+// Reading innerHTML instead would feed the edit box serialized entities
+// (&amp;, &lt;, &nbsp;), and saving those would escape the stored item one
+// layer deeper per edit cycle.
+function definitionToEditString(node) {
+  let out = '';
+  node.childNodes.forEach(child => {
+    if (child.nodeType === Node.TEXT_NODE) {
+      out += child.nodeValue;
+    } else if (child.nodeType === Node.ELEMENT_NODE && child.tagName === 'BR') {
+      out += '\n';
+    } else if (child.nodeType === Node.ELEMENT_NODE && child.tagName === 'STRONG') {
+      out += '**' + definitionToEditString(child) + '**';
+    } else {
+      out += definitionToEditString(child);
+    }
+  });
+  return out;
+}
+
 // --- handleEditClick ---
 function handleEditClick(event) {
   const btn = event.currentTarget;
@@ -1145,9 +1198,7 @@ function handleEditClick(event) {
   const definitionDiv = itemElement.querySelector('.history-definition');
 
   const currentWord = wordDiv.textContent;
-  const currentDefinitionText = definitionDiv.innerHTML
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<strong>(.*?)<\/strong>/gi, '**$1**');
+  const currentDefinitionText = definitionToEditString(definitionDiv);
 
   itemElement.querySelector('.display-view').style.display = 'none';
   itemElement.querySelector('.anki-item-btn').style.display = 'none';
@@ -1252,6 +1303,8 @@ function handleCancelClick(event) {
 function updateHistoryItem(itemKey, newWord, newDefinition, newListId) {
   chrome.storage.local.get(['history'], (result) => {
     let history = result.history || [];
+    // Persist legacy id migration through this write (see applyFilters).
+    ensureHistoryIds(history);
 
     const newHistory = history.map(item => {
       if (histId(item) === itemKey) {
@@ -1291,6 +1344,9 @@ function deleteHistoryItem(itemKey) {
 
   chrome.storage.local.get(['history'], (result) => {
     let history = result.history || [];
+    // Persist legacy id migration through this write (applyFilters
+    // deliberately doesn't persist its snapshot — see the race note there).
+    ensureHistoryIds(history);
     const newHistory = history.filter(item => histId(item) !== itemKey);
     chrome.storage.local.set({ history: newHistory }, () => {
       applyFilters(scrollTop);
@@ -1310,27 +1366,9 @@ function clearAllHistory() {
 }
 
 // --- NEW: Function to clear history for a specific list ---
-function clearListHistory() {
-  const listSelect = document.getElementById('list-select');
-  const listId = listSelect.value;
-  const listName = listSelect.getText();
-
-  // Ignore the "+ Create New List..." pseudo-option.
-  if (!listId || listId === "__create_new__") return;
-
-  if (confirm(`Are you sure you want to clear all words from the "${listName}" list? This cannot be undone.`)) {
-    chrome.storage.local.get(['history'], (result) => {
-      let history = result.history || [];
-      // Keep all items that DO NOT belong to the selected list
-      const newHistory = history.filter(item => item.listId !== listId);
-
-      chrome.storage.local.set({ history: newHistory }, () => {
-        updateIOStatus(`History for "${listName}" cleared.`, 'success');
-        applyFilters(); // Reload the view (reads the current list selection itself)
-      });
-    });
-  }
-}
+// (Retired along with its hidden #clear-list-history button; list-scoped
+// clearing now happens implicitly when a list is deleted, which unlists
+// rather than destroys items.)
 
 // --- escapeHTML ---
 function escapeHTML(str) {
@@ -1408,8 +1446,11 @@ function exportHistory() {
   const selectedListId = listSelect.value;
   const selectedListName = listSelect.getText();
 
-  if (!selectedListId || selectedListId === "__create_new__") {
-    updateIOStatus("No valid list selected to export.", "error");
+  // "All Lists" is the aggregate pseudo-view, not a real list — filtering
+  // on its sentinel id always reports the list as empty. The aggregate
+  // case belongs to the dedicated Export All History button instead.
+  if (!selectedListId || selectedListId === "__create_new__" || selectedListId === "__all_lists__") {
+    updateIOStatus("Select a specific list to export, or use Export All History.", "error");
     return;
   }
 
@@ -1710,11 +1751,13 @@ function mergeHistory(newItems, parseErrors) {
     const historyMap = new Map();
     oldHistory.forEach(item => historyMap.set(histId(item), item));
 
-    // CSV rows carry timestamps but no ids, so duplicate detection against
-    // existing (and already-imported) rows still runs on timestamps.
-    const seenTimestamps = new Set(
-      oldHistory.map(item => item.timestamp).filter(Boolean)
-    );
+    // CSV rows carry no ids, and timestamps alone can't identify rows —
+    // they collide under bulk saves (see "History item identity" above),
+    // which made round-tripped exports silently drop distinct items.
+    // Dedup on the timestamp+word+definition composite instead: identical
+    // rows still match, same-millisecond items survive.
+    const rowKey = (item) => [item.timestamp, item.word, item.definition].join('\u0000');
+    const seenRowKeys = new Set(oldHistory.map(rowKey));
 
     let added = 0;
     let duplicates = 0;
@@ -1789,8 +1832,15 @@ function mergeHistory(newItems, parseErrors) {
         if (item.listName === 'Unlisted') {
           targetListId = null;
         } else {
-          // Basic fallback for old CSVs without listName col
-          targetListId = currentSelectedListId;
+          // Basic fallback for old CSVs without a listName column: import
+          // into the list the dropdown shows — unless it shows the All
+          // Lists pseudo-view (the dropdown's default) or the create-new
+          // sentinel. Those are not real lists and must never be persisted
+          // as a listId: such items would vanish from every real list view
+          // and per-list export. Rows then import as Unlisted instead.
+          targetListId = (currentSelectedListId && currentSelectedListId !== '__all_lists__' && currentSelectedListId !== '__create_new__')
+            ? currentSelectedListId
+            : null;
         }
       }
       item.listId = targetListId;
@@ -1800,9 +1850,9 @@ function mergeHistory(newItems, parseErrors) {
         item.listId = null;
       }
 
-      if (isNew || !seenTimestamps.has(timestamp)) {
+      if (isNew || !seenRowKeys.has(rowKey(item))) {
         item.id = generateHistoryId();
-        seenTimestamps.add(timestamp);
+        seenRowKeys.add(rowKey(item));
         historyMap.set(item.id, item);
         added++;
       } else {
@@ -2174,6 +2224,11 @@ function restoreBackup() {
   if (!file) {
     return;
   }
+
+  // Reset immediately (the File object is already captured): otherwise
+  // picking the same backup again fires no change event and the second
+  // restore attempt silently does nothing.
+  fileInput.value = null;
 
   const reader = new FileReader();
 
@@ -2609,9 +2664,18 @@ function editPrompt(id) {
 
 function deletePrompt(id) {
   if (confirm("Are you sure you want to delete this prompt?")) {
-    chrome.storage.sync.get({ customPrompts: [] }, (data) => {
+    chrome.storage.sync.get({ customPrompts: [], defaultPromptId: null }, (data) => {
       const prompts = data.customPrompts.filter(p => p.id !== id);
-      chrome.storage.sync.set({ customPrompts: prompts }, () => {
+      const updates = { customPrompts: prompts };
+      // Deleting the default prompt reverts the default to the built-in
+      // system prompt — 'system' is the sentinel content.js and background
+      // already resolve correctly. A dangling id would make this dropdown
+      // display the first prompt while runtime silently uses the system
+      // default.
+      if (data.defaultPromptId === id) {
+        updates.defaultPromptId = 'system';
+      }
+      chrome.storage.sync.set(updates, () => {
         loadPrompts();
         loadDefaultPromptSelect();
       });
@@ -2660,10 +2724,11 @@ function applyFilters(scrollTopToRestore = null) {
 
     // Migration: legacy items (pre-id era, or restored from an old backup)
     // get a stable unique id before any identity operation can run against
-    // them. Fire-and-forget persist; the in-memory array is what renders.
-    if (ensureHistoryIds(history)) {
-      chrome.storage.local.set({ history: history });
-    }
+    // them. In-memory only: persisting this snapshot here races a
+    // concurrent delete (the delete's filtered write lands first, then
+    // this full-array write resurrects the deleted item). The ids persist
+    // through the history writers, which re-read storage before writing.
+    ensureHistoryIds(history);
 
     // Filter by list first
     if (showAllLists) {
