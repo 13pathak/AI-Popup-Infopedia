@@ -112,10 +112,6 @@ body, html {
   z-index:0;
 }
 
-.textLayer.highlighting{
-    touch-action:none;
-  }
-
 .textLayer :is(span, br){
     color:transparent;
     position:absolute;
@@ -124,14 +120,8 @@ body, html {
     transform-origin:0% 0%;
   }
 
-.textLayer > :not(.markedContent),
-  .textLayer .markedContent span:not(.markedContent){
+.textLayer > :not(.markedContent){
     z-index:1;
-  }
-
-.textLayer span.markedContent{
-    top:0;
-    height:0;
   }
 
 .textLayer ::-moz-selection{
@@ -150,17 +140,6 @@ body, html {
     background:transparent;
   }
 
-.textLayer .endOfContent{
-    display:block;
-    position:absolute;
-    inset:100% 0 0;
-    z-index:0;
-    cursor:default;
-    -webkit-user-select:none;
-       -moz-user-select:none;
-            user-select:none;
-  }
-
 .custom-highlight {
     position: absolute;
     mix-blend-mode: multiply;
@@ -175,7 +154,7 @@ body, html {
     z-index: 10;
 }
 
-#color-picker-popup, #ai-popup-container, #edit-highlight-popup, #note-editor-popup {
+#color-picker-popup, #edit-highlight-popup, #note-editor-popup {
     position: absolute;
     background: white;
     border-radius: 6px;
@@ -455,12 +434,6 @@ body, html {
 
 #close_sidebar:hover {
     color: #000 !important;
-}
-
-.sidebar-pane {
-    flex: 1;
-    overflow-y: auto;
-    padding: 10px;
 }
 
 /* Sidebar Icons Strip */
@@ -850,7 +823,6 @@ body.dark-mode .outline-toggle:hover {
 
 /* --- Dark Mode: Popups --- */
 body.dark-mode #color-picker-popup,
-body.dark-mode #ai-popup-container,
 body.dark-mode #edit-highlight-popup,
 body.dark-mode #note-editor-popup {
     background: #242526;
