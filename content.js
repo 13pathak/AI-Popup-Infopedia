@@ -1404,18 +1404,16 @@ function createActionButtons(instance, word, definition, modelName, promptName, 
 
     if (!response || !response.lists || response.lists.length === 0) {
       // --- Handle case where NO lists exist ---
+      // Show only a hint where the save controls would be. The popup must
+      // stay open: the answer, follow-ups, and speech all still work —
+      // saving is the only thing unavailable until a list exists. It
+      // closes like any other popup (outside click / Escape).
       actionsContainer.innerHTML = ''; // Clear any previous content
       const errorText = document.createElement('span');
       errorText.textContent = 'Please create a list in the options page first.';
       errorText.style.opacity = '0.8';
       errorText.style.fontSize = '13px';
       actionsContainer.appendChild(errorText);
-
-      // Keep the popup open for a bit longer so the user can read the message
-      setTimeout(() => {
-        instance.isInteracting = false; // Allow closure again
-        removePopupInstance(instance);
-      }, 2500);
       return; // Stop execution
     }
 
