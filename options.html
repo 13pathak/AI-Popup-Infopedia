@@ -5,6 +5,16 @@
     <meta charset="UTF-8">
     <title>AI Helper Settings</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <script>
+        (function () {
+            try {
+                const theme = localStorage.getItem('uiTheme') || 'dark';
+                if (theme !== 'auto') {
+                    document.documentElement.setAttribute('data-theme', theme);
+                }
+            } catch (e) {}
+        })();
+    </script>
     <style>
         :root {
             --bg-color: #0F172A;
@@ -13,12 +23,48 @@
             --text-muted: #94A3B8;
             --primary-color: #3B82F6;
             --secondary-color: #10B981;
+            --warning-color: #F59E0B;
             --danger-color: #EF4444;
             --border-color: #334155;
             --input-bg: #0F172A;
             --button-bg: #334155;
             --button-hover-bg: #475569;
             --spacing-unit: 12px;
+            color-scheme: dark;
+        }
+
+        :root[data-theme="light"] {
+            --bg-color: #F8FAFC;
+            --card-bg: #FFFFFF;
+            --text-color: #0F172A;
+            --text-muted: #64748B;
+            --primary-color: #2563EB;
+            --secondary-color: #059669;
+            --warning-color: #D97706;
+            --danger-color: #DC2626;
+            --border-color: #E2E8F0;
+            --input-bg: #FFFFFF;
+            --button-bg: #E2E8F0;
+            --button-hover-bg: #CBD5E1;
+            color-scheme: light;
+        }
+
+        @media (prefers-color-scheme: light) {
+            :root:not([data-theme="dark"]) {
+                --bg-color: #F8FAFC;
+                --card-bg: #FFFFFF;
+                --text-color: #0F172A;
+                --text-muted: #64748B;
+                --primary-color: #2563EB;
+                --secondary-color: #059669;
+                --warning-color: #D97706;
+                --danger-color: #DC2626;
+                --border-color: #E2E8F0;
+                --input-bg: #FFFFFF;
+                --button-bg: #E2E8F0;
+                --button-hover-bg: #CBD5E1;
+                color-scheme: light;
+            }
         }
 
         /* Inline SVG icons: size with surrounding text, inherit currentColor */
@@ -150,10 +196,10 @@
         button {
             padding: 8px 16px;
             cursor: pointer;
-            border: none;
+            border: 1px solid transparent;
             border-radius: 8px;
             background-color: var(--button-bg);
-            color: white;
+            color: var(--text-color);
             font-weight: 500;
             font-family: inherit;
             transition: all 0.2s ease;
@@ -170,6 +216,17 @@
 
         button:active {
             transform: translateY(0);
+        }
+
+        button[style*="--primary-color"],
+        button[style*="--secondary-color"],
+        button[style*="--danger-color"],
+        button[style*="#059669"],
+        button[style*="#DC2626"],
+        .save-edit-btn,
+        .rating-btn,
+        .test-action-btn {
+            color: #ffffff !important;
         }
 
         #status,
@@ -871,6 +928,19 @@
 
     <div id="settings-content" class="tab-content active">
         <h2>AI Chatbot Settings</h2>
+        
+        <div style="background-color: var(--bg-color); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 16px; margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+            <div>
+                <label for="ui-theme-select" style="font-weight: 600; margin-bottom: 2px;">Interface Theme</label>
+                <small style="margin-top: 0;">Choose the visual theme for the settings page and AI popup.</small>
+            </div>
+            <select id="ui-theme-select" style="max-width: 220px; width: auto; font-weight: 500;">
+                <option value="dark">Dark Theme (Default)</option>
+                <option value="light">Light Theme</option>
+                <option value="auto">Auto (Follow System)</option>
+            </select>
+        </div>
+
         <p style="margin-bottom: calc(var(--spacing-unit) * 2);">Manage your AI model configurations. The "Default" model will
             be used for pop-up definitions.</p>
 
@@ -1262,14 +1332,14 @@
 
         <div id="flashcard-container"
             style="display: none; border: 2px solid var(--border-color); border-radius: 8px; min-height: 300px; padding: 20px; text-align: center;">
-            <div id="flashcard-progress" style="margin-bottom: 15px; font-size: 0.9em; color: #888;">
+            <div id="flashcard-progress" style="margin-bottom: 15px; font-size: 0.9em; color: var(--text-muted);">
                 Card <span id="current-card-num">0</span> of <span id="total-cards-num">0</span>
             </div>
 
             <div id="flashcard-front" style="margin-bottom: 20px;">
                 <h3 id="flashcard-word" style="font-size: 1.8em; color: var(--primary-color); margin-bottom: 10px;">Word
                 </h3>
-                <p id="flashcard-source" style="font-size: 0.85em; color: #666;"></p>
+                <p id="flashcard-source" style="font-size: 0.85em; color: var(--text-muted);"></p>
             </div>
 
             <div id="flashcard-back"
@@ -1283,12 +1353,12 @@
             </button>
 
             <div id="rating-buttons" style="display: none; margin-top: 15px;">
-                <p style="margin-bottom: 10px; color: #888;">How well did you remember?</p>
+                <p style="margin-bottom: 10px; color: var(--text-muted);">How well did you remember?</p>
                 <div style="display: flex; justify-content: center; gap: 10px;">
                     <button class="rating-btn" data-rating="1"
                         style="background-color: var(--danger-color); padding: 10px 20px;">Again</button>
                     <button class="rating-btn" data-rating="2"
-                        style="background-color: #f0ad4e; padding: 10px 20px;">Hard</button>
+                        style="background-color: var(--warning-color); padding: 10px 20px;">Hard</button>
                     <button class="rating-btn" data-rating="3"
                         style="background-color: var(--secondary-color); padding: 10px 20px;">Good</button>
                     <button class="rating-btn" data-rating="4"
@@ -1306,30 +1376,30 @@
 
         <div id="no-cards-message" class="empty-state" style="display: none;">
             <div class="empty-state-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></div>
-            <div class="empty-state-title">No cards due for review. Great job!</div>
-            <div class="empty-state-hint">Save some words to start building your flashcard deck.</div>
+            <div class="empty-state-title">No flashcards due for review</div>
+            <div class="empty-state-hint">You're all caught up on your spaced repetition practice for now!</div>
         </div>
     </div>
 
     <!-- --- NEW REMINDER TAB CONTENT --- -->
     <div id="reminder-content" class="tab-content">
-        <h2>Auto-Backup Settings</h2>
-        <p>Configure automatic backups of your history list. Files will be saved to your Downloads folder.</p>
+        <h2>Backup & Export Settings</h2>
+        <p>Set up automatic reminders to backup your vocabulary data, or create a full backup now.</p>
 
-        <div style="margin-top: 20px;">
-            <label for="reminder-frequency-select">Backup Frequency</label>
-            <select id="reminder-frequency-select">
+        <div class="form-group">
+            <label for="reminder-frequency">Backup Frequency:</label>
+            <select id="reminder-frequency" style="width: auto;">
                 <option value="0">Disabled</option>
                 <option value="1">Daily</option>
-                <option value="2">Every 2 Days</option>
-                <option value="3">Every 3 Days</option>
                 <option value="7">Weekly</option>
+                <option value="30">Monthly</option>
             </select>
         </div>
 
-        <div style="margin-top: 20px;">
-            <label for="backup-subfolder">Backup Subfolder (inside Downloads)</label>
-            <input type="text" id="backup-subfolder" placeholder="Infopedia-Backups">
+        <div class="form-group" style="margin-top: 20px;">
+            <label for="backup-subfolder">Backup Subfolder (inside Downloads):</label>
+            <input type="text" id="backup-subfolder" placeholder="e.g. AI-Infopedia-Backups"
+                style="max-width: 300px; display: block; margin-top: 5px;">
             <small>Leave empty to save directly in Downloads folder.</small>
         </div>
 
@@ -1342,15 +1412,15 @@
         <button id="manual-backup-btn"
             style="margin-top: 20px; margin-left: 10px; background-color: var(--primary-color);">Backup Now</button>
 
-        <hr style="margin-top: 30px; border-color: #444;">
+        <hr style="border: 0; border-top: 1px solid var(--border-color); margin-top: 30px;">
 
         <h3 style="margin-top: 20px;">Restore from Backup</h3>
-        <p style="color: #bbb; font-size: 0.9em; margin-bottom: 10px;">
+        <p style="color: var(--text-muted); font-size: 0.9em; margin-bottom: 10px;">
             Restore your history, lists, and settings from a backup file. <br>
-            <strong style="color: #d9534f;">Warning: This will overwrite your current data!</strong>
+            <strong style="color: var(--danger-color);">Warning: This will overwrite your current data!</strong>
         </p>
         <input type="file" id="restore-backup-file" accept=".json" style="display: none;">
-        <button id="restore-backup-btn" style="background-color: #d9534f;">Restore Backup file</button>
+        <button id="restore-backup-btn" style="background-color: var(--danger-color);">Restore Backup file</button>
         <div id="restore-status" style="margin-top: 10px; font-weight: bold; min-height: 1em;"></div>
 
         <div id="reminder-status" style="margin-top: 10px; font-weight: bold; min-height: 1em;"></div>
@@ -1401,8 +1471,7 @@
 
         <div class="form-group">
             <label for="tts-voice-select">Select Voice:</label>
-            <select id="tts-voice-select"
-                style="width: 100%; padding: 8px; margin-top: 5px; background: #333; color: #fff; border: 1px solid #555;">
+            <select id="tts-voice-select" style="width: 100%; margin-top: 5px;">
                 <option value="" disabled selected>Loading voices...</option>
             </select>
         </div>
@@ -1428,8 +1497,7 @@
 
         <div class="form-group">
             <label for="stt-engine-select">Select Engine:</label>
-            <select id="stt-engine-select"
-                style="width: 100%; padding: 8px; margin-top: 5px; background: #333; color: #fff; border: 1px solid #555;">
+            <select id="stt-engine-select" style="width: 100%; margin-top: 5px;">
                 <option value="native">Chrome Native (Free)</option>
                 <option value="api">API-Based (e.g., Whisper)</option>
             </select>
@@ -1439,27 +1507,27 @@
             <div class="form-group">
                 <label for="stt-api-key">API Key (optional if using custom headers):</label>
                 <input type="password" id="stt-api-key" placeholder="sk-..."
-                    style="width: 100%; padding: 8px; margin-top: 5px; background: #333; color: #fff; border: 1px solid #555;">
+                    style="width: 100%; margin-top: 5px;">
             </div>
             <div class="form-group" style="margin-top: 10px;">
                 <label for="stt-api-url">API URL:</label>
                 <input type="text" id="stt-api-url" placeholder="https://api.openai.com/v1/audio/transcriptions"
-                    style="width: 100%; padding: 8px; margin-top: 5px; background: #333; color: #fff; border: 1px solid #555;">
+                    style="width: 100%; margin-top: 5px;">
             </div>
             <div class="form-group" style="margin-top: 10px;">
                 <label for="stt-model">Model Name:</label>
                 <input type="text" id="stt-model" placeholder="whisper-1"
-                    style="width: 100%; padding: 8px; margin-top: 5px; background: #333; color: #fff; border: 1px solid #555;">
+                    style="width: 100%; margin-top: 5px;">
             </div>
             <div class="form-group" style="margin-top: 10px;">
                 <label for="stt-custom-headers">Custom Headers (JSON format, e.g., {"api-subscription-key": "..."}):</label>
                 <textarea id="stt-custom-headers" placeholder='{ "Authorization": "Bearer YOUR_KEY" }'
-                    style="width: 100%; padding: 8px; margin-top: 5px; background: #333; color: #fff; border: 1px solid #555; height: 60px; font-family: monospace;"></textarea>
+                    style="width: 100%; margin-top: 5px; height: 60px; font-family: monospace;"></textarea>
             </div>
             <div class="form-group" style="margin-top: 10px;">
                 <label for="stt-custom-formdata">Additional Form Data (JSON format, e.g., {"mode": "transcribe"}):</label>
                 <textarea id="stt-custom-formdata" placeholder='{ "mode": "transcribe" }'
-                    style="width: 100%; padding: 8px; margin-top: 5px; background: #333; color: #fff; border: 1px solid #555; height: 60px; font-family: monospace;"></textarea>
+                    style="width: 100%; margin-top: 5px; height: 60px; font-family: monospace;"></textarea>
             </div>
         </div>
 

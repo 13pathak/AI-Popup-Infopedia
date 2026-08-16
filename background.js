@@ -701,7 +701,7 @@ function triggerBackup(type = "Auto") {
   // viewer, plus the pdf_author_name preference set on the options page;
   // all are picked out into pdfAnnotations below.
   chrome.storage.local.get(null, (localData) => {
-    chrome.storage.sync.get(['models', 'customPrompts', 'defaultModelId', 'defaultPromptId', 'ankiSettings', 'ttsSettings', 'backupReminderFrequency', 'backupSubfolder', 'followupCustomMessage', 'showUserQuestions', 'sttEngine', 'sttApiKey', 'sttApiUrl', 'sttModel', 'sttCustomHeaders', 'sttCustomFormData', 'pdfViewerEnabled'], (syncData) => {
+    chrome.storage.sync.get(['models', 'customPrompts', 'defaultModelId', 'defaultPromptId', 'ankiSettings', 'ttsSettings', 'backupReminderFrequency', 'backupSubfolder', 'followupCustomMessage', 'showUserQuestions', 'sttEngine', 'sttApiKey', 'sttApiUrl', 'sttModel', 'sttCustomHeaders', 'sttCustomFormData', 'pdfViewerEnabled', 'uiTheme'], (syncData) => {
 
       // SECURITY NOTE: this backup intentionally includes secrets (each
       // model's apiKey, sttApiKey, sttCustomHeaders) so that restores are
@@ -735,6 +735,7 @@ function triggerBackup(type = "Auto") {
         followupCustomMessage: syncData.followupCustomMessage,
         showUserQuestions: syncData.showUserQuestions,
         pdfViewerEnabled: syncData.pdfViewerEnabled,
+        uiTheme: syncData.uiTheme,
         exportedAt: new Date().toISOString(),
         backupType: type,
         version: "1.2"

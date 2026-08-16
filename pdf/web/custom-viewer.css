@@ -1,23 +1,69 @@
+/* ============================================================
+   Theme tokens. Light values live on :root; body.dark-mode
+   (bottom of file) re-declares the same custom properties.
+   Every rule below references tokens, so adding a future theme
+   is a single override block. Colors without a dark counterpart
+   (brand blues, print overlay, search highlight tints) stay
+   literal on purpose.
+   ============================================================ */
+:root {
+    --viewer-bg: #525659;              /* app background */
+    --viewer-canvas: #525659;          /* scrolling area behind pages */
+    --surface: #f5f5f5;                /* toolbar, sidebar header, icon strip */
+    --surface-alt: #ffffff;            /* sidebar panel, active icon tab */
+    --surface-raised: #ffffff;         /* cards: popups, sidebar items, error card, modal, findbar buttons */
+    --surface-inset: #f9f9f9;          /* quoted highlight text background */
+    --field-bg: #ffffff;               /* textareas and note inputs */
+    --text: #333;                      /* primary text */
+    --text-muted: #555;                /* secondary text */
+    --text-faint: #666;                /* tertiary text, close buttons */
+    --text-hover: #000;                /* text on hovered controls */
+    --icon-muted: #999;                /* empty-state icons */
+    --text-hint: #888;                 /* empty-state hint lines */
+    --border: #ddd;                    /* surface and text-field borders */
+    --border-input: #ccc;              /* note textarea, sidebar panel edge */
+    --border-control: #ccc;            /* control borders (buttons, page input, findbar, password fields) */
+    --border-control-strong: #bbb;     /* hovered control borders */
+    --border-item: #e0e0e0;            /* sidebar item cards */
+    --control-bg: #ffffff;             /* toolbar buttons, page input, modal input */
+    --control-bg-2: #e8e8e8;           /* findbar container */
+    --control-bg-3: #f0f0f0;           /* quiet buttons, edit-popup hover */
+    --control-bg-4: #e0e0e0;           /* markup-tool and icon-strip hover */
+    --control-bg-5: #e6f3ff;           /* outline row hover */
+    --control-hover-bg: #e2e6ea;       /* toolbar button hover */
+    --findbar-btn-hover-bg: #d8d8d8;   /* findbar nav button hover */
+    --btn-neutral-bg: #f1f3f4;         /* password cancel, modal secondary */
+    --accent: #0078D7;                 /* focus rings, active tab, list actions */
+    --markup-active-bg: #d0e8ff;       /* active highlight tool */
+    --danger: #d32f2f;                 /* destructive actions */
+    --toolbar-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    --sidebar-shadow: -2px 0 5px rgba(0, 0, 0, 0.1);
+    --item-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    --item-shadow-hover: 0 2px 6px rgba(0, 0, 0, 0.1);
+    --popup-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    --error-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
 body, html {
     margin: 0;
     padding: 0;
     width: 100%;
     height: 100%;
-    background-color: #525659;
+    background-color: var(--viewer-bg);
     font-family: sans-serif;
     overflow: hidden; /* Prevent body scroll, use viewerContainer */
 }
 
 #toolbar {
     height: 40px;
-    background-color: #f5f5f5;
-    color: #333;
+    background-color: var(--surface);
+    color: var(--text);
     display: flex;
     justify-content: space-between;
     align-items: center;
     padding: 0 20px;
-    border-bottom: 1px solid #ddd;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    border-bottom: 1px solid var(--border);
+    box-shadow: var(--toolbar-shadow);
     z-index: 1000;
     position: relative;
 }
@@ -29,9 +75,9 @@ body, html {
 }
 
 #toolbar button {
-    background: #ffffff;
-    border: 1px solid #ccc;
-    color: #333;
+    background: var(--control-bg);
+    border: 1px solid var(--border-control);
+    color: var(--text);
     padding: 5px 10px;
     cursor: pointer;
     border-radius: 3px;
@@ -40,17 +86,17 @@ body, html {
 }
 
 #toolbar button:hover {
-    background: #e2e6ea;
-    border-color: #bbb;
-    color: #000;
+    background: var(--control-hover-bg);
+    border-color: var(--border-control-strong);
+    color: var(--text-hover);
 }
 
 #page_num {
     width: 48px;
     text-align: center;
-    background: #ffffff;
-    color: #333;
-    border: 1px solid #ccc;
+    background: var(--control-bg);
+    color: var(--text);
+    border: 1px solid var(--border-control);
     border-radius: 3px;
     padding: 4px 2px;
     font-size: 12px;
@@ -59,7 +105,7 @@ body, html {
 }
 
 #page_num:focus {
-    border-color: #0078D7;
+    border-color: var(--accent);
 }
 
 #mainContainer {
@@ -76,7 +122,7 @@ body, html {
     flex: 1;
     position: relative;
     overflow: auto;
-    background-color: #525659;
+    background-color: var(--viewer-canvas);
 }
 
 #viewer {
@@ -156,10 +202,11 @@ body, html {
 
 #color-picker-popup, #edit-highlight-popup, #note-editor-popup {
     position: absolute;
-    background: white;
+    background: var(--surface-raised);
+    color: var(--text);
     border-radius: 6px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-    border: 1px solid #ddd;
+    box-shadow: var(--popup-shadow);
+    border: 1px solid var(--border);
     z-index: 10000;
     display: flex;
     gap: 8px;
@@ -173,20 +220,31 @@ body, html {
     padding: 8px;
 }
 
+#markup-tools {
+    display: flex;
+    gap: 5px;
+    margin-bottom: 5px;
+    justify-content: center;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 5px;
+}
+
 .markup-tool-btn {
     background: none;
     border: 1px solid transparent;
+    color: var(--text);
     cursor: pointer;
     font-size: 14px;
     padding: 2px 6px;
     border-radius: 3px;
 }
 .markup-tool-btn:hover {
-    background: #e0e0e0;
+    background: var(--control-bg-4);
+    color: var(--text-hover);
 }
 .markup-tool-btn.active {
-    background: #d0e8ff;
-    border: 1px solid #0078D7;
+    background: var(--markup-active-bg);
+    border: 1px solid var(--accent);
 }
 
 /* Rendering styles for markups */
@@ -218,7 +276,9 @@ body, html {
     width: 100%;
     height: 80px;
     box-sizing: border-box;
-    border: 1px solid #ccc;
+    background: var(--field-bg);
+    color: var(--text);
+    border: 1px solid var(--border-input);
     border-radius: 4px;
     padding: 6px;
     resize: none;
@@ -242,13 +302,13 @@ body, html {
 }
 
 #note-btn-save {
-    background: #0078D7;
+    background: #0078D7; /* same in both themes */
     color: white;
 }
 
 #note-btn-cancel {
-    background: #f0f0f0;
-    color: #333;
+    background: var(--control-bg-3);
+    color: var(--text);
 }
 
 .note-indicator {
@@ -258,7 +318,7 @@ body, html {
     z-index: 5;
     user-select: none;
     transform: translate(-100%, -50%); /* Center vertically relative to top-left, and push completely to the left */
-    padding-right: 4px; /* small gap between emoji and text */
+    padding-right: 4px; /* small gap between icon and text */
 }
 
 #edit-highlight-popup button {
@@ -276,13 +336,13 @@ body, html {
 }
 
 #edit-highlight-popup button:hover {
-    background: #f0f0f0;
+    background: var(--control-bg-3);
 }
 
 .color-btn {
     width: 24px;
     height: 24px;
-    border: 1px solid #ccc;
+    border: 1px solid #ccc; /* not themed: identical in dark mode */
     border-radius: 50%;
     cursor: pointer;
 }
@@ -292,7 +352,7 @@ body, html {
     border: none;
     cursor: pointer;
     font-weight: bold;
-    color: #666;
+    color: var(--text-faint);
 }
 
 /* Find Bar Styles */
@@ -301,49 +361,49 @@ body, html {
     align-items: center;
     gap: 6px;
     margin-right: 10px;
-    background: #e8e8e8;
-    border: 1px solid #ccc;
+    background: var(--control-bg-2);
+    border: 1px solid var(--border-control);
     padding: 2px 6px;
     border-radius: 4px;
-    color: #333;
+    color: var(--text);
 }
 
 #findbar input {
-    background: white;
-    border: 1px solid #ccc;
+    background: var(--surface-raised);
+    border: 1px solid var(--border-control);
     border-radius: 2px;
     padding: 3px 6px;
     font-size: 12px;
     width: 140px;
     outline: none;
-    color: #333;
+    color: var(--text);
     transition: border-color 0.2s;
 }
 
 #findbar input:focus {
-    border-color: #0078D7;
+    border-color: var(--accent);
 }
 
 #findbar span {
     font-size: 12px;
     min-width: 35px;
     text-align: center;
-    color: #555;
+    color: var(--text-muted);
 }
 
 #findbar button {
-    background: #ffffff !important;
-    border: 1px solid #ccc !important;
-    color: #333 !important;
+    background: var(--surface-raised) !important;
+    border: 1px solid var(--border-control) !important;
+    color: var(--text) !important;
     padding: 2px 6px !important;
     border-radius: 2px;
     cursor: pointer;
 }
 
 #findbar button:hover {
-    background: #d8d8d8 !important;
-    border-color: #bbb !important;
-    color: #000 !important;
+    background: var(--findbar-btn-hover-bg) !important;
+    border-color: var(--border-control-strong) !important;
+    color: var(--text-hover) !important;
 }
 
 /* Search Highlight Styles */
@@ -385,11 +445,11 @@ body, html {
 /* Sidebar Styles */
 #sidebar {
     width: 300px;
-    background: white;
-    border-left: 1px solid #ccc;
+    background: var(--surface-alt);
+    border-left: 1px solid var(--border-input);
     display: flex;
     flex-direction: column;
-    box-shadow: -2px 0 5px rgba(0,0,0,0.1);
+    box-shadow: var(--sidebar-shadow);
     z-index: 1000;
 }
 
@@ -399,14 +459,14 @@ body, html {
     justify-content: space-between;
     align-items: center;
     padding: 10px 15px;
-    background: #f5f5f5;
-    border-bottom: 1px solid #ddd;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
 }
 
 #sidebar-header h3 {
     margin: 0;
     font-size: 14px;
-    color: #333;
+    color: var(--text);
 }
 
 #sidebar-header-actions button {
@@ -414,18 +474,18 @@ body, html {
     border: none;
     font-size: 14px;
     cursor: pointer;
-    color: #555;
+    color: var(--text-muted);
     padding: 0 4px;
 }
 
 #sidebar-header-actions button:hover {
-    color: #000;
+    color: var(--text-hover);
 }
 
 #close_sidebar {
     background: none !important;
     border: none;
-    color: #666 !important;
+    color: var(--text-faint) !important;
     font-size: 16px;
     cursor: pointer;
     padding: 0 !important;
@@ -433,14 +493,14 @@ body, html {
 }
 
 #close_sidebar:hover {
-    color: #000 !important;
+    color: var(--text-hover) !important;
 }
 
 /* Sidebar Icons Strip */
 #sidebar-icons {
     width: 40px;
-    background: #f5f5f5;
-    border-left: 1px solid #ddd;
+    background: var(--surface);
+    border-left: 1px solid var(--border);
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -455,7 +515,7 @@ body, html {
     padding: 10px 0;
     width: 100%;
     cursor: pointer;
-    color: #555;
+    color: var(--text-muted);
     transition: background 0.2s, color 0.2s;
     display: flex;
     align-items: center;
@@ -463,14 +523,14 @@ body, html {
 }
 
 #sidebar-icons button:hover {
-    background: #e0e0e0;
-    color: #000;
+    background: var(--control-bg-4);
+    color: var(--text-hover);
 }
 
 #sidebar-icons button.active {
-    background: #fff;
-    border-left: 3px solid #0078D7;
-    color: #0078D7;
+    background: var(--surface-alt);
+    border-left: 3px solid var(--accent);
+    color: var(--accent);
 }
 
 /* Outline List Styles (Adobe Reader Style) */
@@ -480,7 +540,7 @@ body, html {
 
 .outline-item {
     font-size: 13px;
-    color: #333;
+    color: var(--text);
     line-height: 1.5;
     display: flex;
     flex-direction: column;
@@ -494,7 +554,7 @@ body, html {
 }
 
 .outline-item-title:hover {
-    background-color: #e6f3ff;
+    background-color: var(--control-bg-5);
 }
 
 .outline-item-title a {
@@ -516,13 +576,13 @@ body, html {
     margin-right: 4px;
     cursor: pointer;
     font-size: 10px;
-    color: #666;
+    color: var(--text-faint);
     user-select: none;
     transition: transform 0.2s;
 }
 
 .outline-toggle:hover {
-    color: #000;
+    color: var(--text-hover);
 }
 
 .outline-toggle.collapsed {
@@ -535,18 +595,19 @@ body, html {
 
 
 .sidebar-item {
-    background: #fff;
-    border: 1px solid #e0e0e0;
+    background: var(--surface-raised);
+    border: 1px solid var(--border-item);
     border-radius: 4px;
     padding: 10px;
     margin-bottom: 10px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    box-shadow: var(--item-shadow);
     cursor: pointer;
-    transition: box-shadow 0.2s;
+    transition: box-shadow 0.2s, border-color 0.2s;
 }
 
 .sidebar-item:hover {
-    box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+    border-color: var(--border-control-strong);
+    box-shadow: var(--item-shadow-hover);
 }
 
 .sidebar-item-header {
@@ -558,7 +619,7 @@ body, html {
 
 .sidebar-item-page {
     font-size: 11px;
-    color: #666;
+    color: var(--accent);
     font-weight: bold;
 }
 
@@ -566,30 +627,37 @@ body, html {
     width: 12px;
     height: 12px;
     border-radius: 50%;
-    border: 1px solid #ccc;
+    border: 1px solid var(--border-control);
 }
 
 .sidebar-item-text {
     font-size: 13px;
-    color: #333;
+    color: var(--text);
     line-height: 1.4;
     margin-bottom: 8px;
     font-style: italic;
-    background: #f9f9f9;
+    background: var(--surface-inset);
     padding: 4px;
-    border-left: 2px solid #ccc;
+    border-left: 2px solid var(--accent);
 }
 
 .sidebar-item-note-input {
     width: 100%;
     box-sizing: border-box;
+    background: var(--field-bg);
+    color: var(--text);
     font-size: 12px;
     font-family: inherit;
     padding: 6px;
-    border: 1px solid #ddd;
+    border: 1px solid var(--border);
     border-radius: 3px;
     resize: vertical;
     min-height: 40px;
+}
+
+.sidebar-item-note-input:focus {
+    border-color: var(--accent);
+    outline: none;
 }
 
 .sidebar-item-actions {
@@ -603,20 +671,21 @@ body, html {
     border: none;
     cursor: pointer;
     font-size: 12px;
-    color: #0078D7;
+    color: var(--accent);
     padding: 2px 6px;
 }
 
 .sidebar-item-actions button:hover {
+    color: var(--text-hover);
     text-decoration: underline;
 }
 
 .sidebar-item-delete {
-    color: #d32f2f !important;
+    color: var(--danger) !important;
 }
 
 .sidebar-empty-msg {
-    color: #666;
+    color: var(--text-faint);
     text-align: center;
     margin-top: 20px;
     font-size: 13px;
@@ -626,270 +695,100 @@ body, html {
 .sidebar-empty-msg svg {
     display: block;
     margin: 0 auto 8px auto;
-    color: #999;
+    color: var(--icon-muted);
 }
 
 .sidebar-empty-msg .sidebar-empty-hint {
     margin-top: 5px;
     font-size: 11.5px;
-    color: #888;
+    color: var(--text-hint);
     line-height: 1.45;
 }
 
-/* --- Dark Mode Styles --- */
-body.dark-mode {
-    background-color: #121212;
+/* --- Lightweight modal dialogs (replace native alert/prompt) --- */
+#viewer-modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1200;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
-body.dark-mode #viewerContainer {
-    background-color: #1e1e1e;
+#viewer-modal-overlay.hidden {
+    display: none;
 }
 
-/* Invert the canvas and text layer, keeping colors mostly correct by hue-rotating 180deg */
-body.dark-mode .page {
-    filter: invert(90%) hue-rotate(180deg);
-    box-shadow: 0px 0px 8px rgba(0,0,0,0.8);
-    border: 1px solid #333;
+.viewer-modal {
+    width: min(340px, calc(100vw - 48px));
+    background-color: var(--surface-raised);
+    color: var(--text);
+    border-radius: 8px;
+    padding: 22px 24px;
+    box-shadow: var(--error-shadow);
+    text-align: center;
+    animation: viewerModalEnter 140ms ease-out;
 }
 
-/* --- Dark Mode: Top Toolbar --- */
-body.dark-mode #toolbar {
-    background-color: #242526;
-    border-bottom: 1px solid #3a3b3c;
-    color: #e4e6eb;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+@keyframes viewerModalEnter {
+    from { opacity: 0; transform: translateY(6px) scale(0.98); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-body.dark-mode #toolbar button {
-    background: #3a3b3c;
-    border: 1px solid #4e4f50;
-    color: #e4e6eb;
+.viewer-modal h3 {
+    margin: 0 0 8px 0;
+    font-size: 16px;
 }
 
-body.dark-mode #toolbar button:hover {
-    background: #4e4f50;
-    border-color: #606266;
+.viewer-modal p {
+    margin: 4px 0 0;
+    font-size: 13px;
+    color: var(--text-muted);
+    line-height: 1.5;
+    word-break: break-word;
+}
+
+.viewer-modal input {
+    width: 100%;
+    box-sizing: border-box;
+    margin-top: 14px;
+    padding: 8px 10px;
+    background: var(--control-bg);
+    color: var(--text);
+    border: 1px solid var(--border-control);
+    border-radius: 6px;
+    font-size: 13px;
+}
+
+.viewer-modal-actions {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 16px;
+}
+
+.viewer-modal-actions button {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.viewer-modal-primary {
+    background-color: #1a73e8; /* same in both themes */
     color: #ffffff;
 }
 
-body.dark-mode #page_num {
-    background: #3a3b3c;
-    color: #e4e6eb;
-    border: 1px solid #4e4f50;
+.viewer-modal-primary:hover {
+    background-color: #1667d9;
 }
 
-body.dark-mode #page_num:focus {
-    border-color: #4da3ff;
-}
-
-body.dark-mode #findbar {
-    background: #3a3b3c;
-    border: 1px solid #4e4f50;
-    color: #e4e6eb;
-}
-
-body.dark-mode #findbar input {
-    background: #242526;
-    color: #e4e6eb;
-    border: 1px solid #4e4f50;
-}
-
-body.dark-mode #findbar input:focus {
-    border-color: #4da3ff;
-}
-
-body.dark-mode #findbar span {
-    color: #b0b3b8;
-}
-
-body.dark-mode #findbar button {
-    background: #242526 !important;
-    border: 1px solid #4e4f50 !important;
-    color: #e4e6eb !important;
-}
-
-body.dark-mode #findbar button:hover {
-    background: #4e4f50 !important;
-    border-color: #606266 !important;
-    color: #ffffff !important;
-}
-
-/* --- Dark Mode: Sidebar --- */
-body.dark-mode #sidebar {
-    background: #1e1e1e;
-    border-left: 1px solid #3a3b3c;
-    box-shadow: -2px 0 5px rgba(0,0,0,0.4);
-}
-
-body.dark-mode #sidebar-header {
-    background: #242526;
-    border-bottom: 1px solid #3a3b3c;
-}
-
-body.dark-mode #sidebar-header h3 {
-    color: #e4e6eb;
-}
-
-body.dark-mode #sidebar-header-actions button {
-    color: #b0b3b8;
-}
-
-body.dark-mode #sidebar-header-actions button:hover {
-    color: #ffffff;
-}
-
-body.dark-mode #close_sidebar {
-    color: #b0b3b8 !important;
-}
-
-body.dark-mode #close_sidebar:hover {
-    color: #ffffff !important;
-}
-
-body.dark-mode #sidebar-icons {
-    background: #242526;
-    border-left: 1px solid #3a3b3c;
-}
-
-body.dark-mode #sidebar-icons button {
-    color: #b0b3b8;
-}
-
-body.dark-mode #sidebar-icons button:hover {
-    background: #3a3b3c;
-    color: #ffffff;
-}
-
-body.dark-mode #sidebar-icons button.active {
-    background: #1e1e1e;
-    border-left: 3px solid #4da3ff;
-    color: #4da3ff;
-}
-
-body.dark-mode .sidebar-empty-msg {
-    color: #b0b3b8 !important;
-}
-
-body.dark-mode .sidebar-empty-msg svg {
-    color: #7a7d82;
-}
-
-body.dark-mode .sidebar-empty-msg .sidebar-empty-hint {
-    color: #9a9da3;
-}
-
-body.dark-mode .sidebar-item {
-    background: #242526;
-    border: 1px solid #3a3b3c;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
-}
-
-body.dark-mode .sidebar-item:hover {
-    box-shadow: 0 2px 6px rgba(0,0,0,0.5);
-    border-color: #4e4f50;
-}
-
-body.dark-mode .sidebar-item-page {
-    color: #4da3ff;
-}
-
-body.dark-mode .sidebar-item-color {
-    border: 1px solid #555;
-}
-
-body.dark-mode .sidebar-item-text {
-    background: #18191a;
-    color: #e4e6eb;
-    border-left: 2px solid #4da3ff;
-}
-
-body.dark-mode .sidebar-item-note-input {
-    background: #18191a;
-    color: #e4e6eb;
-    border: 1px solid #3a3b3c;
-}
-
-body.dark-mode .sidebar-item-note-input:focus {
-    border-color: #4da3ff;
-    outline: none;
-}
-
-body.dark-mode .sidebar-item-actions button {
-    color: #4da3ff;
-}
-
-body.dark-mode .sidebar-item-actions button:hover {
-    color: #70b5ff;
-}
-
-body.dark-mode .sidebar-item-delete {
-    color: #ff6b6b !important;
-}
-
-body.dark-mode .outline-item {
-    color: #e4e6eb;
-}
-
-body.dark-mode .outline-item-title:hover {
-    background-color: #3a3b3c;
-}
-
-body.dark-mode .outline-item-title a {
-    color: #e4e6eb;
-}
-
-body.dark-mode .outline-toggle {
-    color: #b0b3b8;
-}
-
-body.dark-mode .outline-toggle:hover {
-    color: #ffffff;
-}
-
-/* --- Dark Mode: Popups --- */
-body.dark-mode #color-picker-popup,
-body.dark-mode #edit-highlight-popup,
-body.dark-mode #note-editor-popup {
-    background: #242526;
-    border-color: #3a3b3c;
-    color: #e4e6eb;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
-}
-
-body.dark-mode #markup-tools {
-    border-bottom-color: #3a3b3c !important;
-}
-
-body.dark-mode .markup-tool-btn {
-    color: #e4e6eb;
-}
-
-body.dark-mode .markup-tool-btn:hover {
-    background: #3a3b3c;
-}
-
-body.dark-mode .markup-tool-btn.active {
-    background: #1a3a5c;
-    border: 1px solid #4da3ff;
-}
-
-body.dark-mode #close-color-picker {
-    color: #b0b3b8;
-}
-
-body.dark-mode #edit-highlight-popup button:hover {
-    background: #3a3b3c;
-}
-
-body.dark-mode #note-textarea {
-    background: #18191a;
-    color: #e4e6eb;
-    border: 1px solid #3a3b3c;
-}
-
-body.dark-mode #note-btn-cancel {
-    background: #3a3b3c;
-    color: #e4e6eb;
+.viewer-modal-secondary {
+    background-color: var(--btn-neutral-bg);
+    color: var(--text);
+    border: 1px solid var(--border-control);
 }
 
 /* --- PDF Load Failure --- */
@@ -897,10 +796,10 @@ body.dark-mode #note-btn-cancel {
     max-width: 420px;
     margin: 80px auto 0 auto;
     padding: 24px 32px;
-    background-color: #ffffff;
-    color: #333;
+    background-color: var(--surface-raised);
+    color: var(--text);
     border-radius: 8px;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+    box-shadow: var(--error-shadow);
     text-align: center;
 }
 
@@ -920,7 +819,7 @@ body.dark-mode #note-btn-cancel {
 }
 
 .pdf-load-error-url {
-    color: #777;
+    color: var(--text-muted);
     font-size: 12px;
     word-break: break-all;
 }
@@ -975,7 +874,9 @@ body.dark-mode #note-btn-cancel {
     flex-grow: 1;
     min-width: 150px;
     padding: 8px 10px;
-    border: 1px solid #ccc;
+    background: var(--control-bg);
+    color: var(--text);
+    border: 1px solid var(--border-control);
     border-radius: 6px;
     font-size: 13px;
 }
@@ -987,125 +888,12 @@ body.dark-mode #note-btn-cancel {
 
 .pdf-password-cancel {
     padding: 9px 18px;
-    border: 1px solid #ccc;
+    border: 1px solid var(--border-control);
     border-radius: 6px;
-    background-color: #f1f3f4;
-    color: #333;
+    background-color: var(--btn-neutral-bg);
+    color: var(--text);
     font-size: 13px;
     cursor: pointer;
-}
-
-body.dark-mode .pdf-password-input,
-body.dark-mode .pdf-password-cancel {
-    background-color: #3a3b3c;
-    color: #e4e6eb;
-    border-color: #4e4f50;
-}
-
-/* --- Lightweight modal dialogs (replace native alert/prompt) --- */
-#viewer-modal-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 1200;
-    background: rgba(0, 0, 0, 0.5);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-#viewer-modal-overlay.hidden {
-    display: none;
-}
-
-.viewer-modal {
-    width: min(340px, calc(100vw - 48px));
-    background-color: #ffffff;
-    color: #333;
-    border-radius: 8px;
-    padding: 22px 24px;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
-    text-align: center;
-    animation: viewerModalEnter 140ms ease-out;
-}
-
-@keyframes viewerModalEnter {
-    from { opacity: 0; transform: translateY(6px) scale(0.98); }
-    to { opacity: 1; transform: translateY(0) scale(1); }
-}
-
-.viewer-modal h3 {
-    margin: 0 0 8px 0;
-    font-size: 16px;
-}
-
-.viewer-modal p {
-    margin: 4px 0 0;
-    font-size: 13px;
-    color: #555;
-    line-height: 1.5;
-    word-break: break-word;
-}
-
-.viewer-modal input {
-    width: 100%;
-    box-sizing: border-box;
-    margin-top: 14px;
-    padding: 8px 10px;
-    border: 1px solid #ccc;
-    border-radius: 6px;
-    font-size: 13px;
-}
-
-.viewer-modal-actions {
-    display: flex;
-    justify-content: center;
-    gap: 8px;
-    margin-top: 16px;
-}
-
-.viewer-modal-actions button {
-    padding: 8px 16px;
-    border: none;
-    border-radius: 6px;
-    font-size: 13px;
-    cursor: pointer;
-}
-
-.viewer-modal-primary {
-    background-color: #1a73e8;
-    color: #ffffff;
-}
-
-.viewer-modal-primary:hover {
-    background-color: #1667d9;
-}
-
-.viewer-modal-secondary {
-    background-color: #f1f3f4;
-    color: #333;
-    border: 1px solid #ccc;
-}
-
-body.dark-mode .viewer-modal {
-    background-color: #242526;
-    color: #e4e6eb;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
-}
-
-body.dark-mode .viewer-modal p {
-    color: #b0b3b8;
-}
-
-body.dark-mode .viewer-modal input {
-    background-color: #3a3b3c;
-    color: #e4e6eb;
-    border-color: #4e4f50;
-}
-
-body.dark-mode .viewer-modal-secondary {
-    background-color: #3a3b3c;
-    color: #e4e6eb;
-    border-color: #4e4f50;
 }
 
 /* --- Whole-document printing ---
@@ -1210,12 +998,51 @@ body.dark-mode .viewer-modal-secondary {
     }
 }
 
-body.dark-mode .pdf-load-error {
-    background-color: #242526;
-    color: #e4e6eb;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+/* ============================================================
+   Dark mode. One token flip restyles everything that references
+   the variables above, plus the page canvas filter inversion.
+   ============================================================ */
+body.dark-mode {
+    --viewer-bg: #121212;
+    --viewer-canvas: #1e1e1e;
+    --surface: #242526;
+    --surface-alt: #1e1e1e;
+    --surface-raised: #242526;
+    --surface-inset: #18191a;
+    --field-bg: #18191a;
+    --text: #e4e6eb;
+    --text-muted: #b0b3b8;
+    --text-faint: #b0b3b8;
+    --text-hover: #ffffff;
+    --icon-muted: #7a7d82;
+    --text-hint: #9a9da3;
+    --border: #3a3b3c;
+    --border-input: #3a3b3c;
+    --border-control: #4e4f50;
+    --border-control-strong: #606266;
+    --border-item: #3a3b3c;
+    --control-bg: #3a3b3c;
+    --control-bg-2: #3a3b3c;
+    --control-bg-3: #3a3b3c;
+    --control-bg-4: #3a3b3c;
+    --control-bg-5: #3a3b3c;
+    --control-hover-bg: #4e4f50;
+    --findbar-btn-hover-bg: #4e4f50;
+    --btn-neutral-bg: #3a3b3c;
+    --accent: #4da3ff;
+    --markup-active-bg: #1a3a5c;
+    --danger: #ff6b6b;
+    --toolbar-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+    --sidebar-shadow: -2px 0 5px rgba(0, 0, 0, 0.4);
+    --item-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+    --item-shadow-hover: 0 2px 6px rgba(0, 0, 0, 0.5);
+    --popup-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    --error-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
 }
 
-body.dark-mode .pdf-load-error-url {
-    color: #b0b3b8;
+/* Invert the canvas and text layer, keeping colors mostly correct by hue-rotating 180deg */
+body.dark-mode .page {
+    filter: invert(90%) hue-rotate(180deg);
+    box-shadow: 0px 0px 8px rgba(0,0,0,0.8);
+    border: 1px solid #333;
 }

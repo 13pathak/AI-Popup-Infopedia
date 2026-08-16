@@ -86,6 +86,7 @@ document.addEventListener('DOMContentLoaded', () => {
   loadModels();
   loadLists(); // Load lists on initial page load
 
+  loadThemeSetting(); // Load visual theme setting
   loadDefaultPromptSelect(); // Load default prompt selector
   loadAnkiSettings(); // Load saved Anki settings on page load
   loadReminderSettings(); // Load saved Reminder settings on page load
@@ -111,8 +112,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Also listen for changes so deep-linking works when options page is already open
+  // Also listen for changes so deep-linking and theme syncing work when options page is already open
   chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'sync' && changes.uiTheme) {
+      loadThemeSetting();
+    }
     if (area === 'local' && changes.activeOptionsTab && changes.activeOptionsTab.newValue) {
       activateRequestedTab(changes.activeOptionsTab.newValue);
     }
@@ -129,6 +133,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // --- REVISED: Safe Event Listener Attachments ---
+  safeAddListener('ui-theme-select', 'change', saveThemeSetting);
   safeAddListener('add-model-btn', 'click', () => showModelForm(false));
   safeAddListener('edit-model-btn', 'click', editSelectedModel);
   safeAddListener('delete-model-btn', 'click', deleteSelectedModel);
@@ -495,6 +500,36 @@ function savePdfAuthorName() {
       updateStatus('Custom Author Name saved successfully!', 'success');
     });
   }
+}
+
+function applyThemeToDocument(theme) {
+  try {
+    localStorage.setItem('uiTheme', theme);
+  } catch (e) {}
+  if (theme === 'auto') {
+    document.documentElement.removeAttribute('data-theme');
+  } else {
+    document.documentElement.setAttribute('data-theme', theme);
+  }
+}
+
+function loadThemeSetting() {
+  chrome.storage.sync.get({ uiTheme: 'dark' }, (data) => {
+    const theme = data.uiTheme || 'dark';
+    const select = document.getElementById('ui-theme-select');
+    if (select) select.value = theme;
+    applyThemeToDocument(theme);
+  });
+}
+
+function saveThemeSetting() {
+  const select = document.getElementById('ui-theme-select');
+  if (!select) return;
+  const theme = select.value;
+  applyThemeToDocument(theme);
+  chrome.storage.sync.set({ uiTheme: theme }, () => {
+    updateStatus('Theme preference saved.', 'success');
+  });
 }
 
 // Stored in sync (unlike the author name) so it roams with the account and
@@ -2369,7 +2404,7 @@ function restoreBackup() {
       if (restoredCount > 0) {
         chrome.storage.local.set(dataToSave, () => {
           // Also check for sync settings if any
-          const syncKeys = ['models', 'customPrompts', 'defaultModelId', 'defaultPromptId', 'ttsSettings', 'ankiSettings', 'backupReminderFrequency', 'backupSubfolder', 'followupCustomMessage', 'showUserQuestions', 'sttEngine', 'sttApiKey', 'sttApiUrl', 'sttModel', 'sttCustomHeaders', 'sttCustomFormData', 'pdfViewerEnabled'];
+          const syncKeys = ['models', 'customPrompts', 'defaultModelId', 'defaultPromptId', 'ttsSettings', 'ankiSettings', 'backupReminderFrequency', 'backupSubfolder', 'followupCustomMessage', 'showUserQuestions', 'sttEngine', 'sttApiKey', 'sttApiUrl', 'sttModel', 'sttCustomHeaders', 'sttCustomFormData', 'pdfViewerEnabled', 'uiTheme'];
           const syncData = {};
           let syncCount = 0;
           for (const key of syncKeys) {
