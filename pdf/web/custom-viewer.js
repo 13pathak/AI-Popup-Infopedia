@@ -223,7 +223,14 @@ async function loadPDF() {
             url: fileUrl,
             cMapUrl: './cmaps/',
             cMapPacked: true,
-            standardFontDataUrl: './standard_fonts/'
+            standardFontDataUrl: './standard_fonts/',
+            // This page's origin is chrome-extension://, so PDF.js's
+            // default credentials:"same-origin" never matches the PDF's
+            // site and session cookies are dropped — yet the intercepted
+            // navigation would have sent them. "include" restores
+            // cookie-authenticated PDFs (university proxies etc.);
+            // host_permissions already exempts the fetch from CORS.
+            withCredentials: true
         }).promise;
         pageCountSpan.textContent = pdfDoc.numPages;
         await renderAllPages();
@@ -262,7 +269,16 @@ function showLoadError(err) {
     const title = document.createElement('h2');
     title.textContent = 'Could not load PDF';
     const detail = document.createElement('p');
-    detail.textContent = (err && reasons[err.name]) || 'The file could not be fetched or read.';
+    let detailText = (err && reasons[err.name]) || 'The file could not be fetched or read.';
+    // A 401/403 on a document that opens fine in a normal tab means the
+    // session cookie didn't reach this fetch (expired login, cookie
+    // rules); say so instead of a generic fetch failure.
+    if (err && err.name === 'UnexpectedResponseException' && (err.status === 401 || err.status === 403)) {
+        detailText = `The server denied access (HTTP ${err.status}). If this document requires a login, sign in on the site in a normal tab, then reopen the PDF here.`;
+    } else if (err && err.name === 'UnexpectedResponseException' && err.status) {
+        detailText += ` (HTTP ${err.status})`;
+    }
+    detail.textContent = detailText;
     const urlLine = document.createElement('p');
     urlLine.className = 'pdf-load-error-url';
     urlLine.textContent = fileUrl;
@@ -1039,7 +1055,10 @@ document.getElementById('save_pdf').addEventListener('click', async () => {
         if (!fileUrl) {
             throw new Error("No PDF file URL specified.");
         }
-        const res = await fetch(fileUrl);
+        // credentials:"include" to match getDocument above — without it
+        // this export 401s on the cookie-authenticated PDFs the viewer
+        // itself can now load.
+        const res = await fetch(fileUrl, { credentials: 'include' });
         if (!res.ok) {
             throw new Error(`HTTP ${res.status}: ${res.statusText || 'Failed to fetch PDF file'}`);
         }

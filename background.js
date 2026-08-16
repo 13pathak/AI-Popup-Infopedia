@@ -42,6 +42,33 @@ chrome.commands.onCommand.addListener((command) => {
 });
 
 
+// --- Print hand-off for "Save conversation as PDF" ---
+// The transcript used to open as a data:text/html tab, but top-frame
+// data: navigation is on Chrome's deprecation path and data: URLs cap
+// out around ~2MB in tabs.create. Instead, stash the HTML in session
+// storage under a one-shot key and open the packaged pdf/print.html,
+// which writes the payload into the document and calls window.print().
+// Chrome too old for storage.session keeps the legacy data: fallback.
+function openPrintTab(htmlContent) {
+  if (typeof htmlContent !== 'string' || htmlContent.length === 0) return;
+  const openDataUrl = () => {
+    chrome.tabs.create({ url: "data:text/html;charset=utf-8," + encodeURIComponent(htmlContent) });
+  };
+  if (!chrome.storage || !chrome.storage.session) {
+    openDataUrl();
+    return;
+  }
+  const key = 'pdfPrint_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+  chrome.storage.session.set({ [key]: htmlContent }, () => {
+    if (chrome.runtime.lastError) {
+      openDataUrl();
+      return;
+    }
+    chrome.tabs.create({ url: chrome.runtime.getURL('pdf/print.html') + '?k=' + encodeURIComponent(key) });
+  });
+}
+
+
 // --- This listener now handles multiple message types ---
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
@@ -367,7 +394,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   // --- Case 2.5: Open PDF Tab ---
   if (request.type === "openPdfTab") {
-    chrome.tabs.create({ url: "data:text/html;charset=utf-8," + encodeURIComponent(request.htmlContent) });
+    openPrintTab(request.htmlContent);
   }
 
   // --- Case 2.8: Test AI Connection & Setup ---
