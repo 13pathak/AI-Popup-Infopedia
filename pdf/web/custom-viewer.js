@@ -30,7 +30,7 @@ let fileUrl = urlParams.get('file');
 
 if (!fileUrl) {
     // Fallback for testing
-    fileUrl = '../../test.pdf';
+    fileUrl = '../../test_highlight.pdf';
 }
 
 function hasChromeStorage() {
@@ -527,13 +527,15 @@ document.addEventListener('mouseup', (e) => {
         return;
     }
 
+    // Read the page rect in the same instant as clientRects: getPage()
+    // resolves asynchronously, and a zoom or scroll landing in that gap
+    // would mix old-scale selection rects with a new-scale page rect.
+    const pageRect = pageDiv.getBoundingClientRect();
+
     // Get viewport to convert coordinates
     pdfDoc.getPage(pageNumber).then(page => {
         const viewport = page.getViewport({ scale: scale });
-        
-        // Get bounding rects relative to the page div
-        const pageRect = pageDiv.getBoundingClientRect();
-        
+
         const relativeRects = clientRects.map(r => {
             // CSS pixels relative to page container
             const left = r.left - pageRect.left;
@@ -639,7 +641,10 @@ document.querySelectorAll('.color-btn').forEach(btn => {
         
         highlights.push(hl);
         saveHighlights();
-        drawHighlight(hl, currentSelection.pageDiv, currentSelection.viewport);
+        // Resolve the viewport at draw time, not mouseup time: the user
+        // may zoom while the picker is open, and the stored PDF-space
+        // rects only land correctly through the page's live _viewport.
+        drawHighlight(hl, currentSelection.pageDiv, currentSelection.pageDiv._viewport || currentSelection.viewport);
         
         // Clear browser selection
         window.getSelection().removeAllRanges();
