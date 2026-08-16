@@ -79,8 +79,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         // Find the name if possible, or use "Custom Prompt"
         const foundPrompt = customPrompts ? customPrompts.find(p => p.content === request.customPrompt) : null;
         promptName = foundPrompt ? foundPrompt.name : "Custom Prompt";
-      } else if (defaultPromptId && customPrompts) {
-        // 2. Use user-configured default prompt
+      } else if (request.customPrompt !== '' && defaultPromptId && customPrompts) {
+        // 2. Use user-configured default prompt — but only when the popup
+        //    didn't explicitly pick "System Default", which the selector
+        //    sends as ''. An absent customPrompt (initial lookup, retries,
+        //    follow-ups) still inherits the configured default here.
         const defaultPrompt = customPrompts.find(p => p.id === defaultPromptId);
         if (defaultPrompt) {
           promptTemplate = defaultPrompt.content;
@@ -660,17 +663,28 @@ function base64EncodeUtf8(str) {
 }
 
 function triggerBackup(type = "Auto") {
-  // 1. Fetch all data to backup
-  chrome.storage.local.get(['history', 'wordLists'], (localData) => {
+  // 1. Fetch all data to backup.
+  // get(null), not a fixed key list: PDF annotations live in per-URL keys
+  // (pdf_highlights_*, pdf_bookmarks_*, pdf_lastpage_*) that only the
+  // viewer writes; they're picked out into pdfAnnotations below.
+  chrome.storage.local.get(null, (localData) => {
     chrome.storage.sync.get(['models', 'customPrompts', 'defaultModelId', 'defaultPromptId', 'ankiSettings', 'ttsSettings', 'backupReminderFrequency', 'backupSubfolder', 'followupCustomMessage', 'showUserQuestions', 'sttEngine', 'sttApiKey', 'sttApiUrl', 'sttModel', 'sttCustomHeaders', 'sttCustomFormData'], (syncData) => {
 
       // SECURITY NOTE: this backup intentionally includes secrets (each
       // model's apiKey, sttApiKey, sttCustomHeaders) so that restores are
       // self-contained. The file is written unencrypted to the user's
       // Downloads folder — backups must be treated as credentials.
+      const pdfAnnotations = {};
+      for (const key of Object.keys(localData)) {
+        if (key.startsWith('pdf_highlights_') || key.startsWith('pdf_bookmarks_') || key.startsWith('pdf_lastpage_')) {
+          pdfAnnotations[key] = localData[key];
+        }
+      }
+
       const backupData = {
         history: localData.history || [],
         wordLists: localData.wordLists || [],
+        pdfAnnotations,
         models: syncData.models || [],
         customPrompts: syncData.customPrompts || [],
         defaultModelId: syncData.defaultModelId,
@@ -689,7 +703,7 @@ function triggerBackup(type = "Auto") {
         showUserQuestions: syncData.showUserQuestions,
         exportedAt: new Date().toISOString(),
         backupType: type,
-        version: "1.1"
+        version: "1.2"
       };
 
       // 2. Create Data URI (Base64) - Service Worker safe

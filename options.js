@@ -2239,6 +2239,22 @@ function restoreBackup() {
         }
       }
 
+      // Full backups keep per-URL PDF annotation keys (highlights,
+      // bookmarks, last page) namespaced under 'pdfAnnotations'; merge the
+      // pdf_* ones into the same local-storage write. URLs absent from the
+      // file keep whatever is already stored.
+      let pdfAnnotationCount = 0;
+      const pdfAnnotations = backupData.pdfAnnotations;
+      if (pdfAnnotations && typeof pdfAnnotations === 'object' && !Array.isArray(pdfAnnotations)) {
+        for (const key of Object.keys(pdfAnnotations)) {
+          if (key.startsWith('pdf_')) {
+            dataToSave[key] = pdfAnnotations[key];
+            pdfAnnotationCount++;
+          }
+        }
+        if (pdfAnnotationCount > 0) restoredCount++;
+      }
+
       if (restoredCount > 0) {
         chrome.storage.local.set(dataToSave, () => {
           // Also check for sync settings if any
@@ -2252,7 +2268,8 @@ function restoreBackup() {
             }
           }
 
-          const msg = `Restored: ${dataToSave.history ? dataToSave.history.length : 0} items, ${dataToSave.wordLists ? dataToSave.wordLists.length : 0} lists, ${syncCount} settings. Reloading...`;
+          const pdfPart = pdfAnnotationCount > 0 ? `, ${pdfAnnotationCount} PDF annotation keys` : '';
+          const msg = `Restored: ${dataToSave.history ? dataToSave.history.length : 0} items, ${dataToSave.wordLists ? dataToSave.wordLists.length : 0} lists, ${syncCount} settings${pdfPart}. Reloading...`;
 
           if (syncCount > 0) {
             chrome.storage.sync.set(syncData, () => {
