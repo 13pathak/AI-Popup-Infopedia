@@ -4,6 +4,11 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = '../build/pdf.worker.mjs';
 
 let pdfDoc = null;
 let scale = 1.25; // Adjusted scale as default zoom
+// Every scale writer (zoom buttons, fit modes, pinch) clamps to this
+// shared range; unbounded zoom pushes canvas backing stores past
+// browser limits and pages stop rendering.
+const MIN_SCALE = 0.25;
+const MAX_SCALE = 5.0;
 const viewerContainer = document.getElementById('viewer');
 const pageCountSpan = document.getElementById('page_count');
 const zoomLevelSpan = document.getElementById('zoom_level');
@@ -116,7 +121,18 @@ async function renderPageContent(pageDiv) {
 
         const page = pageDiv._pdfPage;
         const viewport = pageDiv._viewport;
-        const outputScale = Math.max(window.devicePixelRatio || 1, 2);
+        let outputScale = Math.max(window.devicePixelRatio || 1, 2);
+        // Cap the backing store below browser canvas limits (Chrome:
+        // 65535 px per side, 2^28 total pixels) — exceeding them makes
+        // the page render blank. Lowering outputScale only softens the
+        // image; the canvas keeps its viewport-sized CSS dimensions.
+        const cssLongSide = Math.max(viewport.width, viewport.height);
+        if (cssLongSide * outputScale > 65535 ||
+            viewport.width * viewport.height * outputScale * outputScale > 2 ** 28) {
+            const sideFactor = 65535 / cssLongSide;
+            const areaFactor = Math.sqrt((2 ** 28) / (viewport.width * viewport.height));
+            outputScale = Math.max(1, Math.min(sideFactor, areaFactor));
+        }
 
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
@@ -204,7 +220,38 @@ async function loadPDF() {
         }
     } catch (e) {
         console.error("Error loading PDF:", e);
+        showLoadError(e);
     }
+}
+
+// Visible failure state: without this a fetch/render error leaves the
+// user staring at an empty gray viewer.
+function showLoadError(err) {
+    const reasons = {
+        PasswordException: 'This PDF is password protected and cannot be opened here.',
+        InvalidPDFException: 'This file is not a valid PDF.',
+        MissingPDFException: 'The PDF file could not be found at the requested location.',
+        UnexpectedResponseException: 'The server sent an unexpected response while fetching the PDF.'
+    };
+    const box = document.createElement('div');
+    box.className = 'pdf-load-error';
+
+    const icon = document.createElement('div');
+    icon.className = 'pdf-load-error-icon';
+    icon.textContent = '⚠️';
+    const title = document.createElement('h2');
+    title.textContent = 'Could not load PDF';
+    const detail = document.createElement('p');
+    detail.textContent = (err && reasons[err.name]) || 'The file could not be fetched or read.';
+    const urlLine = document.createElement('p');
+    urlLine.className = 'pdf-load-error-url';
+    urlLine.textContent = fileUrl;
+
+    box.appendChild(icon);
+    box.appendChild(title);
+    box.appendChild(detail);
+    box.appendChild(urlLine);
+    document.getElementById('viewer').appendChild(box);
 }
 
 async function renderAllPages() {
@@ -291,8 +338,8 @@ async function calculateScaleAndRender() {
         scale = Math.min(scaleWidth, scaleHeight);
     }
     
-    if (scale < 0.25) scale = 0.25;
-    if (scale > 5.0) scale = 5.0;
+    if (scale < MIN_SCALE) scale = MIN_SCALE;
+    if (scale > MAX_SCALE) scale = MAX_SCALE;
     
     renderAllPages();
 }
@@ -300,15 +347,18 @@ async function calculateScaleAndRender() {
 document.getElementById('zoom_in').addEventListener('click', () => {
     if (!pdfDoc) return;
     currentZoomMode = 'custom';
-    scale += 0.25;
+    const newScale = Math.min(scale + 0.25, MAX_SCALE);
+    if (newScale === scale) return; // already at max, nothing to re-render
+    scale = newScale;
     renderAllPages();
 });
 
 document.getElementById('zoom_out').addEventListener('click', () => {
     if (!pdfDoc) return;
     currentZoomMode = 'custom';
-    if (scale <= 0.5) return;
-    scale -= 0.25;
+    const newScale = Math.max(scale - 0.25, MIN_SCALE);
+    if (newScale === scale) return; // already at min, nothing to re-render
+    scale = newScale;
     renderAllPages();
 });
 
@@ -337,8 +387,9 @@ window.addEventListener('resize', () => {
 const container = document.getElementById('viewerContainer');
 let pageNumberRafId = null;
 container.addEventListener('scroll', () => {
-    // Reading offsetTop/clientHeight forces layout; coalesce scroll
-    // bursts into at most one update per rendered frame.
+    // Coalesce scroll bursts into at most one update per rendered
+    // frame; offsetTop/clientHeight reads only force a reflow when
+    // styles are dirty, but they still shouldn't run per scroll event.
     if (pageNumberRafId !== null) return;
     pageNumberRafId = requestAnimationFrame(() => {
         pageNumberRafId = null;
@@ -1359,6 +1410,9 @@ async function renderLinkAnnotations(page, pageDiv, viewport) {
 }
 
 function scrollToPage(pageNumber) {
+    // Reachable with no loaded document (e.g. stored bookmark clicked
+    // after the file failed to load) — nothing to scroll to.
+    if (!pdfDoc) return;
     const pageDiv = document.querySelector(`.page[data-page-number="${pageNumber}"]`);
     const container = document.getElementById('viewerContainer');
     if (pageDiv) {
@@ -1742,8 +1796,8 @@ document.getElementById('viewerContainer').addEventListener('wheel', (e) => {
         const delta = -e.deltaY * 0.01;
         let newScale = scale * Math.exp(delta);
         
-        if (newScale < 0.5) newScale = 0.5;
-        if (newScale > 3.0) newScale = 3.0;
+        if (newScale < MIN_SCALE) newScale = MIN_SCALE;
+        if (newScale > MAX_SCALE) newScale = MAX_SCALE;
         
         scale = newScale;
         

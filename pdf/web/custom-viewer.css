@@ -894,3 +894,46 @@ body.dark-mode #note-btn-cancel {
     background: #3a3b3c;
     color: #e4e6eb;
 }
+
+/* --- PDF Load Failure --- */
+.pdf-load-error {
+    max-width: 420px;
+    margin: 80px auto 0 auto;
+    padding: 24px 32px;
+    background-color: #ffffff;
+    color: #333;
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+    text-align: center;
+}
+
+.pdf-load-error-icon {
+    font-size: 40px;
+    margin-bottom: 8px;
+}
+
+.pdf-load-error h2 {
+    margin: 0 0 8px 0;
+    font-size: 18px;
+}
+
+.pdf-load-error p {
+    margin: 4px 0;
+    font-size: 13px;
+}
+
+.pdf-load-error-url {
+    color: #777;
+    font-size: 12px;
+    word-break: break-all;
+}
+
+body.dark-mode .pdf-load-error {
+    background-color: #242526;
+    color: #e4e6eb;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+}
+
+body.dark-mode .pdf-load-error-url {
+    color: #b0b3b8;
+}
