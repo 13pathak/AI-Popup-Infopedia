@@ -163,6 +163,16 @@ async function renderPageContent(pageDiv) {
 
         await Promise.all([renderTask, textLayer.render()]);
 
+        // A zoom/fit during the awaits above swapped pageDiv._viewport and
+        // resized the div, but everything so far used the stale viewport.
+        // The zoom path skips "rendering" pages (unload no-ops, re-render
+        // early-returns), so redo the render at the current scale here.
+        if (pageDiv._viewport !== viewport) {
+            pageDiv.dataset.loaded = "false";
+            renderPageContent(pageDiv);
+            return;
+        }
+
         drawHighlightsForPage(parseInt(pageDiv.dataset.pageNumber), pageDiv, viewport);
         drawSearchHighlightsForPage(parseInt(pageDiv.dataset.pageNumber), pageDiv, viewport);
         renderLinkAnnotations(page, pageDiv, viewport);
@@ -204,7 +214,17 @@ const pageObserver = new IntersectionObserver((entries) => {
 async function loadPDF() {
     try {
         await loadStorageData();
-        pdfDoc = await pdfjsLib.getDocument(fileUrl).promise;
+        // CJK PDFs need CMap data and some PDFs rely on non-embedded
+        // standard fonts; without these URLs glyphs render garbled and text
+        // extraction (selection/search/highlights) fails on those documents.
+        // This PDF.js build fetches both from the main thread, so the URLs
+        // are document-relative (like workerSrc above).
+        pdfDoc = await pdfjsLib.getDocument({
+            url: fileUrl,
+            cMapUrl: './cmaps/',
+            cMapPacked: true,
+            standardFontDataUrl: './standard_fonts/'
+        }).promise;
         pageCountSpan.textContent = pdfDoc.numPages;
         await renderAllPages();
         
