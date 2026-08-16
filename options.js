@@ -1,3 +1,30 @@
+// --- Inline SVG icon set (currentColor; matches the .oi CSS in options.html) ---
+const OPT_ICON_PATHS = {
+  starFilled: '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" fill="currentColor" stroke="none"/>',
+  star: '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>',
+  edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>',
+  trash: '<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
+  check: '<polyline points="20 6 9 17 4 12"/>',
+  checkCircle: '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>',
+  xCircle: '<circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>',
+  alertTriangle: '<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
+  circle: '<circle cx="12" cy="12" r="9"/>',
+  spinner: '<path d="M21 12a9 9 0 1 1-6.219-8.56"/>',
+  play: '<polygon points="6 3 20 12 6 21 6 3" fill="currentColor" stroke="none"/>',
+  zap: '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>',
+  plus: '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
+  key: '<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/>',
+  inbox: '<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+  search: '<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>'
+};
+
+function optIcon(name, size = 1, extraClass = '') {
+  const paths = OPT_ICON_PATHS[name];
+  if (!paths) return '';
+  const sizeStyle = size === 1 ? '' : ` style="width: ${size}em; height: ${size}em;"`;
+  return `<svg class="oi${extraClass ? ' ' + extraClass : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"${sizeStyle} aria-hidden="true">${paths}</svg>`;
+}
+
 // --- TAB SWITCHING LOGIC ---
 document.addEventListener('DOMContentLoaded', () => {
   const tabs = document.querySelectorAll('.tab-button');
@@ -807,7 +834,7 @@ function createCustomDropdown(lists, currentValue, onChange, options = {}) {
   const sortedList = getSortedTreeLists(lists);
 
   const allItems = [];
-  if (options.showAllLists) allItems.push({ id: '__all_lists__', name: '🗂 All Lists', depth: 0 });
+  if (options.showAllLists) allItems.push({ id: '__all_lists__', name: 'All Lists', depth: 0 });
   if (options.showUnlisted) allItems.push({ id: '__unlisted__', name: '(Unlisted / No list)', depth: 0, color: '#aaa', italic: true });
   allItems.push(...sortedList);
   if (options.showCreateNew) allItems.push({ id: '__create_new__', name: '+ Create New List...', depth: 0, color: 'lightgreen', isCreate: true });
@@ -2159,7 +2186,7 @@ async function handleSendToAnkiClick(event) {
     }
 
     // Success!
-    btn.innerHTML = '<strong>✔</strong>'; // <-- UPDATED
+    btn.innerHTML = `<strong>${optIcon('check')}</strong>`;
     // Keep it disabled to show success
 
   } catch (e) {
@@ -2759,6 +2786,9 @@ function applyFilters(scrollTopToRestore = null) {
     // through the history writers, which re-read storage before writing.
     ensureHistoryIds(history);
 
+    // Capture the pre-filter size for the empty-state distinction below.
+    const totalHistoryCount = history.length;
+
     // Filter by list first
     if (showAllLists) {
       // No list filter — keep everything (incl. null/unlisted items).
@@ -2804,20 +2834,33 @@ function applyFilters(scrollTopToRestore = null) {
       history = history.filter(item => item.favorite === true);
     }
 
-    // Render filtered history
-    renderFilteredHistory(history, scrollTopToRestore);
+    // Render filtered history. totalHistoryCount is the unfiltered size, so
+    // an empty list can be told apart from "filters matched nothing".
+    renderFilteredHistory(history, scrollTopToRestore, totalHistoryCount);
   });
 }
 
-function renderFilteredHistory(history, scrollTopToRestore = null) {
+function renderFilteredHistory(history, scrollTopToRestore = null, totalHistoryCount = 0) {
   const historyList = document.getElementById('history-list');
   const noHistoryMessage = document.getElementById('no-history-message');
   historyList.innerHTML = '';
 
   if (history.length === 0) {
     noHistoryMessage.style.display = 'block';
-    noHistoryMessage.textContent = 'No matching items found.';
     historyList.style.display = 'none';
+
+    const noHistoryIcon = document.getElementById('no-history-icon');
+    const noHistoryTitle = document.getElementById('no-history-title');
+    const noHistoryHint = document.getElementById('no-history-hint');
+    if (totalHistoryCount === 0) {
+      if (noHistoryIcon) noHistoryIcon.innerHTML = optIcon('inbox');
+      if (noHistoryTitle) noHistoryTitle.textContent = 'No saved words yet';
+      if (noHistoryHint) noHistoryHint.textContent = 'Select a word on any webpage and save it from the AI popup to see it here.';
+    } else {
+      if (noHistoryIcon) noHistoryIcon.innerHTML = optIcon('search');
+      if (noHistoryTitle) noHistoryTitle.textContent = 'No matching items found';
+      if (noHistoryHint) noHistoryHint.textContent = 'Try a different search term, list, or date filter.';
+    }
   } else {
     noHistoryMessage.style.display = 'none';
     historyList.style.display = 'block';
@@ -2863,7 +2906,7 @@ function renderFilteredHistory(history, scrollTopToRestore = null) {
 
       const starButton = document.createElement('button');
       starButton.className = 'star-item-btn' + (item.favorite ? ' favorited' : '');
-      starButton.innerHTML = item.favorite ? '★' : '☆';
+      starButton.innerHTML = item.favorite ? optIcon('starFilled', 1.1) : optIcon('star', 1.1);
       starButton.title = item.favorite ? 'Remove from favorites' : 'Add to favorites';
       starButton.dataset.timestamp = histId(item);
       starButton.addEventListener('click', handleToggleFavoriteClick);
@@ -2878,7 +2921,7 @@ function renderFilteredHistory(history, scrollTopToRestore = null) {
 
       const editButton = document.createElement('button');
       editButton.className = 'edit-item-btn';
-      editButton.innerHTML = '&#9998;';
+      editButton.innerHTML = optIcon('edit');
       editButton.title = 'Edit this item';
       editButton.dataset.timestamp = histId(item);
       editButton.addEventListener('click', handleEditClick);
@@ -2886,7 +2929,7 @@ function renderFilteredHistory(history, scrollTopToRestore = null) {
 
       const deleteButton = document.createElement('button');
       deleteButton.className = 'delete-item-btn';
-      deleteButton.innerHTML = '&#128465;';
+      deleteButton.innerHTML = optIcon('trash');
       deleteButton.title = 'Delete this item';
       deleteButton.dataset.timestamp = histId(item);
       deleteButton.addEventListener('click', handleDeleteClick);
@@ -2922,7 +2965,7 @@ function handleToggleFavoriteClick(event) {
       // Update button visually
       const item = history.find(i => histId(i) === itemKey);
       if (item) {
-        btn.innerHTML = item.favorite ? '★' : '☆';
+        btn.innerHTML = item.favorite ? optIcon('starFilled', 1.1) : optIcon('star', 1.1);
         btn.className = 'star-item-btn' + (item.favorite ? ' favorited' : '');
         btn.title = item.favorite ? 'Remove from favorites' : 'Add to favorites';
       }
@@ -3452,19 +3495,19 @@ function executeDiagnosticCheck(requestData) {
       row.className = 'test-step-row running';
       const icon = row.querySelector('.test-step-icon');
       const detail = row.querySelector('.test-step-detail');
-      if (icon) icon.innerHTML = '<span class="test-spinner">⏳</span>';
+      if (icon) icon.innerHTML = optIcon('spinner', 1.1, 'oi-spin');
       if (detail) detail.textContent = 'Checking...';
     }
   });
 
   if (runBtn) {
     runBtn.disabled = true;
-    if (btnIcon) btnIcon.textContent = '⏳';
+    if (btnIcon) btnIcon.innerHTML = optIcon('spinner', 1, 'oi-spin');
     if (btnLabel) btnLabel.textContent = 'Testing...';
   }
   if (formTestBtn) {
     formTestBtn.disabled = true;
-    formTestBtn.textContent = '⏳ Testing...';
+    formTestBtn.innerHTML = `${optIcon('spinner', 1, 'oi-spin')} Testing...`;
   }
 
   chrome.runtime.sendMessage({
@@ -3473,12 +3516,12 @@ function executeDiagnosticCheck(requestData) {
   }, (response) => {
     if (runBtn) {
       runBtn.disabled = false;
-      if (btnIcon) btnIcon.textContent = '▶';
+      if (btnIcon) btnIcon.innerHTML = optIcon('play');
       if (btnLabel) btnLabel.textContent = 'Run Diagnostic Test';
     }
     if (formTestBtn) {
       formTestBtn.disabled = false;
-      formTestBtn.textContent = '⚡ Test Inputs';
+      formTestBtn.innerHTML = `${optIcon('zap')} Test Inputs`;
     }
 
     if (chrome.runtime.lastError) {
@@ -3488,7 +3531,7 @@ function executeDiagnosticCheck(requestData) {
           row.className = 'test-step-row fail';
           const icon = row.querySelector('.test-step-icon');
           const detail = row.querySelector('.test-step-detail');
-          if (icon) icon.textContent = '❌';
+          if (icon) icon.innerHTML = `<span style="color: var(--danger-color);">${optIcon('xCircle', 1.1)}</span>`;
           if (detail) detail.textContent = `Extension error: ${chrome.runtime.lastError.message}`;
         }
       });
@@ -3499,7 +3542,7 @@ function executeDiagnosticCheck(requestData) {
       if (summaryBox) {
         summaryBox.style.display = 'flex';
         summaryBox.className = 'test-summary-box failure';
-        summaryBox.innerHTML = '<span>❌</span><span>Failed to receive diagnostic test results from background worker.</span>';
+        summaryBox.innerHTML = `<span style="color: #F87171;">${optIcon('xCircle', 1.2)}</span><span>Failed to receive diagnostic test results from background worker.</span>`;
       }
       return;
     }
@@ -3511,7 +3554,7 @@ function executeDiagnosticCheck(requestData) {
         row.className = 'test-step-row pending';
         const icon = row.querySelector('.test-step-icon');
         const detail = row.querySelector('.test-step-detail');
-        if (icon) icon.textContent = '⚪';
+        if (icon) icon.innerHTML = `<span style="color: var(--text-muted);">${optIcon('circle', 1.1)}</span>`;
         if (detail) detail.textContent = 'Skipped.';
       }
     });
@@ -3525,10 +3568,10 @@ function executeDiagnosticCheck(requestData) {
         const detail = row.querySelector('.test-step-detail');
 
         if (icon) {
-          if (step.status === 'pass') icon.textContent = '✅';
-          else if (step.status === 'fail') icon.textContent = '❌';
-          else if (step.status === 'warn') icon.textContent = '⚠️';
-          else icon.textContent = '⚪';
+          if (step.status === 'pass') icon.innerHTML = `<span style="color: var(--secondary-color);">${optIcon('checkCircle', 1.1)}</span>`;
+          else if (step.status === 'fail') icon.innerHTML = `<span style="color: var(--danger-color);">${optIcon('xCircle', 1.1)}</span>`;
+          else if (step.status === 'warn') icon.innerHTML = `<span style="color: #F59E0B;">${optIcon('alertTriangle', 1.1)}</span>`;
+          else icon.innerHTML = `<span style="color: var(--text-muted);">${optIcon('circle', 1.1)}</span>`;
         }
 
         if (detail) {
@@ -3538,7 +3581,7 @@ function executeDiagnosticCheck(requestData) {
           if (step.id === 'config' && step.status === 'fail' && step.message.includes('No AI model is configured')) {
             const addBtn = document.createElement('button');
             addBtn.className = 'test-action-btn';
-            addBtn.innerHTML = '➕ Add Model Configuration';
+            addBtn.innerHTML = `${optIcon('plus', 0.9)} Add Model Configuration`;
             addBtn.style.cssText = 'margin-top: 8px; background-color: var(--secondary-color); padding: 6px 14px; font-size: 0.88em; font-weight: 600; border-radius: 6px; border: none; color: #fff; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;';
             addBtn.onclick = () => {
               showModelForm(false);
@@ -3549,7 +3592,7 @@ function executeDiagnosticCheck(requestData) {
           } else if (step.id === 'auth' && step.status === 'fail') {
             const editBtn = document.createElement('button');
             editBtn.className = 'test-action-btn';
-            editBtn.innerHTML = '✏️ Edit Model & API Key';
+            editBtn.innerHTML = `${optIcon('edit', 0.9)} Edit Model & API Key`;
             editBtn.style.cssText = 'margin-top: 8px; background-color: var(--primary-color); padding: 6px 14px; font-size: 0.88em; font-weight: 600; border-radius: 6px; border: none; color: #fff; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;';
             editBtn.onclick = () => {
               editSelectedModel();
@@ -3560,7 +3603,7 @@ function executeDiagnosticCheck(requestData) {
           } else if (step.id === 'search' && step.status === 'warn') {
             const tavilyBtn = document.createElement('button');
             tavilyBtn.className = 'test-action-btn';
-            tavilyBtn.innerHTML = '🔑 Open Search API Settings';
+            tavilyBtn.innerHTML = `${optIcon('key', 0.9)} Open Search API Settings`;
             tavilyBtn.style.cssText = 'margin-top: 8px; background-color: #F59E0B; padding: 6px 14px; font-size: 0.88em; font-weight: 600; border-radius: 6px; border: none; color: #000; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;';
             tavilyBtn.onclick = () => {
               const searchSection = document.getElementById('search-api-container');
@@ -3581,10 +3624,10 @@ function executeDiagnosticCheck(requestData) {
       summaryBox.style.display = 'flex';
       if (response.success) {
         summaryBox.className = 'test-summary-box success';
-        summaryBox.innerHTML = `<span>✅</span><span>${escapeHTML(response.summary || 'All checks passed!')}</span>`;
+        summaryBox.innerHTML = `<span>${optIcon('checkCircle', 1.2)}</span><span>${escapeHTML(response.summary || 'All checks passed!')}</span>`;
       } else {
         summaryBox.className = 'test-summary-box failure';
-        summaryBox.innerHTML = `<span>❌</span><span>${escapeHTML(response.summary || 'One or more diagnostic checks failed.')}</span>`;
+        summaryBox.innerHTML = `<span>${optIcon('xCircle', 1.2)}</span><span>${escapeHTML(response.summary || 'One or more diagnostic checks failed.')}</span>`;
       }
     }
   });
@@ -3635,13 +3678,13 @@ function loadSupportDiagnosticInfo() {
     if (activeModel) {
       if (diagModel) diagModel.textContent = activeModel.name || activeModel.modelName;
       if (diagStatus) {
-        diagStatus.textContent = 'Configured ✓';
+        diagStatus.innerHTML = `Configured ${optIcon('check')}`;
         diagStatus.style.color = 'var(--secondary-color)';
       }
     } else {
       if (diagModel) diagModel.textContent = 'None';
       if (diagStatus) {
-        diagStatus.textContent = 'Needs Setup ⚠';
+        diagStatus.innerHTML = `Needs Setup ${optIcon('alertTriangle')}`;
         diagStatus.style.color = '#F59E0B';
       }
     }
@@ -3683,7 +3726,7 @@ function copyDiagnosticInfo() {
     navigator.clipboard.writeText(diagText).then(() => {
       const copyStatus = document.getElementById('copy-diag-status');
       if (copyStatus) {
-        copyStatus.textContent = '✓ Diagnostic info copied to clipboard! You can paste it into an email or issue.';
+        copyStatus.innerHTML = `${optIcon('check')} Diagnostic info copied to clipboard! You can paste it into an email or issue.`;
         setTimeout(() => { copyStatus.textContent = ''; }, 4000);
       }
     }).catch((err) => {

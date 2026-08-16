@@ -31,13 +31,74 @@ const popupStyles = `
     to { opacity: 1; transform: translateY(0) scale(1); }
   }
 
+  /* --- Loading indicator (initial load, follow-ups, model reloads) --- */
+  .ai-popup-loading {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    color: #aaa;
+    font-size: 13px;
+    padding: 4px 0;
+  }
+  .ai-popup-loading-dots {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+  .ai-popup-loading-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #5eead4;
+    animation: ai-popup-dot-bounce 1.2s ease-in-out infinite;
+  }
+  .ai-popup-loading-dot:nth-child(2) { animation-delay: 0.15s; }
+  .ai-popup-loading-dot:nth-child(3) { animation-delay: 0.3s; }
+  @keyframes ai-popup-dot-bounce {
+    0%, 60%, 100% { transform: translateY(0); opacity: 0.45; }
+    30% { transform: translateY(-4px); opacity: 1; }
+  }
+
+  /* --- Toast (save feedback, STT/speech errors) --- */
+  .ai-popup-toast {
+    position: absolute;
+    bottom: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 7px 13px;
+    background: #0b1220;
+    border: 1px solid rgba(94, 234, 212, 0.35);
+    border-radius: 8px;
+    color: #eef3f8;
+    font-size: 12.5px;
+    font-weight: 600;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+    z-index: 3000;
+    pointer-events: none;
+    white-space: nowrap;
+    animation: ai-popup-toast-enter 160ms ease-out;
+  }
+  .ai-popup-toast.toast-error { border-color: rgba(239, 68, 68, 0.5); }
+  .ai-popup-toast.toast-hiding { opacity: 0; transition: opacity 200ms ease; }
+  @keyframes ai-popup-toast-enter {
+    from { opacity: 0; transform: translate(-50%, 6px); }
+    to { opacity: 1; transform: translate(-50%, 0); }
+  }
+
   #ai-popup-context {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 10px;
     margin-bottom: 10px;
+    cursor: grab;
+    user-select: none; /* the header drags the popup; text stays copyable via its tooltip */
   }
+  #ai-popup-context:active { cursor: grabbing; }
   .ai-popup-context-copy { min-width: 0; }
   .ai-popup-context-label {
     color: #7dd3fc;
@@ -85,6 +146,23 @@ const popupStyles = `
   }
   .custom-select > span:last-child { flex-shrink: 0; margin-left: 8px; }
   .custom-select:focus { outline: none; border-color: #888; }
+
+  /* --- Keyboard focus rings (matches the options page's ring pattern) --- */
+  #ai-definition-popup button:focus-visible,
+  #ai-definition-popup input:focus-visible,
+  #ai-definition-popup select:focus-visible,
+  #ai-popup-followup-input:focus-visible,
+  .custom-select:focus-visible,
+  .ai-feedback-close:focus-visible,
+  .ai-feedback-btn:focus-visible {
+    outline: none;
+    border-color: #2dd4bf;
+    box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.35);
+  }
+  #ai-open-button-popup:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.45);
+  }
   .custom-options {
       position: absolute; bottom: 100%; left: 0; right: 0;
        background-color: #0f172a; border: 1px solid #475569;
@@ -174,6 +252,7 @@ const popupStyles = `
   #ai-popup-speak-btn, #ai-popup-pdf-btn, #ai-popup-pin-btn {
     width: 30px;
     height: 30px;
+    padding: 0;
     font-size: 15px;
     color: #b9f6ed;
     cursor: pointer;
@@ -361,6 +440,65 @@ const popupStyles = `
   }
 `;
 
+// --- Inline SVG icon set (currentColor, inherits hover/state colors) ---
+const POPUP_ICON_PATHS = {
+  volume: '<path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>',
+  stop: '<rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none"/>',
+  fileText: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>',
+  pin: '<path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z"/>',
+  refresh: '<polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>',
+  globe: '<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>',
+  shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+  alertTriangle: '<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
+  thumbsUp: '<path d="M7 10v12"/><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z"/>',
+  thumbsDown: '<path d="M17 14V2"/><path d="M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22a3.13 3.13 0 0 1-3-3.88Z"/>',
+  messageCircle: '<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>',
+  star: '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>',
+  zap: '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>',
+  x: '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
+  xCircle: '<circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>',
+  check: '<polyline points="20 6 9 17 4 12"/>',
+  checkCircle: '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>',
+  chevronDown: '<polyline points="6 9 12 15 18 9"/>',
+  chevronRight: '<polyline points="9 18 15 12 9 6"/>'
+};
+
+function iconSvg(name, size = 16) {
+  const paths = POPUP_ICON_PATHS[name];
+  if (!paths) return '';
+  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -2px;" aria-hidden="true">${paths}</svg>`;
+}
+
+// --- NEW: Toast feedback inside a popup instance ---
+// Message text is set via textContent, so it can never inject HTML.
+function showPopupToast(instance, message, type = 'success') {
+  const popup = instance && instance.popup;
+  if (!popup) return;
+
+  // One toast per popup: replace any toast still on screen.
+  popup.querySelector('.ai-popup-toast')?.remove();
+  clearTimeout(instance.toastTimer);
+
+  const toast = document.createElement('div');
+  toast.className = 'ai-popup-toast' + (type === 'error' ? ' toast-error' : '');
+
+  const iconWrap = document.createElement('span');
+  iconWrap.style.color = type === 'error' ? '#f87171' : '#5eead4';
+  iconWrap.style.display = 'inline-flex';
+  iconWrap.innerHTML = iconSvg(type === 'error' ? 'xCircle' : 'checkCircle', 14);
+
+  const text = document.createElement('span');
+  text.textContent = message;
+
+  toast.append(iconWrap, text);
+  popup.appendChild(toast);
+
+  instance.toastTimer = setTimeout(() => {
+    toast.classList.add('toast-hiding');
+    setTimeout(() => toast.remove(), 220);
+  }, 2200);
+}
+
 // --- NEW: Custom Dropdown Helpers ---
 function getSortedTreeLists(lists) {
   const listMap = {};
@@ -405,7 +543,7 @@ function createCustomDropdown(lists, currentValue, onChange, options = {}) {
   }
 
   const arrow = document.createElement('span');
-  arrow.textContent = '▼';
+  arrow.innerHTML = iconSvg('chevronDown', 12);
   
   selectBtn.append(valueDisplay, arrow);
   
@@ -420,7 +558,7 @@ function createCustomDropdown(lists, currentValue, onChange, options = {}) {
   const sortedList = getSortedTreeLists(lists);
 
   const allItems = [];
-  if (options.showAllLists) allItems.push({ id: '__all_lists__', name: '🗂 All Lists', depth: 0 });
+  if (options.showAllLists) allItems.push({ id: '__all_lists__', name: 'All Lists', depth: 0 });
   if (options.showUnlisted) allItems.push({ id: '__unlisted__', name: '(Unlisted / No list)', depth: 0, color: '#aaa', italic: true });
   allItems.push(...sortedList);
   if (options.showCreateNew) allItems.push({ id: '__create_new__', name: '+ Create New List...', depth: 0, color: 'lightgreen', isCreate: true });
@@ -460,7 +598,7 @@ function createCustomDropdown(lists, currentValue, onChange, options = {}) {
       if (hasChildren) {
         const toggle = document.createElement('span');
         toggle.className = 'expand-toggle';
-        toggle.textContent = expandedState[item.id] ? '▼' : '▶';
+        toggle.innerHTML = expandedState[item.id] ? iconSvg('chevronDown', 10) : iconSvg('chevronRight', 10);
         toggle.addEventListener('click', (e) => {
           e.stopPropagation(); 
           expandedState[item.id] = !expandedState[item.id];
@@ -507,6 +645,15 @@ function createCustomDropdown(lists, currentValue, onChange, options = {}) {
   selectBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     optionsContainer.classList.toggle('show');
+  });
+
+  // The trigger is a div, so Enter/Space do not synthesize a click.
+  selectBtn.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      e.stopPropagation();
+      optionsContainer.classList.toggle('show');
+    }
   });
 
   // Adding document listener here won't work perfectly inside shadow root if we just listen on document,
@@ -868,6 +1015,18 @@ document.addEventListener('keydown', (event) => {
   }
 });
 
+// --- NEW: Loading indicator markup ---
+// The label is message/model text, never trusted HTML, so escape it here.
+function buildLoadingHtml(label) {
+  const safeLabel = String(label || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+  return `<div class="ai-popup-loading"><span class="ai-popup-loading-dots"><span class="ai-popup-loading-dot"></span><span class="ai-popup-loading-dot"></span><span class="ai-popup-loading-dot"></span></span><span>${safeLabel}</span></div>`;
+}
+
 // --- UPDATED showPopup ---
 function showPopup(x, y, content) {
   // Do NOT remove existing popups. Stack them.
@@ -898,7 +1057,7 @@ function showPopup(x, y, content) {
 
   const contentWrapper = document.createElement('div');
   contentWrapper.id = 'ai-popup-content';
-  contentWrapper.innerHTML = content; // "Loading..."
+  contentWrapper.innerHTML = buildLoadingHtml(content); // Animated loading indicator
   popup.appendChild(contentWrapper);
 
   // Set initial position (viewport-relative)
@@ -925,8 +1084,55 @@ function showPopup(x, y, content) {
     instance.showUserQuestions = data.showUserQuestions;
   });
 
+  makePopupDraggable(instance);
+
   activePopups.push(instance);
   return instance;
+}
+
+// --- NEW: Drag the popup by its context header ---
+// The header is created later (createSelectors), so the mousedown handler
+// resolves it at drag time. Positions are clamped so at least 40px of the
+// card always stays reachable on screen.
+function makePopupDraggable(instance) {
+  const popup = instance.popup;
+  if (!popup) return;
+
+  popup.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return; // left button only
+    const header = popup.querySelector('#ai-popup-context');
+    if (!header || !header.contains(e.target)) return;
+
+    e.preventDefault(); // keep the page's text selection out of the drag
+
+    const rect = popup.getBoundingClientRect();
+    const offsetX = e.clientX - rect.left;
+    const offsetY = e.clientY - rect.top;
+
+    // Switch from the right-anchored default (adjustPopupPosition) to
+    // explicit coordinates pinned at the card's current spot.
+    popup.style.right = 'auto';
+    popup.style.left = `${rect.left}px`;
+    popup.style.top = `${rect.top}px`;
+
+    function onMove(ev) {
+      const nx = Math.min(Math.max(ev.clientX - offsetX, 40 - rect.width), window.innerWidth - 40);
+      const ny = Math.min(Math.max(ev.clientY - offsetY, 0), window.innerHeight - 40);
+      popup.style.left = `${nx}px`;
+      popup.style.top = `${ny}px`;
+    }
+    function onUp() {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      popup.style.cursor = '';
+      // Once the user placed the popup, stop auto-repositioning it.
+      instance.isDragged = true;
+    }
+
+    popup.style.cursor = 'grabbing';
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
 }
 
 // --- NEW: renderMessages maps state to UI ---
@@ -963,6 +1169,13 @@ function renderMessages(instance) {
         formattedContent = formattedContent.replace(/\n/g, '<br>');
       }
 
+      // Loading placeholders (isThinking/isStatus) render as an animated
+      // indicator; their content is a plain label, not markup to display.
+      if (msg.isThinking || msg.isStatus) {
+        contentWrapper.insertAdjacentHTML('beforeend', buildLoadingHtml(formattedContent));
+        return;
+      }
+
       if (msg.role === 'user' && !instance.showUserQuestions) return; // Hide user prompts unless setting is true
 
       const isMainDefinition = (index === 0 || index === 1) && instance.messages.length <= 2;
@@ -984,7 +1197,7 @@ function renderMessages(instance) {
                     <strong style="color: ${color};">${roleName}:</strong>
                     <div style="margin-top: 5px;">
                        <button id="${retryBtnId}" class="ai-popup-retry-btn" style="background:#4db6ac; color:white; border:none; border-radius:3px; cursor:pointer; padding:4px 8px; font-size:12px;">
-                         🔄 Retry with ${targetModelName}
+                         ${iconSvg('refresh', 12)} Retry with ${targetModelName}
                        </button>
                     </div>
                   </div>`;
@@ -1116,8 +1329,9 @@ function retryMessage(instance, messageIndex) {
   // Error placeholders are raw display HTML, never real assistant replies, so drop them.
   const messagesContext = instance.messages.slice(0, messageIndex).filter(m => !m.isError);
   
-  // Set the message state to loading
-  instance.messages[messageIndex] = { role: 'assistant', content: '<i>Thinking...</i>', isError: false, needsRetry: false };
+  // Set the message state to loading. isThinking routes it through the
+  // animated loading indicator (and keeps it out of the request context).
+  instance.messages[messageIndex] = { role: 'assistant', content: 'Retrying...', isThinking: true, isError: false, needsRetry: false };
   renderMessages(instance);
 
   const modelId = instance.lastModelId || null;
@@ -1285,7 +1499,7 @@ function redefineWithModelAndPrompt(instance, word, modelId, promptContent) {
 
   function performRedefineFetch() {
     // Update UI to show loading state by adding a thinking indicator
-    instance.messages.push({ role: 'assistant', content: '<i style="color: #aaa;">Reloading model definition...</i>', isThinking: true });
+    instance.messages.push({ role: 'assistant', content: 'Reloading model definition...', isThinking: true });
     try { renderMessages(instance); } catch (e) { console.error('crash in pre redfr', e); }
     
     // Remove old action buttons
@@ -1444,9 +1658,12 @@ function createActionButtons(instance, word, definition, modelName, promptName, 
       : (lists.length ? lists[0].id : null);
 
     // --- NEW: SPEECH BUTTON ---
-    const speakButton = document.createElement('span'); // Use span for icon
+    // Real buttons (not spans) so keyboard users can reach them; the icon
+    // rule already resets padding/border/background for identical looks.
+    const speakButton = document.createElement('button');
+    speakButton.type = 'button';
     speakButton.id = 'ai-popup-speak-btn';
-    speakButton.innerHTML = '🔊'; // Speaker icon
+    speakButton.innerHTML = iconSvg('volume', 16);
     speakButton.title = 'Listen to explanation';
     speakButton.onclick = (e) => {
       e.stopPropagation();
@@ -1454,9 +1671,10 @@ function createActionButtons(instance, word, definition, modelName, promptName, 
     };
 
     // --- NEW: PDF BUTTON ---
-    const pdfButton = document.createElement('span');
+    const pdfButton = document.createElement('button');
+    pdfButton.type = 'button';
     pdfButton.id = 'ai-popup-pdf-btn';
-    pdfButton.innerHTML = '📄'; // PDF icon
+    pdfButton.innerHTML = iconSvg('fileText', 16);
     pdfButton.title = 'Save conversation as PDF';
     pdfButton.onclick = (e) => {
       e.stopPropagation();
@@ -1464,9 +1682,10 @@ function createActionButtons(instance, word, definition, modelName, promptName, 
     };
 
     // --- NEW: PIN BUTTON ---
-    const pinButton = document.createElement('span');
+    const pinButton = document.createElement('button');
+    pinButton.type = 'button';
     pinButton.id = 'ai-popup-pin-btn';
-    pinButton.innerHTML = '📌'; // Pin icon
+    pinButton.innerHTML = iconSvg('pin', 16);
     pinButton.title = 'Pin conversation';
     if (instance.isPinned) {
       pinButton.style.opacity = '0.5';
@@ -1494,7 +1713,7 @@ function createActionButtons(instance, word, definition, modelName, promptName, 
                 listsToUse.push(response.newList);
                 recreateDropdown(listsToUse, response.newList.id);
               } else {
-                alert("Failed to create list: " + (response.error || "Unknown error"));
+                showPopupToast(instance, "Failed to create list", 'error');
                 listSelector.value = validListId;
               }
             });
@@ -1575,20 +1794,19 @@ function createActionButtons(instance, word, definition, modelName, promptName, 
         sourceTitle: document.title,
         citations: citationsToSave
       }, (saveResponse) => {
-        actionsContainer.innerHTML = ''; // Clear the controls
-        const savedText = document.createElement('span');
         if (chrome.runtime.lastError || (saveResponse && saveResponse.status === 'error')) {
           console.error('Failed to save definition:', chrome.runtime.lastError || saveResponse?.error);
-          savedText.textContent = '✕ Failed to save';
-          savedText.style.color = '#ff8585';
+          // Keep the controls so the user can retry; the toast explains what happened.
+          showPopupToast(instance, 'Failed to save', 'error');
         } else {
           console.log('Definition saved to list.');
-          savedText.textContent = '✓ Saved to list';
-          savedText.style.color = '#b7f7eb';
+          // Feedback via toast; disable Save so one popup cannot file duplicates.
+          finalSaveButton.disabled = true;
+          finalSaveButton.textContent = 'Saved';
+          finalSaveButton.style.opacity = '0.75';
+          finalSaveButton.style.cursor = 'default';
+          showPopupToast(instance, 'Saved to list');
         }
-        savedText.style.opacity = '0.8';
-        savedText.style.fontWeight = '600';
-        actionsContainer.appendChild(savedText);
       });
 
       // --- REMOVED: Auto-close logic ---
@@ -1765,7 +1983,7 @@ function createFollowupInput(instance, word) {
           // If custom headers are provided, we don't strictly require sttApiKey 
           // because the API key might be inside the custom JSON.
           if (!settings.sttApiKey && !settings.sttCustomHeaders) {
-            alert("Speech-to-Text API Key is not configured.");
+            showPopupToast(instance, "Speech-to-Text API Key is not configured", 'error');
             micBtn.style.opacity = '1';
             return;
           }
@@ -1816,7 +2034,7 @@ function createFollowupInput(instance, word) {
             }
           } catch (error) {
             console.error("STT API Error:", error);
-            alert("Failed to transcribe audio.");
+            showPopupToast(instance, "Failed to transcribe audio", 'error');
           } finally {
             micBtn.style.opacity = '1';
             input.focus();
@@ -1828,7 +2046,7 @@ function createFollowupInput(instance, word) {
       activeMediaRecorder.start();
     } catch (err) {
       console.error("Microphone access denied:", err);
-      alert("Microphone access denied or unavailable.");
+      showPopupToast(instance, "Microphone access denied or unavailable", 'error');
     }
   }
 
@@ -1852,7 +2070,7 @@ function createFollowupInput(instance, word) {
         if (nativeRecognition) {
           nativeRecognition.start();
         } else {
-          alert("Native speech recognition is not supported in this browser.");
+          showPopupToast(instance, "Native speech recognition is not supported in this browser", 'error');
         }
       }
     });
@@ -1895,7 +2113,7 @@ function createFollowupInput(instance, word) {
 
     try {
       // Push thinking indicator and render to UI immediately
-      instance.messages.push({ role: 'assistant', content: '<i style="color: #aaa;">Thinking...</i>', isThinking: true });
+      instance.messages.push({ role: 'assistant', content: 'Thinking...', isThinking: true });
       renderMessages(instance);
     } catch (e) {
       console.error("render crashed on pre-fetch", e);
@@ -2032,7 +2250,7 @@ function toggleSpeech(instance, text) {
   if (instance.isSpeaking) {
     window.speechSynthesis.cancel();
     instance.isSpeaking = false;
-    if (btn) btn.innerHTML = '🔊';
+    if (btn) btn.innerHTML = iconSvg('volume', 16);
     // Reset all buttons just in case? Or just the active one?
     // Let's reset all check to simple state
   } else {
@@ -2059,18 +2277,18 @@ function toggleSpeech(instance, text) {
 
       utterance.onend = () => {
         instance.isSpeaking = false;
-        if (btn) btn.innerHTML = '🔊';
+        if (btn) btn.innerHTML = iconSvg('volume', 16);
       };
 
       utterance.onerror = (e) => {
         console.error("Speech error", e);
         instance.isSpeaking = false;
-        if (btn) btn.innerHTML = '🔊';
+        if (btn) btn.innerHTML = iconSvg('volume', 16);
       };
 
       window.speechSynthesis.speak(utterance);
       instance.isSpeaking = true;
-      if (btn) btn.innerHTML = '⏹'; // Stop icon
+      if (btn) btn.innerHTML = iconSvg('stop', 16); // Stop icon
     });
   }
 }
@@ -2079,6 +2297,9 @@ function toggleSpeech(instance, text) {
 function adjustPopupPosition(instance, selectionRect) {
   const popup = instance.popup;
   if (!popup) return;
+
+  // A user-dragged popup stays where they put it.
+  if (instance.isDragged) return;
 
   if (instance.isInteracting) return;
 
@@ -2162,7 +2383,7 @@ function appendSearchGroundedBadge(container) {
   indicator.style.borderLeft = '3px solid #3b82f6';
   indicator.style.fontSize = '12px';
   indicator.style.color = 'inherit';
-  indicator.innerHTML = `🌐 <strong style="color:#7dd3fc;">Search Grounded</strong> <span style="opacity:0.8">· Response is based on live web results. Hallucination Guard bypassed.</span>`;
+  indicator.innerHTML = `<span style="color:#7dd3fc;">${iconSvg('globe', 13)}</span> <strong style="color:#7dd3fc;">Search Grounded</strong> <span style="opacity:0.8">· Response is based on live web results. Hallucination Guard bypassed.</span>`;
   container.appendChild(indicator);
 }
 
@@ -2233,7 +2454,7 @@ function appendVerificationBadge(container, verification) {
   if (verification.state === 'pending') {
     ind.style.backgroundColor = 'rgba(59, 130, 246, 0.1)';
     ind.style.borderLeft = '3px solid #3b82f6';
-    ind.innerHTML = `🛡️ <span style="opacity:0.8;">Verifying response...</span>`;
+    ind.innerHTML = `<span style="color:#3b82f6;">${iconSvg('shield', 13)}</span> <span style="opacity:0.8;">Verifying response...</span>`;
     container.appendChild(ind);
     return;
   }
@@ -2241,7 +2462,7 @@ function appendVerificationBadge(container, verification) {
   if (verification.state === 'failed') {
     ind.style.backgroundColor = 'rgba(100, 116, 139, 0.1)';
     ind.style.borderLeft = '3px solid #64748b';
-    ind.innerHTML = `🛡️ <span style="opacity:0.7">Verification failed or unavailable.</span>`;
+    ind.innerHTML = `<span style="color:#94a3b8;">${iconSvg('shield', 13)}</span> <span style="opacity:0.7">Verification failed or unavailable.</span>`;
     container.appendChild(ind);
     return;
   }
@@ -2261,11 +2482,11 @@ function appendVerificationBadge(container, verification) {
       correctionsHtml += `<li style="margin-bottom:3px;">${escapeVerifyText(c)}</li>`;
     });
     correctionsHtml += '</ul>';
-    ind.innerHTML = `⚠️ <strong style="color:#ef4444;">Hallucination Detected</strong>${reasoningHtml}<div>${correctionsHtml}</div>`;
+    ind.innerHTML = `<span style="color:#ef4444;">${iconSvg('alertTriangle', 13)}</span> <strong style="color:#ef4444;">Hallucination Detected</strong>${reasoningHtml}<div>${correctionsHtml}</div>`;
   } else {
     ind.style.backgroundColor = 'rgba(94, 234, 212, 0.1)';
     ind.style.borderLeft = '3px solid #5eead4';
-    ind.innerHTML = `🛡️ <strong style="color:#5eead4;">Verified</strong> <span style="opacity:0.8">- No hallucinations detected.</span>${reasoningHtml}`;
+    ind.innerHTML = `<span style="color:#5eead4;">${iconSvg('shield', 13)}</span> <strong style="color:#5eead4;">Verified</strong> <span style="opacity:0.8">- No hallucinations detected.</span>${reasoningHtml}`;
   }
 
   container.appendChild(ind);
@@ -2369,12 +2590,12 @@ function renderFeedbackBanner(instance) {
     banner.innerHTML = `
       <div class="ai-feedback-header">
         <span>How's Infopedia working for you?</span>
-        <button class="ai-feedback-close" title="Dismiss">✕</button>
+        <button class="ai-feedback-close" title="Dismiss">${iconSvg('x', 13)}</button>
       </div>
       <div class="ai-feedback-actions">
-        <button class="ai-feedback-btn" data-action="good">👍 Working well</button>
-        <button class="ai-feedback-btn" data-action="trouble">👎 Something isn't working</button>
-        <button class="ai-feedback-btn" data-action="feedback">💬 Send feedback</button>
+        <button class="ai-feedback-btn" data-action="good">${iconSvg('thumbsUp', 13)} Working well</button>
+        <button class="ai-feedback-btn" data-action="trouble">${iconSvg('thumbsDown', 13)} Something isn't working</button>
+        <button class="ai-feedback-btn" data-action="feedback">${iconSvg('messageCircle', 13)} Send feedback</button>
       </div>
     `;
 
@@ -2404,10 +2625,10 @@ function renderFeedbackBanner(instance) {
     banner.innerHTML = `
       <div class="ai-feedback-header">
         <span>Glad to hear it! Thanks for using Infopedia.</span>
-        <button class="ai-feedback-close" title="Dismiss">✕</button>
+        <button class="ai-feedback-close" title="Dismiss">${iconSvg('x', 13)}</button>
       </div>
       <div class="ai-feedback-actions">
-        <button class="ai-feedback-btn primary" data-action="review">⭐ Optional: Leave a review on Chrome Web Store</button>
+        <button class="ai-feedback-btn primary" data-action="review">${iconSvg('star', 13)} Optional: Leave a review on Chrome Web Store</button>
         <button class="ai-feedback-btn" data-action="dismiss">Dismiss</button>
       </div>
     `;
@@ -2433,10 +2654,10 @@ function renderFeedbackBanner(instance) {
     banner.innerHTML = `
       <div class="ai-feedback-header">
         <span>Sorry to hear that! Let us help you get it running.</span>
-        <button class="ai-feedback-close" title="Dismiss">✕</button>
+        <button class="ai-feedback-close" title="Dismiss">${iconSvg('x', 13)}</button>
       </div>
       <div class="ai-feedback-actions">
-        <button class="ai-feedback-btn primary" data-action="troubleshoot">⚡ Open Troubleshooting & Support</button>
+        <button class="ai-feedback-btn primary" data-action="troubleshoot">${iconSvg('zap', 13)} Open Troubleshooting & Support</button>
         <button class="ai-feedback-btn" data-action="dismiss">Dismiss</button>
       </div>
     `;

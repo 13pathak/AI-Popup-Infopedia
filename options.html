@@ -21,6 +21,55 @@
             --spacing-unit: 12px;
         }
 
+        /* Inline SVG icons: size with surrounding text, inherit currentColor */
+        .oi {
+            width: 1em;
+            height: 1em;
+            vertical-align: -0.125em;
+            flex-shrink: 0;
+        }
+
+        .oi-spin {
+            animation: oiSpin 1s linear infinite;
+        }
+
+        @keyframes oiSpin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* --- Empty states: icon + title + one-line hint --- */
+        .empty-state {
+            text-align: center;
+            padding: 42px 20px;
+            color: var(--text-muted);
+        }
+
+        .empty-state-icon {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 12px;
+            color: #475569;
+        }
+
+        .empty-state-icon svg {
+            width: 38px;
+            height: 38px;
+        }
+
+        .empty-state-title {
+            font-size: 1.05em;
+            font-weight: 600;
+            color: var(--text-color);
+            margin-bottom: 6px;
+        }
+
+        .empty-state-hint {
+            font-size: 0.88em;
+            line-height: 1.5;
+            max-width: 420px;
+            margin: 0 auto;
+        }
+
         body {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             padding: calc(var(--spacing-unit) * 2.5);
@@ -829,10 +878,10 @@
             <label for="model-select" style="margin-bottom: 0;">Default Model:</label>
             <select id="model-select" style="flex-grow: 1;"></select>
             <button id="add-model-btn" title="Add New Model"
-                style="background-color: var(--secondary-color);">&#43;</button>
+                style="background-color: var(--secondary-color);"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
             <button id="edit-model-btn" title="Edit Selected Model"
-                style="background-color: var(--primary-color);">&#9998;</button>
-            <button id="delete-model-btn" title="Delete Selected Model">&#128465;</button>
+                style="background-color: var(--primary-color);"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></button>
+            <button id="delete-model-btn" title="Delete Selected Model"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
         </div>
         <p id="no-models-message" style="display: none; margin-top: 10px;">No models configured. Click '+' to add one.
         </p>
@@ -842,20 +891,20 @@
             <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
                 <div style="flex: 1; min-width: 250px;">
                     <h4 style="margin: 0; display: flex; align-items: center; gap: 8px; color: var(--text-color); font-size: 1.05em;">
-                        <span>⚡</span> Test Connection & Setup
+                        <span><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></span> Test Connection & Setup
                     </h4>
                     <p style="margin: 4px 0 0 0; color: var(--text-muted); font-size: 0.85em;">
                         Verify model configuration, API credentials, server reachability, and web search in real time.
                     </p>
                 </div>
                 <button id="run-test-setup-btn" style="background-color: var(--primary-color); padding: 8px 16px; font-weight: 600; display: flex; align-items: center; gap: 6px; white-space: nowrap;">
-                    <span id="test-btn-icon">▶</span> <span id="test-btn-label">Run Diagnostic Test</span>
+                    <span id="test-btn-icon"><svg class="oi" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><polygon points="6 3 20 12 6 21 6 3"/></svg></span> <span id="test-btn-label">Run Diagnostic Test</span>
                 </button>
             </div>
             
             <div id="test-setup-results" style="display: none; margin-top: 16px; border-top: 1px solid var(--border-color); padding-top: 14px;">
                 <div id="test-step-config" class="test-step-row">
-                    <span class="test-step-icon">⚪</span>
+                    <span class="test-step-icon"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/></svg></span>
                     <div class="test-step-body" style="flex-grow: 1;">
                         <div class="test-step-title">1. Storage & Configuration Check</div>
                         <div class="test-step-detail">Waiting to start...</div>
@@ -863,7 +912,7 @@
                 </div>
                 
                 <div id="test-step-reachability" class="test-step-row">
-                    <span class="test-step-icon">⚪</span>
+                    <span class="test-step-icon"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/></svg></span>
                     <div class="test-step-body" style="flex-grow: 1;">
                         <div class="test-step-title">2. Endpoint Reachability Check</div>
                         <div class="test-step-detail">Waiting...</div>
@@ -871,7 +920,7 @@
                 </div>
                 
                 <div id="test-step-auth" class="test-step-row">
-                    <span class="test-step-icon">⚪</span>
+                    <span class="test-step-icon"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/></svg></span>
                     <div class="test-step-body" style="flex-grow: 1;">
                         <div class="test-step-title">3. Authentication & Model Response Check</div>
                         <div class="test-step-detail">Waiting...</div>
@@ -879,7 +928,7 @@
                 </div>
                 
                 <div id="test-step-search" class="test-step-row">
-                    <span class="test-step-icon">⚪</span>
+                    <span class="test-step-icon"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/></svg></span>
                     <div class="test-step-body" style="flex-grow: 1;">
                         <div class="test-step-title">4. Web Search Integration Check</div>
                         <div class="test-step-detail">Waiting...</div>
@@ -916,7 +965,7 @@
             </div>
             <div id="model-form-actions">
                 <button id="save-model-btn" style="background-color: var(--primary-color);">Save Model</button>
-                <button id="test-form-model-btn" type="button" style="background-color: var(--button-bg);">⚡ Test Inputs</button>
+                    <button id="test-form-model-btn" type="button" style="background-color: var(--button-bg);"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg> Test Inputs</button>
                 <button id="cancel-model-btn">Cancel</button>
             </div>
         </div>
@@ -1036,7 +1085,7 @@
                     <option value="month">This Month</option>
                 </select>
                 <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; margin-bottom: 0;">
-                    <input type="checkbox" id="favorites-only"> ⭐ Favorites Only
+                    <input type="checkbox" id="favorites-only"> <svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg> Favorites Only
                 </label>
             </div>
         </div>
@@ -1098,7 +1147,12 @@
 
 
         <div id="history-list-container">
-            <p id="no-history-message" style="display: none;">No history yet.</p>
+            <div id="no-history-message" class="empty-state" style="display: none;">
+                <div class="empty-state-icon" id="no-history-icon"></div>
+                <div class="empty-state-title" id="no-history-title">No saved words yet</div>
+                <div class="empty-state-hint" id="no-history-hint">Select a word on any webpage and save it from the
+                    AI popup to see it here.</div>
+            </div>
             <div id="history-list"></div>
         </div>
     </div>
@@ -1162,7 +1216,7 @@
             </div>
             <div class="stat-card">
                 <div class="stat-value" id="stat-favorites">0</div>
-                <div class="stat-label">Favorites ⭐</div>
+                <div class="stat-label">Favorites <svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></div>
             </div>
             <div class="stat-card">
                 <div class="stat-value" id="stat-due-cards">0</div>
@@ -1244,15 +1298,16 @@
         </div>
 
         <div id="review-complete" style="display: none; text-align: center; padding: 40px;">
-            <h3 style="color: var(--secondary-color);">🎉 Review Complete!</h3>
+            <h3 style="color: var(--secondary-color);"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 1.2em; height: 1.2em; vertical-align: -0.2em;" aria-hidden="true"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg> Review Complete!</h3>
             <p>You've reviewed all cards due for today.</p>
             <button id="review-again-btn" style="margin-top: 15px; background-color: var(--primary-color);">Review
                 Again</button>
         </div>
 
-        <div id="no-cards-message" style="display: none; text-align: center; padding: 40px; color: #888;">
-            <p>No cards due for review. Great job!</p>
-            <p style="font-size: 0.9em;">Save some words to start building your flashcard deck.</p>
+        <div id="no-cards-message" class="empty-state" style="display: none;">
+            <div class="empty-state-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></div>
+            <div class="empty-state-title">No cards due for review. Great job!</div>
+            <div class="empty-state-hint">Save some words to start building your flashcard deck.</div>
         </div>
     </div>
 
@@ -1330,7 +1385,11 @@
         <h3>Saved Prompts</h3>
         <div id="prompts-list"
             style="border: 1px solid var(--border-color); border-radius: 4px; padding: 10px; min-height: 100px;">
-            <p id="no-prompts-message" style="color: #888;">No custom prompts added yet.</p>
+            <div id="no-prompts-message" class="empty-state" style="display: none;">
+                <div class="empty-state-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
+                <div class="empty-state-title">No custom prompts added yet</div>
+                <div class="empty-state-hint">Create a prompt to tailor what the AI explains when you select text.</div>
+            </div>
             <!-- Prompts will be added here dynamically -->
         </div>
     </div>
@@ -1419,14 +1478,14 @@
         <div style="background-color: var(--input-bg); border: 1px solid var(--border-color); border-radius: 10px; padding: 20px; margin-bottom: 25px;">
             <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 12px;">
                 <h3 style="margin: 0; color: var(--primary-color); font-size: 1.15em; display: flex; align-items: center; gap: 8px;">
-                    <span>📊</span> Quick Diagnostic Information
+                    <span><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></span> Quick Diagnostic Information
                 </h3>
                 <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                     <button id="copy-diag-btn" style="background-color: var(--button-bg); padding: 7px 14px; font-size: 0.9em; font-weight: 500;">
-                        <span>📋</span> Copy System Info
+                        <span><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></span> Copy System Info
                     </button>
                     <button id="support-run-test-btn" style="background-color: var(--primary-color); padding: 7px 14px; font-size: 0.9em; font-weight: 600;">
-                        <span>⚡</span> Test Connection
+                        <span><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></span> Test Connection
                     </button>
                 </div>
             </div>
@@ -1468,17 +1527,17 @@
             <div style="display: flex; flex-wrap: wrap; gap: 10px;">
                 <a id="github-issue-link" href="https://github.com/13pathak/AI-Popup-Infopedia/issues/new" target="_blank" style="text-decoration: none;">
                     <button type="button" style="background-color: #24292e; color: #fff; padding: 10px 16px; font-weight: 500;">
-                        <span>🐛</span> Report Bug on GitHub
+                        <span><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 2 1.88 1.88"/><path d="M14.12 3.88 16 2"/><path d="M9 7.13v-1a3.003 3.003 0 1 1 6 0v1"/><path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6"/><path d="M12 20v-9"/><path d="M6.53 9C4.6 8.8 3 7.1 3 5"/><path d="M6 13H2"/><path d="M3 21c0-2.1 1.7-3.9 3.8-4"/><path d="M20.97 5c0 2.1-1.6 3.8-3.5 4"/><path d="M22 13h-4"/><path d="M17.2 17c2.1.1 3.8 1.9 3.8 4"/></svg></span> Report Bug on GitHub
                     </button>
                 </a>
                 <a id="feedback-email-link" href="mailto:13pathak@gmail.com?subject=Infopedia%20Feedback" style="text-decoration: none;">
                     <button type="button" style="background-color: var(--button-bg); color: #fff; padding: 10px 16px; font-weight: 500;">
-                        <span>💬</span> Send Feedback / Suggestion
+                        <span><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span> Send Feedback / Suggestion
                     </button>
                 </a>
                 <a id="support-email-link" href="mailto:13pathak@gmail.com?subject=Infopedia%20Support%20Request" style="text-decoration: none;">
                     <button type="button" style="background-color: var(--secondary-color); color: #fff; padding: 10px 16px; font-weight: 500;">
-                        <span>✉️</span> Email Support Directly
+                        <span><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg></span> Email Support Directly
                     </button>
                 </a>
             </div>
@@ -1492,8 +1551,8 @@
                 <!-- FAQ 1 -->
                 <div class="faq-item">
                     <button class="faq-question" type="button">
-                        <span>❓ Popup is not appearing when selecting text or pressing shortcut</span>
-                        <span class="faq-arrow">▼</span>
+                        <span><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg> Popup is not appearing when selecting text or pressing shortcut</span>
+                        <span class="faq-arrow"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg></span>
                     </button>
                     <div class="faq-answer">
                         <p><strong>1. Keyboard Shortcut:</strong> The default hotkey is <code>Ctrl+Shift+Y</code> (or <code>Cmd+Shift+Y</code> on Mac). You can customize this shortcut at <code>chrome://extensions/shortcuts</code>.</p>
@@ -1505,8 +1564,8 @@
                 <!-- FAQ 2 -->
                 <div class="faq-item">
                     <button class="faq-question" type="button">
-                        <span>🔑 API Key & Authentication Errors (HTTP 401 / 403)</span>
-                        <span class="faq-arrow">▼</span>
+                        <span><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></svg> API Key & Authentication Errors (HTTP 401 / 403)</span>
+                        <span class="faq-arrow"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg></span>
                     </button>
                     <div class="faq-answer">
                         <p><strong>401 Unauthorized</strong> means the AI provider rejected your API key. Here is how to get free/supported keys:</p>
@@ -1515,15 +1574,15 @@
                             <li><strong>Groq (Ultra-fast, Free tier):</strong> Get a key at <a href="https://console.groq.com/" target="_blank" style="color: var(--primary-color);">Groq Console</a>. Endpoint: <code>https://api.groq.com/openai/v1/chat/completions</code>, Model: <code>llama-3.3-70b-versatile</code>.</li>
                             <li><strong>OpenRouter:</strong> Supports dozens of models at <a href="https://openrouter.ai/" target="_blank" style="color: var(--primary-color);">openrouter.ai</a>. Endpoint: <code>https://openrouter.ai/api/v1/chat/completions</code>.</li>
                         </ul>
-                        <p>Use the <strong>"⚡ Test Connection"</strong> button above to verify your key and endpoint in real time.</p>
+                        <p>Use the <strong>"<svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg> Test Connection"</strong> button above to verify your key and endpoint in real time.</p>
                     </div>
                 </div>
 
                 <!-- FAQ 3 -->
                 <div class="faq-item">
                     <button class="faq-question" type="button">
-                        <span>💻 Local LLMs Setup (Ollama / LM Studio)</span>
-                        <span class="faq-arrow">▼</span>
+                        <span><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg> Local LLMs Setup (Ollama / LM Studio)</span>
+                        <span class="faq-arrow"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg></span>
                     </button>
                     <div class="faq-answer">
                         <p>Infopedia supports 100% private, local LLMs running on your own computer:</p>
@@ -1540,8 +1599,8 @@
                 <!-- FAQ 4 -->
                 <div class="faq-item">
                     <button class="faq-question" type="button">
-                        <span>🌐 Web Search Grounding (Tavily)</span>
-                        <span class="faq-arrow">▼</span>
+                        <span><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg> Web Search Grounding (Tavily)</span>
+                        <span class="faq-arrow"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg></span>
                     </button>
                     <div class="faq-answer">
                         <p>Web Search Grounding allows models to fetch up-to-date facts, current events, and live web citations:</p>
@@ -1556,8 +1615,8 @@
                 <!-- FAQ 5 -->
                 <div class="faq-item">
                     <button class="faq-question" type="button">
-                        <span>📄 PDF Reader & Annotations</span>
-                        <span class="faq-arrow">▼</span>
+                        <span><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg> PDF Reader & Annotations</span>
+                        <span class="faq-arrow"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg></span>
                     </button>
                     <div class="faq-answer">
                         <p>Infopedia includes a built-in custom PDF reader with multi-color highlights, bookmarks, search grounding, and Anki card creation:</p>

@@ -2,6 +2,145 @@ import * as pdfjsLib from '../build/pdf.mjs';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = '../build/pdf.worker.mjs';
 
+// Inline SVG icon set (currentColor, follows light/dark button colors).
+const VIEWER_ICON_PATHS = {
+  sun: '<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>',
+  moon: '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>',
+  lock: '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+  alertTriangle: '<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
+  messageSquare: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+  highlighter: '<path d="m9 11-6 6v3h9l3-3"/><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/>',
+  bookmark: '<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>',
+  list: '<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>'
+};
+
+function viewerIconSvg(name, size = 14) {
+  const paths = VIEWER_ICON_PATHS[name];
+  if (!paths) return '';
+  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -2px;" aria-hidden="true">${paths}</svg>`;
+}
+
+// The toolbar toggle swaps its whole content on state change; keep the
+// markup identical to the static HTML in custom-viewer.html.
+function darkModeButtonHtml(isDark) {
+  return isDark
+    ? `${viewerIconSvg('sun', 14)} Light Mode`
+    : `${viewerIconSvg('moon', 14)} Dark Mode`;
+}
+
+// Icon + title + hint for empty sidebar tabs (static strings, no user data).
+function sidebarEmptyHtml(iconName, title, hint) {
+  return `<div class="sidebar-empty-msg">${viewerIconSvg(iconName, 26)}<div>${title}</div><div class="sidebar-empty-hint">${hint}</div></div>`;
+}
+
+// --- Lightweight modal dialogs (replace native alert/prompt) ---
+// Titles/messages/initial values are set via textContent/value, so nothing
+// is parsed as HTML. Resolves: alert -> undefined; prompt -> string, or
+// null when cancelled (Escape / backdrop / Cancel), matching window.prompt.
+function buildViewerModal({ title, message = '', placeholder = '', initialValue = '', confirmText = 'OK', cancelText = null, wantInput = false }) {
+  return new Promise((resolve) => {
+    // One modal at a time.
+    document.getElementById('viewer-modal-overlay')?.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'viewer-modal-overlay';
+
+    const box = document.createElement('div');
+    box.className = 'viewer-modal';
+    box.addEventListener('mousedown', (e) => e.stopPropagation());
+
+    const heading = document.createElement('h3');
+    heading.textContent = title;
+    box.appendChild(heading);
+
+    if (message) {
+      const msg = document.createElement('p');
+      msg.textContent = message;
+      box.appendChild(msg);
+    }
+
+    let input = null;
+    if (wantInput) {
+      input = document.createElement('input');
+      input.type = 'text';
+      input.placeholder = placeholder;
+      input.value = initialValue;
+      box.appendChild(input);
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'viewer-modal-actions';
+
+    const primary = document.createElement('button');
+    primary.className = 'viewer-modal-primary';
+    primary.textContent = confirmText;
+    primary.addEventListener('click', () => done(input ? input.value : undefined));
+    actions.appendChild(primary);
+
+    if (cancelText) {
+      const secondary = document.createElement('button');
+      secondary.className = 'viewer-modal-secondary';
+      secondary.textContent = cancelText;
+      secondary.addEventListener('click', () => done(null));
+      actions.appendChild(secondary);
+    }
+    box.appendChild(actions);
+    overlay.appendChild(box);
+
+    function done(result) {
+      // Capture-phase Escape guard is removed with the dialog itself.
+      document.removeEventListener('keydown', onKey, true);
+      overlay.remove();
+      resolve(result);
+    }
+
+    // Escape closes the dialog but must not also close AI popups behind it.
+    function onKey(e) {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        done(null);
+      }
+    }
+    document.addEventListener('keydown', onKey, true);
+
+    // Clicking the dark backdrop cancels; clicks inside the card are stopped above.
+    overlay.addEventListener('mousedown', (e) => {
+      if (e.target === overlay) done(null);
+    });
+
+    document.body.appendChild(overlay);
+
+    if (input) {
+      input.focus();
+      input.select();
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          done(input.value);
+        }
+      });
+    } else {
+      primary.focus();
+    }
+  });
+}
+
+function viewerAlert(title, message) {
+  return buildViewerModal({ title, message, confirmText: 'OK' });
+}
+
+function viewerPromptDialog(title, message, initialValue, placeholder) {
+  return buildViewerModal({
+    title,
+    message,
+    initialValue,
+    placeholder,
+    confirmText: 'Save',
+    cancelText: 'Cancel',
+    wantInput: true
+  });
+}
+
 let pdfDoc = null;
 let scale = 1.25; // Adjusted scale as default zoom
 // Every scale writer (zoom buttons, fit modes, pinch) clamps to this
@@ -52,7 +191,7 @@ async function loadStorageData() {
             if (result.pdf_dark_mode) {
                 document.body.classList.add('dark-mode');
                 const darkBtn = document.getElementById('dark_mode_toggle');
-                if (darkBtn) darkBtn.innerHTML = '☀️ Light Mode';
+                if (darkBtn) darkBtn.innerHTML = darkModeButtonHtml(true);
             }
             if (result[highlightsKey]) {
                 highlights = result[highlightsKey];
@@ -303,7 +442,7 @@ function promptForPassword(isRetry) {
 
         const icon = document.createElement('div');
         icon.className = 'pdf-load-error-icon';
-        icon.textContent = '🔒';
+        icon.innerHTML = viewerIconSvg('lock', 36);
         const title = document.createElement('h2');
         title.textContent = 'This PDF is password protected';
         const msg = document.createElement('p');
@@ -384,7 +523,7 @@ function showLoadError(err) {
 
     const icon = document.createElement('div');
     icon.className = 'pdf-load-error-icon';
-    icon.textContent = '⚠️';
+    icon.innerHTML = viewerIconSvg('alertTriangle', 36);
     const title = document.createElement('h2');
     title.textContent = 'Could not load PDF';
     const detail = document.createElement('p');
@@ -498,7 +637,7 @@ async function printPDF() {
     } catch (err) {
         if (!printJobCancelled) {
             console.error('Print preparation failed:', err);
-            alert('Printing failed: ' + (err && err.message ? err.message : 'unknown error'));
+            viewerAlert('Print failed', 'Printing failed: ' + (err && err.message ? err.message : 'unknown error'));
         }
     } finally {
         overlay.classList.add('hidden');
@@ -942,7 +1081,7 @@ function drawHighlight(hl, pageDiv, viewport) {
         const indicator = document.createElement('div');
         indicator.className = 'note-indicator';
         indicator.dataset.hlId = hl.id;
-        indicator.textContent = '💬';
+        indicator.innerHTML = viewerIconSvg('messageSquare', 14);
         indicator.style.left = `${cssLeft}px`;
         indicator.style.top = `${cssTop}px`;
         pageDiv.appendChild(indicator);
@@ -1092,24 +1231,29 @@ document.getElementById('dark_mode_toggle').addEventListener('click', () => {
     document.body.classList.toggle('dark-mode');
     const isDark = document.body.classList.contains('dark-mode');
     const btn = document.getElementById('dark_mode_toggle');
-    btn.innerHTML = isDark ? '☀️ Light Mode' : '🌙 Dark Mode';
+    btn.innerHTML = darkModeButtonHtml(isDark);
     if (hasChromeStorage()) {
         chrome.storage.local.set({ 'pdf_dark_mode': isDark });
     }
 });
 
-document.getElementById('bookmark_page').addEventListener('click', () => {
+document.getElementById('bookmark_page').addEventListener('click', async () => {
     if (!pdfDoc) return;
     const pageNum = parseInt(document.getElementById('page_num').value) || 1;
     if (pageNum < 1 || pageNum > pdfDoc.numPages) return;
-    
+
     // Check if already bookmarked
     if (bookmarks.some(b => b.pageNumber === pageNum)) {
-        alert(`Page ${pageNum} is already bookmarked!`);
+        viewerAlert('Already bookmarked', `Page ${pageNum} is already bookmarked.`);
         return;
     }
-    
-    const customName = prompt(`Enter a name for this bookmark:`, `Page ${pageNum}`);
+
+    const customName = await viewerPromptDialog(
+        'Add bookmark',
+        `Enter a name for page ${pageNum}.`,
+        `Page ${pageNum}`,
+        `Page ${pageNum}`
+    );
     if (customName !== null) { // if not cancelled
         bookmarkCounter++;
         const newBookmark = {
@@ -1119,7 +1263,7 @@ document.getElementById('bookmark_page').addEventListener('click', () => {
         };
         bookmarks.push(newBookmark);
         saveBookmarks();
-        
+
         // Open the bookmarks sidebar tab to show feedback
         document.getElementById('icon-tab-bookmarks').click();
     }
@@ -1134,7 +1278,7 @@ document.getElementById('summarize_page').addEventListener('click', async () => 
     const pageText = textContent.items.map(i => i.str).join(' ');
 
     if (!pageText.trim()) {
-        alert('No text found on this page to summarize.');
+        viewerAlert('Nothing to summarize', 'No text found on this page to summarize.');
         return;
     }
 
@@ -1243,7 +1387,7 @@ function hexToRgb(hex) {
 
 document.getElementById('export_md').addEventListener('click', () => {
     if (highlights.length === 0) {
-        alert("No annotations to export.");
+        viewerAlert('Nothing to export', 'No annotations to export yet.');
         return;
     }
     
@@ -1402,9 +1546,9 @@ document.getElementById('save_pdf').addEventListener('click', async () => {
         // nor a .name check. Export MD and Print both work off the
         // decrypted in-memory document, so point the user there.
         if (/is encrypted/i.test(String(e && e.message))) {
-            alert("Saving highlights isn't supported for password-protected PDFs — use Export MD or Print instead.");
+            viewerAlert('Cannot save highlights', "Saving highlights isn't supported for password-protected PDFs — use Export MD or Print instead.");
         } else {
-            alert("Error saving PDF. Check console.");
+            viewerAlert('Error saving PDF', 'Error saving PDF. Check the console for details.');
         }
     }
 });
@@ -1798,7 +1942,7 @@ function renderSidebar() {
     sidebarContent.innerHTML = '';
     
     if (highlights.length === 0) {
-        sidebarContent.innerHTML = '<div class="sidebar-empty-msg">No comments or highlights yet.</div>';
+        sidebarContent.innerHTML = sidebarEmptyHtml('messageSquare', 'No comments or highlights yet.', 'Select text in the document to highlight it, then add a comment.');
         return;
     }
     
@@ -1821,7 +1965,7 @@ function renderSidebar() {
         const pageSpan = document.createElement('span');
         pageSpan.className = 'sidebar-item-page';
         
-        let typeIcon = '🖌️';
+        let typeIcon = viewerIconSvg('highlighter', 10);
         if (hl.markupType === 'Underline') typeIcon = '<u>U</u>';
         else if (hl.markupType === 'StrikeOut') typeIcon = '<s>S</s>';
         
@@ -1898,7 +2042,7 @@ function renderBookmarks() {
     sidebarContent.innerHTML = '';
     
     if (bookmarks.length === 0) {
-        sidebarContent.innerHTML = '<div class="sidebar-empty-msg">No bookmarks yet.</div>';
+        sidebarContent.innerHTML = sidebarEmptyHtml('bookmark', 'No bookmarks yet.', 'Use the Bookmark button in the toolbar to mark this page.');
         return;
     }
     
@@ -1914,7 +2058,7 @@ function renderBookmarks() {
         
         const pageSpan = document.createElement('span');
         pageSpan.className = 'sidebar-item-page';
-        pageSpan.innerHTML = `Page ${bk.pageNumber} <span style="margin-left: 5px; font-size: 10px;">📌</span>`;
+        pageSpan.innerHTML = `Page ${bk.pageNumber} <span style="margin-left: 5px; font-size: 10px; color: #888;">${viewerIconSvg('bookmark', 10)}</span>`;
         
         header.appendChild(pageSpan);
         item.appendChild(header);
@@ -2006,7 +2150,7 @@ function scrollToHighlight(hl) {
 
 function renderOutline(outline) {
     if (!outline || outline.length === 0) {
-        contentOutline.innerHTML = '<div class="sidebar-empty-msg">No outline available.</div>';
+        contentOutline.innerHTML = sidebarEmptyHtml('list', 'No outline available.', 'This PDF does not contain a table of contents.');
         return;
     }
     
