@@ -1391,7 +1391,21 @@ document.getElementById('save_pdf').addEventListener('click', async () => {
         
     } catch (e) {
         console.error("Failed to save PDF", e);
-        alert("Error saving PDF. Check console.");
+        // pdf-lib throws EncryptedPDFError for any document with an
+        // /Encrypt dictionary — including books already unlocked here via
+        // the password prompt, since this handler re-fetches the original
+        // encrypted bytes. { ignoreEncryption: true } is not a way out: it
+        // re-serializes still-encrypted streams into a corrupt file. The
+        // error can only be detected by message: this bundle's minified
+        // subclass is broken (Error.call(this, msg) returns a fresh plain
+        // Error), so instances pass neither instanceof EncryptedPDFError
+        // nor a .name check. Export MD and Print both work off the
+        // decrypted in-memory document, so point the user there.
+        if (/is encrypted/i.test(String(e && e.message))) {
+            alert("Saving highlights isn't supported for password-protected PDFs — use Export MD or Print instead.");
+        } else {
+            alert("Error saving PDF. Check console.");
+        }
     }
 });
 
