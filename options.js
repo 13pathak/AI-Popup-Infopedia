@@ -66,6 +66,7 @@ document.addEventListener('DOMContentLoaded', () => {
   loadHallucinationGuardSettings(); // Load Hallucination Guard settings
   loadSearchApiSettings(); // Load Search API settings
   loadPdfAuthorName(); // Load Custom Author Name
+  loadPdfViewerToggle(); // Load PDF interception toggle
 
   // Check if a specific tab was requested (e.g. from popup troubleshooting action)
   function activateRequestedTab(tabName) {
@@ -109,6 +110,7 @@ document.addEventListener('DOMContentLoaded', () => {
   safeAddListener('default-prompt-select', 'change', (e) => saveDefaultPromptId(e.target.value));
   safeAddListener('cancel-model-btn', 'click', hideModelForm);
   safeAddListener('save-pdf-author-btn', 'click', savePdfAuthorName);
+  safeAddListener('pdf-viewer-enabled-checkbox', 'change', savePdfViewerToggle);
   safeAddListener('save-followup-settings-btn', 'click', saveFollowupSettings);
   safeAddListener('enable-hallucination-guard', 'change', saveHallucinationGuardSettings);
   safeAddListener('verification-model-select', 'change', saveHallucinationGuardSettings);
@@ -466,6 +468,24 @@ function savePdfAuthorName() {
       updateStatus('Custom Author Name saved successfully!', 'success');
     });
   }
+}
+
+// Stored in sync (unlike the author name) so it roams with the account and
+// is picked up automatically by the all-settings export, which copies every
+// sync key. Undefined means "enabled": the interception predates this toggle.
+function loadPdfViewerToggle() {
+  chrome.storage.sync.get(['pdfViewerEnabled'], (data) => {
+    const checkbox = document.getElementById('pdf-viewer-enabled-checkbox');
+    if (checkbox) checkbox.checked = data.pdfViewerEnabled !== false;
+  });
+}
+
+function savePdfViewerToggle() {
+  const checkbox = document.getElementById('pdf-viewer-enabled-checkbox');
+  if (!checkbox) return;
+  chrome.storage.sync.set({ pdfViewerEnabled: checkbox.checked }, () => {
+    updateStatus('PDF viewer preference saved.', 'success');
+  });
 }
 
 function saveDefaultPromptId(promptId) {
@@ -2313,7 +2333,7 @@ function restoreBackup() {
       if (restoredCount > 0) {
         chrome.storage.local.set(dataToSave, () => {
           // Also check for sync settings if any
-          const syncKeys = ['models', 'customPrompts', 'defaultModelId', 'defaultPromptId', 'ttsSettings', 'ankiSettings', 'backupReminderFrequency', 'backupSubfolder', 'followupCustomMessage', 'showUserQuestions', 'sttEngine', 'sttApiKey', 'sttApiUrl', 'sttModel', 'sttCustomHeaders', 'sttCustomFormData'];
+          const syncKeys = ['models', 'customPrompts', 'defaultModelId', 'defaultPromptId', 'ttsSettings', 'ankiSettings', 'backupReminderFrequency', 'backupSubfolder', 'followupCustomMessage', 'showUserQuestions', 'sttEngine', 'sttApiKey', 'sttApiUrl', 'sttModel', 'sttCustomHeaders', 'sttCustomFormData', 'pdfViewerEnabled'];
           const syncData = {};
           let syncCount = 0;
           for (const key of syncKeys) {

@@ -212,6 +212,10 @@ const pageObserver = new IntersectionObserver((entries) => {
 });
 
 async function loadPDF() {
+    // Distinguishes "user closed the password prompt" from real failures
+    // for the catch below: destroy() rejects with an internal PDF.js error
+    // that would otherwise print a scary generic message.
+    let passwordCancelled = false;
     try {
         await loadStorageData();
         // CJK PDFs need CMap data and some PDFs rely on non-embedded
@@ -219,7 +223,7 @@ async function loadPDF() {
         // extraction (selection/search/highlights) fails on those documents.
         // This PDF.js build fetches both from the main thread, so the URLs
         // are document-relative (like workerSrc above).
-        pdfDoc = await pdfjsLib.getDocument({
+        const loadingTask = pdfjsLib.getDocument({
             url: fileUrl,
             cMapUrl: './cmaps/',
             cMapPacked: true,
@@ -231,7 +235,23 @@ async function loadPDF() {
             // cookie-authenticated PDFs (university proxies etc.);
             // host_permissions already exempts the fetch from CORS.
             withCredentials: true
-        }).promise;
+        });
+        // Protected documents open here instead of dead-ending: PDF.js
+        // requests the password through this callback (reason 1 on the
+        // first ask, 2 after a wrong password) and retries on its own once
+        // updatePassword runs. Cancelling tears the load down.
+        loadingTask.onPassword = async (updatePassword, reason) => {
+            const isRetry = reason === pdfjsLib.PasswordResponses.INCORRECT_PASSWORD;
+            const password = await promptForPassword(isRetry);
+            if (password === null) {
+                passwordCancelled = true;
+                loadingTask.destroy();
+            } else {
+                updatePassword(password);
+            }
+        };
+        pdfDoc = await loadingTask.promise;
+        document.querySelector('.pdf-password-prompt')?.remove();
         pageCountSpan.textContent = pdfDoc.numPages;
         await renderAllPages();
         
@@ -247,19 +267,118 @@ async function loadPDF() {
         }
     } catch (e) {
         console.error("Error loading PDF:", e);
-        showLoadError(e);
+        showLoadError(passwordCancelled ? { name: 'PasswordCancelled' } : e);
     }
+}
+
+// Shared "hand this document to Chrome's own viewer" button, offered on the
+// password prompt and the load-error screen. The background worker marks
+// the tab as bypassed before navigating, so the interception listeners
+// don't immediately pull the document back into this viewer. Returns null
+// when there is no meaningful target (relative test path) or no runtime.
+function buildNativeViewerButton() {
+    if (!/^(https?|file):/i.test(fileUrl)) return null;
+    if (typeof chrome === 'undefined' || !chrome.runtime || !chrome.runtime.sendMessage) return null;
+    const nativeBtn = document.createElement('button');
+    nativeBtn.className = 'pdf-load-error-retry';
+    nativeBtn.textContent = "Open in Chrome's built-in viewer";
+    nativeBtn.addEventListener('click', () => {
+        nativeBtn.disabled = true;
+        chrome.runtime.sendMessage({ type: 'openNativeViewer', url: fileUrl }, () => {
+            // No response is sent; read lastError so a restarting
+            // service worker doesn't log an unchecked-lastError warning.
+            void chrome.runtime.lastError;
+        });
+    });
+    return nativeBtn;
+}
+
+// In-viewer password prompt. PDF.js re-invokes onPassword after every wrong
+// attempt, so each call builds a fresh box replacing the previous disabled
+// "checking…" one. Resolves the entered password, or null when cancelled.
+function promptForPassword(isRetry) {
+    return new Promise((resolve) => {
+        const box = document.createElement('div');
+        box.className = 'pdf-load-error pdf-password-prompt';
+
+        const icon = document.createElement('div');
+        icon.className = 'pdf-load-error-icon';
+        icon.textContent = '🔒';
+        const title = document.createElement('h2');
+        title.textContent = 'This PDF is password protected';
+        const msg = document.createElement('p');
+        msg.textContent = 'Enter the password to open it here — highlights and popups stay available.';
+        box.appendChild(icon);
+        box.appendChild(title);
+        box.appendChild(msg);
+
+        if (isRetry) {
+            const retry = document.createElement('p');
+            retry.className = 'pdf-password-error';
+            retry.textContent = 'Incorrect password, please try again.';
+            box.appendChild(retry);
+        }
+
+        const form = document.createElement('form');
+        const input = document.createElement('input');
+        input.type = 'password';
+        input.className = 'pdf-password-input';
+        input.placeholder = 'Password';
+        input.autocomplete = 'off';
+        const unlockBtn = document.createElement('button');
+        unlockBtn.type = 'submit';
+        unlockBtn.className = 'pdf-load-error-retry';
+        unlockBtn.textContent = 'Unlock';
+        const cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.className = 'pdf-password-cancel';
+        cancelBtn.textContent = 'Cancel';
+        form.appendChild(input);
+        form.appendChild(unlockBtn);
+        form.appendChild(cancelBtn);
+        box.appendChild(form);
+
+        const nativeBtn = buildNativeViewerButton();
+        if (nativeBtn) box.appendChild(nativeBtn);
+
+        // Submitting keeps the box up in a disabled state: PDF.js only
+        // re-invokes onPassword once it knows the password is wrong, and
+        // success removes the box in loadPDF.
+        form.addEventListener('submit', (e) => {
+            e.preventDefault();
+            if (!input.value) return;
+            input.disabled = true;
+            unlockBtn.disabled = true;
+            cancelBtn.disabled = true;
+            resolve(input.value);
+        });
+        cancelBtn.addEventListener('click', () => {
+            box.remove();
+            resolve(null);
+        });
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') cancelBtn.click();
+        });
+
+        document.querySelector('.pdf-password-prompt')?.remove();
+        document.getElementById('viewer').appendChild(box);
+        input.focus();
+    });
 }
 
 // Visible failure state: without this a fetch/render error leaves the
 // user staring at an empty gray viewer.
 function showLoadError(err) {
     const reasons = {
-        PasswordException: 'This PDF is password protected and cannot be opened here.',
+        PasswordException: 'This PDF is password protected.',
+        PasswordCancelled: 'Password entry was cancelled.',
         InvalidPDFException: 'This file is not a valid PDF.',
         MissingPDFException: 'The PDF file could not be found at the requested location.',
         UnexpectedResponseException: 'The server sent an unexpected response while fetching the PDF.'
     };
+    // A password prompt may still be on screen if the load failed after
+    // unlocking (or the user cancelled); it has nothing more to say.
+    document.querySelector('.pdf-password-prompt')?.remove();
     const box = document.createElement('div');
     box.className = 'pdf-load-error';
 
@@ -287,8 +406,125 @@ function showLoadError(err) {
     box.appendChild(title);
     box.appendChild(detail);
     box.appendChild(urlLine);
+
+    // Escape hatch: failures here are often things Chrome's own viewer
+    // handles fine. See buildNativeViewerButton for why this goes through
+    // the background worker instead of a direct navigation.
+    const nativeBtn = buildNativeViewerButton();
+    if (nativeBtn) box.appendChild(nativeBtn);
+
     document.getElementById('viewer').appendChild(box);
 }
+
+// --- Whole-document printing ---
+// The screen viewer is virtualized (IntersectionObserver keeps canvases
+// only for visible pages), so Chrome's print of this page produces blank
+// paper — the offscreen page divs have nothing in them. Instead, render
+// every page from the already-loaded pdfDoc into the hidden #print-container
+// at a fixed print scale; @media print swaps it in for the viewer chrome.
+// Raster scale bounds in PDF points: 1.5x (~108dpi) is the legibility
+// floor, 3x (~216dpi) the crispness ceiling. Long documents step down
+// along a total-pixel budget: hundreds of full-resolution print canvases
+// exceed Chrome's canvas memory, and evicted backing stores raster as
+// black boxes in the print preview.
+const PRINT_TOTAL_PIXEL_BUDGET = 2e8;
+let printInProgress = false;
+let printJobCancelled = false;
+
+async function printPDF() {
+    if (!pdfDoc || printInProgress) return;
+    const overlay = document.getElementById('print-overlay');
+    const progress = document.getElementById('print-progress');
+    const container = document.getElementById('print-container');
+    if (!overlay || !container) return;
+
+    printInProgress = true;
+    printJobCancelled = false;
+    overlay.classList.remove('hidden');
+    container.innerHTML = '';
+    let printScale = 3;
+
+    try {
+        const total = pdfDoc.numPages;
+        for (let pageNum = 1; pageNum <= total; pageNum++) {
+            if (printJobCancelled) return;
+            progress.textContent = `Preparing page ${pageNum} of ${total} for printing…`;
+
+            const page = await pdfDoc.getPage(pageNum);
+
+            if (pageNum === 1) {
+                const base = page.getViewport({ scale: 1 });
+                // Paper declaration + scale budget, both derived from page 1.
+                // PDF points are 1/72in; .print-page wrappers are sized to
+                // exactly these values (clamped by the page box) and clip
+                // their canvases, which is what keeps pages whose sizes
+                // differ from page 1 from fragmenting onto phantom sheets.
+                const wIn = (base.width / 72).toFixed(3);
+                const hIn = (base.height / 72).toFixed(3);
+                let pageStyle = document.getElementById('print-page-size');
+                if (!pageStyle) {
+                    pageStyle = document.createElement('style');
+                    pageStyle.id = 'print-page-size';
+                    document.head.appendChild(pageStyle);
+                }
+                pageStyle.textContent = `@page { size: ${wIn}in ${hIn}in; margin: 0; }
+:root { --print-paper-w: ${wIn}in; --print-paper-h: ${hIn}in; }`;
+
+                printScale = Math.min(
+                    3,
+                    Math.max(1.5, Math.sqrt((PRINT_TOTAL_PIXEL_BUDGET / total) / (base.width * base.height))),
+                    65535 / Math.max(base.width, base.height),
+                    Math.sqrt((2 ** 28) / (base.width * base.height))
+                );
+            }
+
+            const viewport = page.getViewport({ scale: printScale });
+
+            const pageWrap = document.createElement('div');
+            pageWrap.className = 'print-page';
+
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = Math.floor(viewport.width);
+            canvas.height = Math.floor(viewport.height);
+
+            await page.render({ canvasContext: ctx, viewport }).promise;
+
+            pageWrap.appendChild(canvas);
+            container.appendChild(pageWrap);
+        }
+
+        if (!printJobCancelled) window.print();
+    } catch (err) {
+        if (!printJobCancelled) {
+            console.error('Print preparation failed:', err);
+            alert('Printing failed: ' + (err && err.message ? err.message : 'unknown error'));
+        }
+    } finally {
+        overlay.classList.add('hidden');
+        if (printJobCancelled) container.innerHTML = '';
+        printInProgress = false;
+    }
+}
+
+document.getElementById('print_pdf').addEventListener('click', printPDF);
+document.getElementById('print-cancel').addEventListener('click', () => {
+    printJobCancelled = true;
+});
+
+// Route Ctrl+P through the same flow: without this, the shortcut prints
+// the virtualized on-screen document and comes out blank.
+window.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P')) {
+        e.preventDefault();
+        printPDF();
+    }
+});
+
+// Release the print canvases once the dialog closes; every print re-renders.
+window.addEventListener('afterprint', () => {
+    document.getElementById('print-container').innerHTML = '';
+});
 
 async function renderAllPages() {
     if (!pdfDoc) return;

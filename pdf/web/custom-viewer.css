@@ -900,6 +900,185 @@ body.dark-mode #note-btn-cancel {
     word-break: break-all;
 }
 
+.pdf-load-error-retry {
+    margin-top: 16px;
+    padding: 9px 18px;
+    border: none;
+    border-radius: 6px;
+    background-color: #1a73e8;
+    color: #ffffff;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.pdf-load-error-retry:hover {
+    background-color: #1667d9;
+}
+
+.pdf-load-error-retry:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+/* --- Password prompt (protected PDFs opened in-viewer) ---
+   The box carries .pdf-load-error too, so card, typography and dark-mode
+   styling come from there; only the form specifics live here. */
+.pdf-password-prompt form {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-top: 14px;
+}
+
+/* The retry button's 16px top margin is for its standalone use on the
+   error card; inside the centered form row it would skew the alignment. */
+.pdf-password-prompt form .pdf-load-error-retry {
+    margin-top: 0;
+}
+
+.pdf-password-prompt > .pdf-load-error-retry {
+    margin-top: 16px;
+}
+
+.pdf-password-prompt button:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+.pdf-password-input {
+    flex-grow: 1;
+    min-width: 150px;
+    padding: 8px 10px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    font-size: 13px;
+}
+
+.pdf-password-error {
+    color: #d93025;
+    margin: 6px 0 0 0;
+}
+
+.pdf-password-cancel {
+    padding: 9px 18px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    background-color: #f1f3f4;
+    color: #333;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+body.dark-mode .pdf-password-input,
+body.dark-mode .pdf-password-cancel {
+    background-color: #3a3b3c;
+    color: #e4e6eb;
+    border-color: #4e4f50;
+}
+
+/* --- Whole-document printing ---
+   The screen viewer is virtualized: only visible pages hold canvases, so
+   printing the page as-is yields blank paper. printPDF() renders every
+   page into #print-container and @media print swaps it in. */
+#print-container {
+    display: none;
+}
+
+/* Paper-exact, overflow-clipped wrappers: a canvas can never exceed its
+   sheet, so Chrome never fragments a sub-page sliver onto a phantom blank
+   sheet. This matters when a document's pages differ from page 1 (scans,
+   trimmed sections) or the dialog's paper differs — both used to emit a
+   near-blank sheet between pages or at the end. 100vw/100vh resolve
+   against the page box while printing; min() additionally guards a
+   wrongly-resolved vh. printPDF() supplies --print-paper-w/h. */
+.print-page {
+    width: min(var(--print-paper-w, 100%), 100%);
+    height: min(var(--print-paper-h, 100vh), 100vh);
+    overflow: hidden;
+    page-break-after: always;
+    break-after: page;
+}
+
+.print-page:last-child {
+    page-break-after: auto;
+    break-after: auto;
+}
+
+.print-page canvas {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+#print-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    background: rgba(0, 0, 0, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#print-overlay.hidden {
+    display: none;
+}
+
+#print-overlay-card {
+    background-color: #ffffff;
+    color: #333;
+    border-radius: 8px;
+    padding: 20px 28px;
+    text-align: center;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+#print-cancel {
+    margin-top: 12px;
+    padding: 8px 16px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    background-color: #f1f3f4;
+    color: #333;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+@page {
+    margin: 0;
+}
+
+@media print {
+    /* The viewer clips the whole page for screen scrolling (html/body
+       overflow hidden + height 100%). Chrome's print pipeline honors
+       that clipping and truncates the print surface to the first
+       viewport — one printable page no matter how many pages were
+       rendered into #print-container. */
+    html,
+    body {
+        overflow: visible !important;
+        height: auto !important;
+        width: auto !important;
+        /* The dark app background would bleed through any letterboxed
+           sheet and paint phantom pages solid gray. */
+        background: #ffffff !important;
+    }
+
+    /* Hide everything except the print surface. Enumerating elements
+       missed runtime-injected widgets (content.js appends its popup
+       containers to <html>, outside <body>); such a stray flowed onto
+       a phantom trailing sheet and printed as a dark box. */
+    html > *:not(body),
+    body > *:not(#print-container) {
+        display: none !important;
+    }
+
+    #print-container {
+        display: block !important;
+    }
+}
+
 body.dark-mode .pdf-load-error {
     background-color: #242526;
     color: #e4e6eb;

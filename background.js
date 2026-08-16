@@ -397,6 +397,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     openPrintTab(request.htmlContent);
   }
 
+  // --- Case 2.6: Escape hatch — reopen a failed PDF in Chrome's viewer ---
+  if (request.type === "openNativeViewer") {
+    handleOpenNativeViewer(request, sender);
+  }
+
   // --- Case 2.8: Test AI Connection & Setup ---
   if (request.type === "testConnection") {
     handleTestConnection(request, sendResponse);
@@ -696,7 +701,7 @@ function triggerBackup(type = "Auto") {
   // viewer, plus the pdf_author_name preference set on the options page;
   // all are picked out into pdfAnnotations below.
   chrome.storage.local.get(null, (localData) => {
-    chrome.storage.sync.get(['models', 'customPrompts', 'defaultModelId', 'defaultPromptId', 'ankiSettings', 'ttsSettings', 'backupReminderFrequency', 'backupSubfolder', 'followupCustomMessage', 'showUserQuestions', 'sttEngine', 'sttApiKey', 'sttApiUrl', 'sttModel', 'sttCustomHeaders', 'sttCustomFormData'], (syncData) => {
+    chrome.storage.sync.get(['models', 'customPrompts', 'defaultModelId', 'defaultPromptId', 'ankiSettings', 'ttsSettings', 'backupReminderFrequency', 'backupSubfolder', 'followupCustomMessage', 'showUserQuestions', 'sttEngine', 'sttApiKey', 'sttApiUrl', 'sttModel', 'sttCustomHeaders', 'sttCustomFormData', 'pdfViewerEnabled'], (syncData) => {
 
       // SECURITY NOTE: this backup intentionally includes secrets (each
       // model's apiKey, sttApiKey, sttCustomHeaders) so that restores are
@@ -729,6 +734,7 @@ function triggerBackup(type = "Auto") {
         backupSubfolder: syncData.backupSubfolder,
         followupCustomMessage: syncData.followupCustomMessage,
         showUserQuestions: syncData.showUserQuestions,
+        pdfViewerEnabled: syncData.pdfViewerEnabled,
         exportedAt: new Date().toISOString(),
         backupType: type,
         version: "1.2"
@@ -797,7 +803,7 @@ function triggerBackup(type = "Auto") {
 // browser closes), mirrored into a synchronous in-memory Map as the fast
 // path. Entries expire lazily by timestamp — no setTimeout to lose.
 const REDIRECT_TTL_MS = 10000; // forget the entry after 10s as a safety net
-const redirectedTabs = new Map(); // tabId -> { url, ts }
+const redirectedTabs = new Map(); // tabId -> { url, ts, bypass? }
 
 const sessionStore = (chrome.storage && chrome.storage.session) || null;
 
@@ -812,7 +818,7 @@ const redirectedTabsLoaded = (async () => {
     for (const key of Object.keys(stored)) {
       const entry = stored[key];
       if (entry && typeof entry.url === 'string' && now - entry.ts < REDIRECT_TTL_MS) {
-        redirectedTabs.set(Number(key), { url: entry.url, ts: entry.ts });
+        redirectedTabs.set(Number(key), { url: entry.url, ts: entry.ts, bypass: Boolean(entry.bypass) });
       }
     }
   } catch (e) {}
@@ -837,17 +843,23 @@ function isAlreadyRedirected(tabId, url) {
     redirectedTabs.delete(tabId); // lazy expiry replaces the lost timer
     return false;
   }
+  // Bypass marks are tab-scoped, not URL-scoped: after the user escapes to
+  // Chrome's native viewer, intermediate hops of a redirect chain (e.g.
+  // http -> https) carry different URLs and must not be re-intercepted.
+  if (entry.bypass) return true;
   return entry.url === url;
 }
 
-function markRedirected(tabId, originalUrl) {
+function markRedirected(tabId, originalUrl, isBypass) {
   const now = Date.now();
   // Sweep expired entries while we're here so neither the Map nor
   // storage.session accumulates dead tabs between navigations.
   for (const [id, entry] of redirectedTabs) {
     if (now - entry.ts >= REDIRECT_TTL_MS) redirectedTabs.delete(id);
   }
-  redirectedTabs.set(tabId, { url: originalUrl, ts: now });
+  redirectedTabs.set(tabId, isBypass
+    ? { url: originalUrl, ts: now, bypass: true }
+    : { url: originalUrl, ts: now });
   persistRedirectedTabs();
 }
 
@@ -858,12 +870,45 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   }
 });
 
+// User-facing kill switch for the PDF interception. Default-on preserves the
+// behavior from before the setting existed. Kept in memory for the decision
+// in redirectToPdfViewer below; warmed at SW startup exactly like
+// redirectedTabsLoaded, because a cold-started MV3 worker would otherwise
+// read stale storage mid-navigation.
+let pdfViewerEnabled = true;
+const pdfViewerEnabledLoaded = (async () => {
+  try {
+    const data = await chrome.storage.sync.get({ pdfViewerEnabled: true });
+    pdfViewerEnabled = data.pdfViewerEnabled !== false;
+  } catch (e) {}
+})();
+
+chrome.storage.onChanged.addListener((changes, namespace) => {
+  if (namespace === 'sync' && changes.pdfViewerEnabled) {
+    pdfViewerEnabled = changes.pdfViewerEnabled.newValue !== false;
+  }
+});
+
+// "Open in Chrome's built-in viewer" from the custom viewer's error screen.
+// The dedupe map doubles as the bypass: a fresh bypass entry for this tab
+// makes isAlreadyRedirected() true, so the tabs.update below lands in the
+// native viewer instead of being scooped straight back into ours. The usual
+// TTL/lazy sweep cleans the entry up afterwards.
+async function handleOpenNativeViewer(request, sender) {
+  if (!sender.tab || typeof request.url !== 'string' || !request.url) return;
+  await redirectedTabsLoaded;
+  markRedirected(sender.tab.id, request.url, true);
+  chrome.tabs.update(sender.tab.id, { url: request.url });
+}
+
 // Common helper that performs the actual redirect once. It awaits the
 // session warm-up so a freshly restarted cold SW still sees marks made by its
 // predecessor; the check-then-mark sequence after the await is synchronous,
 // so near-simultaneous events cannot interleave between check and mark.
 async function redirectToPdfViewer(tabId, originalUrl) {
   await redirectedTabsLoaded;
+  await pdfViewerEnabledLoaded;
+  if (!pdfViewerEnabled) return;
   if (isAlreadyRedirected(tabId, originalUrl)) return; // dedupe across listeners
   markRedirected(tabId, originalUrl);
   const viewerUrl = chrome.runtime.getURL('pdf/web/custom-viewer.html?file=' + encodeURIComponent(originalUrl));

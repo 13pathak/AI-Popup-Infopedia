@@ -30,6 +30,7 @@
                 <button id="findPrevious" title="Previous match">↑</button>
                 <button id="findNext" title="Next match">↓</button>
             </div>
+            <button id="print_pdf" title="Print Document">🖨️ Print</button>
             <button id="bookmark_page" title="Bookmark current page">📌 Bookmark</button>
             <button id="summarize_page" title="Summarize current page">✨ Summarize Page</button>
             <button id="export_md" title="Export Notes to Markdown">📝 Export MD</button>
@@ -103,6 +104,17 @@
         <div id="note-editor-actions">
             <button id="note-btn-cancel">Cancel</button>
             <button id="note-btn-save">Save</button>
+        </div>
+    </div>
+
+    <!-- Hidden print surface: printPDF() renders every page into canvases
+         here; @media print swaps it in for the virtualized viewer, which
+         only holds the visible pages and would otherwise print blank. -->
+    <div id="print-container"></div>
+    <div id="print-overlay" class="hidden">
+        <div id="print-overlay-card">
+            <div id="print-progress">Preparing pages for printing…</div>
+            <button id="print-cancel">Cancel</button>
         </div>
     </div>
 
