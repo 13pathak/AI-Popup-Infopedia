@@ -1009,6 +1009,19 @@ function renderMessages(instance) {
       if (msg.role === 'assistant' && !msg.isError && !msg.isThinking && !msg.needsRetry && Array.isArray(msg.citations) && msg.citations.length > 0) {
         appendCitations(contentWrapper, msg.citations);
       }
+
+      // Verification and search-grounded badges live on the message so
+      // they survive this function's innerHTML rebuild; the old imperative
+      // appends were wiped by the next follow-up/retry, silently dropping
+      // in-flight verification results.
+      if (msg.role === 'assistant' && !msg.isError && !msg.isThinking && !msg.needsRetry) {
+        if (msg.searchGrounded) {
+          appendSearchGroundedBadge(contentWrapper);
+        }
+        if (msg.verification) {
+          appendVerificationBadge(contentWrapper, msg.verification);
+        }
+      }
     });
 
     // Auto-scroll logic
@@ -1419,6 +1432,16 @@ function createActionButtons(instance, word, definition, modelName, promptName, 
 
     const lists = response.lists;
     const lastUsedListId = response.lastUsedListId; // --- NEW ---
+    // A lastUsedListId whose list no longer exists (deleted in options
+    // after the last save) must not reach the dropdown: no option would
+    // match, the label would read "Select a list..." while the value
+    // getter still returns the dead id — and Save would file the word
+    // under a list no history view can show. Resolve against the real
+    // lists and fall back to the first one; the next save persists the
+    // corrected id (background writes lastUsedListId on every save).
+    const validListId = lists.some(l => l.id === lastUsedListId)
+      ? lastUsedListId
+      : (lists.length ? lists[0].id : null);
 
     // --- NEW: SPEECH BUTTON ---
     const speakButton = document.createElement('span'); // Use span for icon
@@ -1472,11 +1495,11 @@ function createActionButtons(instance, word, definition, modelName, promptName, 
                 recreateDropdown(listsToUse, response.newList.id);
               } else {
                 alert("Failed to create list: " + (response.error || "Unknown error"));
-                listSelector.value = (lastUsedListId || (listsToUse.length ? listsToUse[0].id : null));
+                listSelector.value = validListId;
               }
             });
           } else {
-            listSelector.value = (lastUsedListId || (listsToUse.length ? listsToUse[0].id : null));
+            listSelector.value = validListId;
           }
         }
       }, { showCreateNew: true });
@@ -1508,7 +1531,7 @@ function createActionButtons(instance, word, definition, modelName, promptName, 
       }
     }
 
-    recreateDropdown(lists, lastUsedListId || (lists.length ? lists[0].id : null));
+    recreateDropdown(lists, validListId);
 
     // 4. Create the final "Save" button
     const finalSaveButton = document.createElement('button');
@@ -2117,11 +2140,19 @@ function saveConversationAsPdf(instance) {
 }
 
 // --- NEW: Search Grounded Indicator (Smart Bypass) ---
+// The badge is message state (like citations), painted by renderMessages.
+// The previous imperative append was destroyed by the next renderMessages
+// call (any follow-up, retry or model switch), so it only ever showed
+// until the user's next interaction.
 function showSearchGroundedIndicator(popupInstance) {
   if (!popupInstance || !popupInstance.popup) return;
-  const contentWrapper = popupInstance.popup.querySelector('#ai-popup-content');
-  if (!contentWrapper) return;
+  const msg = lastAssistantMessage(popupInstance);
+  if (!msg) return;
+  msg.searchGrounded = true;
+  renderMessages(popupInstance);
+}
 
+function appendSearchGroundedBadge(container) {
   const indicator = document.createElement('div');
   indicator.className = 'ai-popup-search-grounded';
   indicator.style.marginTop = '12px';
@@ -2132,100 +2163,112 @@ function showSearchGroundedIndicator(popupInstance) {
   indicator.style.fontSize = '12px';
   indicator.style.color = 'inherit';
   indicator.innerHTML = `🌐 <strong style="color:#7dd3fc;">Search Grounded</strong> <span style="opacity:0.8">· Response is based on live web results. Hallucination Guard bypassed.</span>`;
-  contentWrapper.appendChild(indicator);
-
-  // if (contentWrapper.scrollHeight > contentWrapper.clientHeight) {
-  //   contentWrapper.scrollTop = contentWrapper.scrollHeight;
-  // }
+  container.appendChild(indicator);
 }
 
 // --- NEW: Hallucination Verification UI Logic ---
+// Same state-driven approach: triggerVerification marks the verified
+// message pending and updates it when the background check resolves, so
+// the badge survives any number of re-renders in between.
+function lastAssistantMessage(popupInstance) {
+  const candidates = popupInstance.messages.filter(m =>
+    m.role === 'assistant' && !m.isError && !m.isThinking && !m.needsRetry
+  );
+  return candidates.length > 0 ? candidates[candidates.length - 1] : null;
+}
+
+// Module-level twin of the transcript's escapeHtml (which is function-
+// scoped there): reasoning and corrections come back from model output
+// and are inlined into innerHTML below.
+function escapeVerifyText(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
 function triggerVerification(popupInstance, originalPrompt, aiResponse) {
   if (!popupInstance || !popupInstance.popup) return;
-  const contentWrapper = popupInstance.popup.querySelector('#ai-popup-content');
-  if (!contentWrapper) return;
-  
-  const verifyId = 'verify-' + Date.now();
-  const indicator = document.createElement('div');
-  indicator.id = verifyId;
-  indicator.style.marginTop = '12px';
-  indicator.style.padding = '8px';
-  indicator.style.borderRadius = '6px';
-  indicator.style.backgroundColor = 'rgba(59, 130, 246, 0.1)';
-  indicator.style.borderLeft = '3px solid #3b82f6';
-  indicator.style.fontSize = '12px';
-  indicator.style.color = 'inherit';
-  indicator.innerHTML = `🛡️ <span style="opacity:0.8;">Verifying response...</span>`;
-  
-  contentWrapper.appendChild(indicator);
-  
-  // if (contentWrapper.scrollHeight > contentWrapper.clientHeight) {
-  //    contentWrapper.scrollTop = contentWrapper.scrollHeight;
-  // }
+  const msg = lastAssistantMessage(popupInstance);
+  if (!msg) return;
 
-  chrome.runtime.sendMessage({ 
-    type: "verifyAiResponse", 
-    originalPrompt: originalPrompt, 
-    aiResponse: aiResponse 
+  msg.verification = { state: 'pending' };
+  renderMessages(popupInstance);
+
+  chrome.runtime.sendMessage({
+    type: "verifyAiResponse",
+    originalPrompt: originalPrompt,
+    aiResponse: aiResponse
   }, (response) => {
     if (!activePopups.includes(popupInstance)) return;
-    
-    const indEl = popupInstance.popup.querySelector(`#${verifyId}`);
-    if (!indEl) return;
-    
-    if (chrome.runtime.lastError || !response || response.error) {
-      indEl.style.backgroundColor = 'rgba(100, 116, 139, 0.1)';
-      indEl.style.borderLeftColor = '#64748b';
-      indEl.innerHTML = `🛡️ <span style="opacity:0.7">Verification failed or unavailable.</span>`;
-      return;
-    }
-    
-    let detailsHtml = '';
-    if (response.result && response.result.reasoning) {
-       detailsHtml = `<a href="#" id="${verifyId}-toggle" style="margin-left: 10px; font-size: 11px; text-decoration: underline; color: inherit; opacity: 0.7;">View reasoning</a>
-       <div style="margin-top: 8px; font-size: 11px; color: inherit; opacity: 0.9; border-top: 1px solid rgba(128,128,128,0.3); padding-top: 6px; display: none;" id="${verifyId}-details"><strong>Reasoning:</strong> ${String(response.result.reasoning).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;')}</div>`;
-    }
+    // The message may have been replaced since (e.g. a redefine rebuilt
+    // instance.messages); painting the stale result on a different
+    // response would be wrong, so only update if it is still live.
+    if (!popupInstance.messages.includes(msg)) return;
 
-    if (response.result && response.result.is_hallucinating) {
-      indEl.style.backgroundColor = 'rgba(239, 68, 68, 0.1)';
-      indEl.style.borderLeftColor = '#ef4444';
-      
-      let correctionsHtml = '<ul style="margin:5px 0 0 20px; padding:0;">';
-      if (Array.isArray(response.result.corrections)) {
-         response.result.corrections.forEach(c => { correctionsHtml += `<li style="margin-bottom:3px;">${String(c).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;')}</li>`; });
-      }
-      correctionsHtml += '</ul>';
-      
-      indEl.innerHTML = `⚠️ <strong style="color:#ef4444;">Hallucination Detected</strong>${detailsHtml}<div>${correctionsHtml}</div>`;
+    if (chrome.runtime.lastError || !response || response.error) {
+      msg.verification = { state: 'failed' };
     } else {
-      indEl.style.backgroundColor = 'rgba(94, 234, 212, 0.1)';
-      indEl.style.borderLeftColor = '#5eead4';
-      indEl.innerHTML = `🛡️ <strong style="color:#5eead4;">Verified</strong> <span style="opacity:0.8">- No hallucinations detected.</span>${detailsHtml}`;
+      msg.verification = {
+        state: response.result && response.result.is_hallucinating ? 'hallucination' : 'verified',
+        reasoning: (response.result && response.result.reasoning) || '',
+        corrections: Array.isArray(response.result && response.result.corrections) ? response.result.corrections.map(String) : []
+      };
     }
-    
-    // Attach event listener for toggle
-    const toggleBtn = popupInstance.popup.querySelector(`#${verifyId}-toggle`);
-    const detailsDiv = popupInstance.popup.querySelector(`#${verifyId}-details`);
-    if (toggleBtn && detailsDiv) {
-      toggleBtn.addEventListener('click', (e) => {
-         e.preventDefault();
-         if (detailsDiv.style.display === 'none') {
-            detailsDiv.style.display = 'block';
-            toggleBtn.textContent = 'Hide reasoning';
-         } else {
-            detailsDiv.style.display = 'none';
-            toggleBtn.textContent = 'View reasoning';
-         }
-         // if (contentWrapper.scrollHeight > contentWrapper.clientHeight) {
-         //    contentWrapper.scrollTop = contentWrapper.scrollHeight;
-         // }
-      });
-    }
-    
-    // if (contentWrapper.scrollHeight > contentWrapper.clientHeight) {
-    //    contentWrapper.scrollTop = contentWrapper.scrollHeight;
-    // }
+    renderMessages(popupInstance);
   });
+}
+
+function appendVerificationBadge(container, verification) {
+  const ind = document.createElement('div');
+  ind.className = 'ai-popup-verification';
+  ind.style.marginTop = '12px';
+  ind.style.padding = '8px';
+  ind.style.borderRadius = '6px';
+  ind.style.fontSize = '12px';
+  ind.style.color = 'inherit';
+
+  if (verification.state === 'pending') {
+    ind.style.backgroundColor = 'rgba(59, 130, 246, 0.1)';
+    ind.style.borderLeft = '3px solid #3b82f6';
+    ind.innerHTML = `🛡️ <span style="opacity:0.8;">Verifying response...</span>`;
+    container.appendChild(ind);
+    return;
+  }
+
+  if (verification.state === 'failed') {
+    ind.style.backgroundColor = 'rgba(100, 116, 139, 0.1)';
+    ind.style.borderLeft = '3px solid #64748b';
+    ind.innerHTML = `🛡️ <span style="opacity:0.7">Verification failed or unavailable.</span>`;
+    container.appendChild(ind);
+    return;
+  }
+
+  // Reasoning folds via native <details> (like citations do): no toggle
+  // listener wiring is needed, and the fold state is simply rebuilt on
+  // every renderMessages call.
+  const reasoningHtml = verification.reasoning
+    ? `<details style="margin-top: 8px; font-size: 11px; opacity: 0.9; border-top: 1px solid rgba(128,128,128,0.3); padding-top: 6px;"><summary style="cursor:pointer; text-decoration: underline; opacity: 0.7;">View reasoning</summary><div style="margin-top: 6px;"><strong>Reasoning:</strong> ${escapeVerifyText(verification.reasoning)}</div></details>`
+    : '';
+
+  if (verification.state === 'hallucination') {
+    ind.style.backgroundColor = 'rgba(239, 68, 68, 0.1)';
+    ind.style.borderLeft = '3px solid #ef4444';
+    let correctionsHtml = '<ul style="margin:5px 0 0 20px; padding:0;">';
+    verification.corrections.forEach(c => {
+      correctionsHtml += `<li style="margin-bottom:3px;">${escapeVerifyText(c)}</li>`;
+    });
+    correctionsHtml += '</ul>';
+    ind.innerHTML = `⚠️ <strong style="color:#ef4444;">Hallucination Detected</strong>${reasoningHtml}<div>${correctionsHtml}</div>`;
+  } else {
+    ind.style.backgroundColor = 'rgba(94, 234, 212, 0.1)';
+    ind.style.borderLeft = '3px solid #5eead4';
+    ind.innerHTML = `🛡️ <strong style="color:#5eead4;">Verified</strong> <span style="opacity:0.8">- No hallucinations detected.</span>${reasoningHtml}`;
+  }
+
+  container.appendChild(ind);
 }
 
 

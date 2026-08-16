@@ -1023,7 +1023,7 @@ function deleteList() {
   }
 
   // Check actual wordLists array length, not options count (which includes "+ Create New List...")
-  chrome.storage.local.get({ wordLists: [], history: [] }, (data) => {
+  chrome.storage.local.get({ wordLists: [], history: [], lastUsedListId: null }, (data) => {
     if (data.wordLists.length <= 1) {
       alert("You cannot delete the last remaining list.");
       return;
@@ -1057,7 +1057,16 @@ function deleteList() {
     const history = data.history.map(item =>
       listsToDelete.has(item.listId) ? { ...item, listId: null } : item
     );
-    chrome.storage.local.set({ wordLists: lists, history }, () => {
+    // Same for the popup's preselection: a stale lastUsedListId makes the
+    // dropdown show "Select a list..." while still returning the dead id,
+    // so Save files new words under an unmatchable list. Fall back to the
+    // first surviving list (there is always one — the last list is
+    // protected above).
+    const updates = { wordLists: lists, history };
+    if (data.lastUsedListId && listsToDelete.has(data.lastUsedListId)) {
+      updates.lastUsedListId = lists[0].id;
+    }
+    chrome.storage.local.set(updates, () => {
       updateStatus('List and sub-lists deleted.', 'success');
       loadLists();
     });
