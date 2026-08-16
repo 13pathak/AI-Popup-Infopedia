@@ -454,7 +454,7 @@ function savePdfAuthorName() {
   if (input) {
     const name = input.value.trim();
     chrome.storage.local.set({ pdf_author_name: name }, () => {
-      updateStatusGlobal('Custom Author Name saved successfully!');
+      updateStatus('Custom Author Name saved successfully!', 'success');
     });
   }
 }

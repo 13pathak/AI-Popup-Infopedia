@@ -1045,7 +1045,20 @@ document.getElementById('save_pdf').addEventListener('click', async () => {
         }
         const existingPdfBytes = await res.arrayBuffer();
         const pdfDoc = await PDFLib.PDFDocument.load(existingPdfBytes);
-        
+
+        // Custom Author Name from the options page, stored in local
+        // chrome.storage. Callback style + hasChromeStorage() guard to
+        // match loadStorageData — the viewer must also run in plain
+        // non-extension test contexts where chrome.storage is absent.
+        let authorName = '';
+        if (hasChromeStorage()) {
+            authorName = await new Promise((resolve) => {
+                chrome.storage.local.get(['pdf_author_name'], (result) => {
+                    resolve((result && result.pdf_author_name) || '');
+                });
+            });
+        }
+
         // Add highlights
         highlights.forEach(hl => {
             const page = pdfDoc.getPage(hl.pageNumber - 1);
@@ -1089,6 +1102,12 @@ document.getElementById('save_pdf').addEventListener('click', async () => {
             if (hl.note) {
                 // PDF-lib supports text contents via PDFString
                 annotObj.Contents = PDFLib.PDFString.of(hl.note);
+            }
+
+            if (authorName) {
+                // /T (annotation author) must be a string; a plain string
+                // here would become a PDFName via context.obj().
+                annotObj.T = PDFLib.PDFString.of(authorName);
             }
 
             const annot = pdfDoc.context.obj(annotObj);

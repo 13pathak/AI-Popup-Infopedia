@@ -664,9 +664,10 @@ function base64EncodeUtf8(str) {
 
 function triggerBackup(type = "Auto") {
   // 1. Fetch all data to backup.
-  // get(null), not a fixed key list: PDF annotations live in per-URL keys
-  // (pdf_highlights_*, pdf_bookmarks_*, pdf_lastpage_*) that only the
-  // viewer writes; they're picked out into pdfAnnotations below.
+  // get(null), not a fixed key list: PDF data lives in per-URL keys
+  // (pdf_highlights_*, pdf_bookmarks_*, pdf_lastpage_*) written by the
+  // viewer, plus the pdf_author_name preference set on the options page;
+  // all are picked out into pdfAnnotations below.
   chrome.storage.local.get(null, (localData) => {
     chrome.storage.sync.get(['models', 'customPrompts', 'defaultModelId', 'defaultPromptId', 'ankiSettings', 'ttsSettings', 'backupReminderFrequency', 'backupSubfolder', 'followupCustomMessage', 'showUserQuestions', 'sttEngine', 'sttApiKey', 'sttApiUrl', 'sttModel', 'sttCustomHeaders', 'sttCustomFormData'], (syncData) => {
 
@@ -676,7 +677,7 @@ function triggerBackup(type = "Auto") {
       // Downloads folder — backups must be treated as credentials.
       const pdfAnnotations = {};
       for (const key of Object.keys(localData)) {
-        if (key.startsWith('pdf_highlights_') || key.startsWith('pdf_bookmarks_') || key.startsWith('pdf_lastpage_')) {
+        if (key === 'pdf_author_name' || key.startsWith('pdf_highlights_') || key.startsWith('pdf_bookmarks_') || key.startsWith('pdf_lastpage_')) {
           pdfAnnotations[key] = localData[key];
         }
       }
