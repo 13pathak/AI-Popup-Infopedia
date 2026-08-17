@@ -37,8 +37,29 @@ function updateActivePopupsTheme() {
 }
 
 // --- Styles ---
+const googleSansUrl = chrome.runtime.getURL('fonts/GoogleSans-VariableFont_GRAD,opsz,wght.ttf');
+const googleSansItalicUrl = chrome.runtime.getURL('fonts/GoogleSans-Italic-VariableFont_GRAD,opsz,wght.ttf');
+
 const popupStyles = `
+  @font-face {
+    font-family: 'Google Sans';
+    src: url('${googleSansUrl}') format('truetype');
+    font-weight: 100 900;
+    font-style: normal;
+    font-display: swap;
+  }
+
+  @font-face {
+    font-family: 'Google Sans';
+    src: url('${googleSansItalicUrl}') format('truetype');
+    font-weight: 100 900;
+    font-style: italic;
+    font-display: swap;
+  }
+
   :host {
+    --popup-font-family: 'Google Sans', 'Google Sans Text', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: var(--popup-font-family);
     --popup-bg: linear-gradient(145deg, #252a35 0%, #171b24 100%);
     --popup-text: #eef3f8;
     --popup-text-muted: #94a3b8;
@@ -140,7 +161,7 @@ const popupStyles = `
     border: 1px solid var(--popup-border);
     border-radius: 12px;
     padding: 18px 14px 14px 14px;
-    font-family: sans-serif;
+    font-family: var(--popup-font-family);
     font-size: 14px;
     line-height: 1.5;
     width: min(350px, calc(100vw - 28px));
@@ -265,7 +286,7 @@ const popupStyles = `
       padding: 7px 10px; background-color: var(--popup-field-bg);
       border: 1px solid var(--popup-field-border); border-radius: 8px;
       cursor: pointer; user-select: none; color: var(--popup-field-text);
-      font-size: 13px; font-family: sans-serif;
+      font-size: 13px; font-family: inherit;
   }
   .custom-select-value {
       min-width: 0;
@@ -297,7 +318,7 @@ const popupStyles = `
       background-color: var(--popup-dropdown-bg); border: 1px solid var(--popup-dropdown-border);
       border-radius: 8px; margin-bottom: 6px; max-height: 250px; overflow-y: auto;
       z-index: 2000; display: none; box-shadow: 0 -4px 10px var(--popup-shadow-1);
-      font-size: 13px; font-family: sans-serif;
+      font-size: 13px; font-family: inherit;
   }
   .custom-options.show { display: block; }
   .custom-option { padding: 6px 10px; cursor: pointer; display: flex; align-items: center; min-width: 0; color: var(--popup-field-text); }
@@ -323,7 +344,7 @@ const popupStyles = `
     border: 1px solid var(--popup-field-border);
     border-radius: 10px;
     padding: 7px;
-    font-family: sans-serif;
+    font-family: inherit;
     font-size: 13px;
     box-sizing: border-box;
   }
@@ -357,7 +378,7 @@ const popupStyles = `
   }
 
   .ai-popup-button {
-    font-family: sans-serif;
+    font-family: inherit;
     font-size: 14px; 
     font-weight: bold; 
     color: var(--popup-accent-btn-text);
@@ -416,7 +437,7 @@ const popupStyles = `
     border: 1px solid var(--popup-field-border);
     border-radius: 10px;
     padding: 6px 36px 6px 10px;
-    font-family: sans-serif;
+    font-family: inherit;
     font-size: 13px;
     outline: none;
     width: 100%;
@@ -485,7 +506,7 @@ const popupStyles = `
     border: 1px solid var(--popup-accent-btn-border);
     border-radius: 6px;
     padding: 6px 12px;
-    font-family: sans-serif;
+    font-family: var(--popup-font-family);
     font-size: 13px;
     font-weight: bold;
     cursor: pointer;
@@ -2503,7 +2524,7 @@ function saveConversationAsPdf(instance) {
 
   let html = `<!DOCTYPE html><html><head><title>Conversation Backup</title>
   <style>
-    body { font-family: sans-serif; padding: 20px; max-width: 800px; margin: auto; line-height: 1.6; }
+    body { font-family: 'Google Sans', 'Google Sans Text', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 20px; max-width: 800px; margin: auto; line-height: 1.6; }
     .message { margin-bottom: 20px; padding: 15px; border-radius: 8px; }
     .user { background-color: #e3f2fd; border-left: 4px solid #1976d2; }
     .ai { background-color: #f5f5f5; border-left: 4px solid #4caf50; }
