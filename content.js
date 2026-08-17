@@ -209,6 +209,9 @@ const popupStyles = `
     0%, 60%, 100% { transform: translateY(0); opacity: 0.45; }
     30% { transform: translateY(-4px); opacity: 1; }
   }
+  .ai-popup-loading-text {
+    display: inline-block;
+  }
 
   /* --- Toast (save feedback, STT/speech errors) --- */
   .ai-popup-toast {
@@ -1088,14 +1091,21 @@ function initiatePopupSequence(rect, selectedText, customPrompt) {
 
   // Create a new popup instance
   // Note: we track the instance object to manage its state updates
-  const popupInstance = showPopup(rect.left, rect.top, "Loading...");
+  const initialQuote = initLoadingQuote();
+  const popupInstance = showPopup(rect.left, rect.top, initialQuote);
   popupInstance.isLoading = true;
+  popupInstance.quoteIndex = LOADING_QUOTES.indexOf(initialQuote);
+  startLoadingQuoteRotation(popupInstance);
 
   // --- NEW: Store the source text to prevent duplicate triggers ---
   popupInstance.sourceText = selectedText;
 
   function performInitialFetch() {
-    updatePopupContent(popupInstance, "Loading...");
+    const currentQuote = (typeof popupInstance.quoteIndex === 'number') 
+      ? LOADING_QUOTES[popupInstance.quoteIndex] 
+      : initLoadingQuote(popupInstance);
+    updatePopupContent(popupInstance, currentQuote);
+    startLoadingQuoteRotation(popupInstance);
     
     // Remove old action buttons if retrying
     if (popupInstance.popup) {
@@ -1108,8 +1118,12 @@ function initiatePopupSequence(rect, selectedText, customPrompt) {
 
     chrome.runtime.sendMessage(payload, (response) => {
       // Verify instance still exists (user might have closed it)
-      if (!activePopups.includes(popupInstance)) return;
+      if (!activePopups.includes(popupInstance)) {
+        stopLoadingQuoteRotation(popupInstance);
+        return;
+      }
       popupInstance.isLoading = false;
+      stopLoadingQuoteRotation(popupInstance);
 
       if (chrome.runtime.lastError) {
         response = { error: chrome.runtime.lastError.message };
@@ -1225,16 +1239,107 @@ document.addEventListener('keydown', (event) => {
   }
 });
 
+// --- Motivational Loading Quotes ---
+const LOADING_QUOTES = [
+  "We're almost there...",
+  "Great things take time...",
+  "Connecting the dots...",
+  "Gathering insights for you...",
+  "Patience brings the best results...",
+  "Brewing up knowledge...",
+  "Distilling wisdom...",
+  "Crafting a thoughtful response...",
+  "Hang tight, magic in progress...",
+  "Putting the pieces together...",
+  "Analyzing and synthesizing...",
+  "Almost ready for you...",
+  "Unlocking fresh insights...",
+  "Every second brings us closer...",
+  "Good things come to those who wait...",
+  "Formulating the explanation...",
+  "Exploring the knowledge base...",
+  "Polishing the final thoughts...",
+  "Consulting the digital oracle...",
+  "Curating the best answer...",
+  "Thinking deeply for you...",
+  "Assembling the right words...",
+  "Illuminating the details...",
+  "Synthesizing the concepts..."
+];
+
+// Returns a random quote when initializing, or advances sequentially on each tick
+function getNextLoadingQuote(instance) {
+  if (!instance) {
+    return LOADING_QUOTES[Math.floor(Math.random() * LOADING_QUOTES.length)];
+  }
+  if (typeof instance.quoteIndex !== 'number') {
+    instance.quoteIndex = Math.floor(Math.random() * LOADING_QUOTES.length);
+  } else {
+    instance.quoteIndex = (instance.quoteIndex + 1) % LOADING_QUOTES.length;
+  }
+  return LOADING_QUOTES[instance.quoteIndex];
+}
+
+// Resets/picks a random starting quote for a new request on this instance
+function initLoadingQuote(instance) {
+  const randIdx = Math.floor(Math.random() * LOADING_QUOTES.length);
+  if (instance) {
+    instance.quoteIndex = randIdx;
+  }
+  return LOADING_QUOTES[randIdx];
+}
+
+function startLoadingQuoteRotation(instance) {
+  if (!instance) return;
+  if (instance.loadingQuoteTimer) return;
+
+  if (typeof instance.quoteIndex !== 'number') {
+    instance.quoteIndex = Math.floor(Math.random() * LOADING_QUOTES.length);
+  }
+
+  instance.loadingQuoteTimer = setInterval(() => {
+    if (!activePopups.includes(instance) || !instance.container || !instance.container.isConnected) {
+      stopLoadingQuoteRotation(instance);
+      return;
+    }
+
+    const shadow = instance.shadow || instance.container?.shadowRoot;
+    if (!shadow) {
+      stopLoadingQuoteRotation(instance);
+      return;
+    }
+
+    const labelEls = shadow.querySelectorAll('.ai-popup-loading-text');
+    if (!labelEls || labelEls.length === 0) {
+      stopLoadingQuoteRotation(instance);
+      return;
+    }
+
+    const nextQuote = getNextLoadingQuote(instance);
+    labelEls.forEach(el => {
+      el.textContent = nextQuote;
+    });
+  }, 1000);
+}
+
+function stopLoadingQuoteRotation(instance) {
+  if (instance && instance.loadingQuoteTimer) {
+    clearInterval(instance.loadingQuoteTimer);
+    instance.loadingQuoteTimer = null;
+  }
+}
+
 // --- NEW: Loading indicator markup ---
 // The label is message/model text, never trusted HTML, so escape it here.
 function buildLoadingHtml(label) {
-  const safeLabel = String(label || '')
+  const quoteText = (label && label !== 'Loading...' && label !== 'Thinking...') ? label : getNextLoadingQuote();
+  const safeLabel = String(quoteText)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
-  return `<div class="ai-popup-loading"><span class="ai-popup-loading-dots"><span class="ai-popup-loading-dot"></span><span class="ai-popup-loading-dot"></span><span class="ai-popup-loading-dot"></span></span><span>${safeLabel}</span></div>`;
+  return `<div class="ai-popup-loading"><span class="ai-popup-loading-dots"><span class="ai-popup-loading-dot"></span><span class="ai-popup-loading-dot"></span><span class="ai-popup-loading-dot"></span></span><span class="ai-popup-loading-text">${safeLabel}</span></div>`;
 }
 
 // --- UPDATED showPopup ---
@@ -1354,6 +1459,11 @@ function renderMessages(instance) {
   const contentWrapper = popup.querySelector('#ai-popup-content');
   if (!contentWrapper) return;
 
+  const hasPendingLoading = instance.isLoading || instance.messages.some(m => m.isThinking || m.isStatus);
+  if (!hasPendingLoading) {
+    stopLoadingQuoteRotation(instance);
+  }
+
   // Save current scroll position
   const isNearBottom = contentWrapper.scrollHeight - contentWrapper.scrollTop - contentWrapper.clientHeight < 30;
   const previousScrollTop = contentWrapper.scrollTop;
@@ -1383,7 +1493,11 @@ function renderMessages(instance) {
       // Loading placeholders (isThinking/isStatus) render as an animated
       // indicator; their content is a plain label, not markup to display.
       if (msg.isThinking || msg.isStatus) {
-        contentWrapper.insertAdjacentHTML('beforeend', buildLoadingHtml(formattedContent));
+        const textToDisplay = (msg.content && msg.content !== 'Loading...' && msg.content !== 'Thinking...')
+          ? msg.content
+          : (typeof instance.quoteIndex === 'number' ? LOADING_QUOTES[instance.quoteIndex % LOADING_QUOTES.length] : initLoadingQuote(instance));
+        contentWrapper.insertAdjacentHTML('beforeend', buildLoadingHtml(textToDisplay));
+        startLoadingQuoteRotation(instance);
         return;
       }
 
@@ -1531,7 +1645,8 @@ function retryMessage(instance, messageIndex) {
   
   // Set the message state to loading. isThinking routes it through the
   // animated loading indicator (and keeps it out of the request context).
-  instance.messages[messageIndex] = { role: 'assistant', content: 'Retrying...', isThinking: true, isError: false, needsRetry: false };
+  const initialQuote = initLoadingQuote(instance);
+  instance.messages[messageIndex] = { role: 'assistant', content: initialQuote, isThinking: true, isError: false, needsRetry: false };
   renderMessages(instance);
 
   const modelId = instance.lastModelId || null;
@@ -1539,7 +1654,10 @@ function retryMessage(instance, messageIndex) {
   chrome.runtime.sendMessage(
     { type: "getAiDefinition", word: instance.sourceWord, modelId: modelId, messages: messagesContext },
     (response) => {
-      if (!activePopups.includes(instance)) return;
+      if (!activePopups.includes(instance)) {
+        stopLoadingQuoteRotation(instance);
+        return;
+      }
 
       if (chrome.runtime.lastError) {
         response = { error: chrome.runtime.lastError.message };
@@ -1699,7 +1817,8 @@ function redefineWithModelAndPrompt(instance, word, modelId, promptContent) {
 
   function performRedefineFetch() {
     // Update UI to show loading state by adding a thinking indicator
-    instance.messages.push({ role: 'assistant', content: 'Reloading model definition...', isThinking: true });
+    const initialQuote = initLoadingQuote(instance);
+    instance.messages.push({ role: 'assistant', content: initialQuote, isThinking: true });
     try { renderMessages(instance); } catch (e) { console.error('crash in pre redfr', e); }
     
     // Remove old action buttons
@@ -1710,7 +1829,10 @@ function redefineWithModelAndPrompt(instance, word, modelId, promptContent) {
     chrome.runtime.sendMessage(
       { type: "getAiDefinition", word: word, modelId: modelId, customPrompt: promptContent },
       (response) => {
-        if (!activePopups.includes(instance)) return;
+        if (!activePopups.includes(instance)) {
+          stopLoadingQuoteRotation(instance);
+          return;
+        }
         
         // Remove the temporary thinking indicator
         instance.messages = instance.messages.filter(m => !m.isThinking);
@@ -2313,7 +2435,8 @@ function createFollowupInput(instance, word) {
 
     try {
       // Push thinking indicator and render to UI immediately
-      instance.messages.push({ role: 'assistant', content: 'Thinking...', isThinking: true });
+      const initialQuote = initLoadingQuote(instance);
+      instance.messages.push({ role: 'assistant', content: initialQuote, isThinking: true });
       renderMessages(instance);
     } catch (e) {
       console.error("render crashed on pre-fetch", e);
@@ -2325,7 +2448,10 @@ function createFollowupInput(instance, word) {
     chrome.runtime.sendMessage(
       { type: "getAiDefinition", word: word, modelId: modelId, messages: instance.messages.filter(m => !m.isThinking && !m.isError) },
       (response) => {
-        if (!activePopups.includes(instance)) return;
+        if (!activePopups.includes(instance)) {
+          stopLoadingQuoteRotation(instance);
+          return;
+        }
 
         input.disabled = false;
         sendBtn.disabled = false;
@@ -2402,6 +2528,7 @@ function stopSpeechSafely() {
 function removeAllPopups() {
   activePopups = activePopups.filter(instance => {
     if (!instance.isPinned) {
+      stopLoadingQuoteRotation(instance);
       if (instance.stopMic) instance.stopMic();
       if (instance.container) instance.container.remove();
       return false; // Remove from array
@@ -2419,6 +2546,7 @@ function removeLastPopup() {
   for (let i = activePopups.length - 1; i >= 0; i--) {
     if (!activePopups[i].isPinned) {
       const instance = activePopups.splice(i, 1)[0];
+      stopLoadingQuoteRotation(instance);
       if (instance.stopMic) instance.stopMic();
       if (instance.container) instance.container.remove();
       break;
@@ -2433,6 +2561,7 @@ function removePopupInstance(instance) {
   const index = activePopups.indexOf(instance);
   if (index > -1) {
     activePopups.splice(index, 1);
+    stopLoadingQuoteRotation(instance);
     if (instance.stopMic) instance.stopMic();
     if (instance.container) instance.container.remove();
   }
