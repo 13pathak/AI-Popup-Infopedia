@@ -462,7 +462,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // --- NEW: Case 6: Force Manual Backup ---
   if (request.type === "manualBackup" || request.type === "testBackup") {
     // Force a backup regardless of time
-    triggerBackup("Manual");
+    triggerBackup("Manual", request.backupInclude);
   }
 
   // --- Case 7: Verify AI Response ---
@@ -694,52 +694,129 @@ function base64EncodeUtf8(str) {
   return btoa(binary);
 }
 
-function triggerBackup(type = "Auto") {
-  // 1. Fetch all data to backup.
-  // get(null), not a fixed key list: PDF data lives in per-URL keys
-  // (pdf_highlights_*, pdf_bookmarks_*, pdf_lastpage_*) written by the
-  // viewer, plus the pdf_author_name preference set on the options page;
-  // all are picked out into pdfAnnotations below.
-  chrome.storage.local.get(null, (localData) => {
-    chrome.storage.sync.get(['models', 'customPrompts', 'defaultModelId', 'defaultPromptId', 'ankiSettings', 'ttsSettings', 'backupReminderFrequency', 'backupSubfolder', 'followupCustomMessage', 'showUserQuestions', 'sttEngine', 'sttApiKey', 'sttApiUrl', 'sttModel', 'sttCustomHeaders', 'sttCustomFormData', 'pdfViewerEnabled', 'uiTheme'], (syncData) => {
-
-      // SECURITY NOTE: this backup intentionally includes secrets (each
-      // model's apiKey, sttApiKey, sttCustomHeaders) so that restores are
-      // self-contained. The file is written unencrypted to the user's
-      // Downloads folder — backups must be treated as credentials.
-      const pdfAnnotations = {};
-      for (const key of Object.keys(localData)) {
-        if (key === 'pdf_author_name' || key.startsWith('pdf_highlights_') || key.startsWith('pdf_bookmarks_') || key.startsWith('pdf_lastpage_')) {
-          pdfAnnotations[key] = localData[key];
-        }
+function sanitizeUrlSecrets(rawUrl) {
+  if (!rawUrl || typeof rawUrl !== 'string') return rawUrl;
+  try {
+    const parsed = new URL(rawUrl);
+    parsed.username = '';
+    parsed.password = '';
+    const sensitiveParams = ['key', 'apikey', 'api_key', 'token', 'access_token', 'auth', 'secret', 'password', 'bearer'];
+    const toDelete = [];
+    for (const key of parsed.searchParams.keys()) {
+      if (sensitiveParams.includes(key.toLowerCase())) {
+        toDelete.push(key);
       }
+    }
+    for (const key of toDelete) {
+      parsed.searchParams.delete(key);
+    }
+    return parsed.toString();
+  } catch (e) {
+    return rawUrl;
+  }
+}
+
+const DEFAULT_BACKUP_INCLUDE = {
+  history: true,
+  models: true,
+  prompts: true,
+  apiKeys: true,
+  anki: true,
+  voice: true,
+  pdf: true,
+  general: true
+};
+
+function triggerBackup(type = "Auto", customBackupInclude = null) {
+  // 1. Fetch all data to backup.
+  chrome.storage.local.get(null, (localData) => {
+    chrome.storage.sync.get(null, (syncData) => {
+      const backupInclude = {
+        ...DEFAULT_BACKUP_INCLUDE,
+        ...(customBackupInclude || syncData.backupInclude || {})
+      };
 
       const backupData = {
-        history: localData.history || [],
-        wordLists: localData.wordLists || [],
-        pdfAnnotations,
-        models: syncData.models || [],
-        customPrompts: syncData.customPrompts || [],
-        defaultModelId: syncData.defaultModelId,
-        defaultPromptId: syncData.defaultPromptId,
-        ankiSettings: syncData.ankiSettings,
-        ttsSettings: syncData.ttsSettings,
-        sttEngine: syncData.sttEngine,
-        sttApiKey: syncData.sttApiKey,
-        sttApiUrl: syncData.sttApiUrl,
-        sttModel: syncData.sttModel,
-        sttCustomHeaders: syncData.sttCustomHeaders,
-        sttCustomFormData: syncData.sttCustomFormData,
-        backupReminderFrequency: syncData.backupReminderFrequency,
-        backupSubfolder: syncData.backupSubfolder,
-        followupCustomMessage: syncData.followupCustomMessage,
-        showUserQuestions: syncData.showUserQuestions,
-        pdfViewerEnabled: syncData.pdfViewerEnabled,
-        uiTheme: syncData.uiTheme,
         exportedAt: new Date().toISOString(),
         backupType: type,
-        version: "1.2"
+        backupInclude: backupInclude,
+        version: "1.3"
       };
+
+      // 1. Vocabulary History & Lists
+      if (backupInclude.history) {
+        backupData.history = localData.history || [];
+        backupData.wordLists = localData.wordLists || [];
+      }
+
+      // 2. AI Models Configuration
+      if (backupInclude.models) {
+        let modelsList = (syncData.models || []).map(m => ({ ...m }));
+        if (!backupInclude.apiKeys) {
+          modelsList = modelsList.map(m => {
+            const sanitized = { ...m };
+            sanitized.apiKey = "";
+            if (sanitized.endpointUrl) {
+              sanitized.endpointUrl = sanitizeUrlSecrets(sanitized.endpointUrl);
+            }
+            return sanitized;
+          });
+        }
+        backupData.models = modelsList;
+        if (syncData.defaultModelId !== undefined) backupData.defaultModelId = syncData.defaultModelId;
+        if (syncData.verificationModelId !== undefined) backupData.verificationModelId = syncData.verificationModelId;
+        if (syncData.enableHallucinationGuard !== undefined) backupData.enableHallucinationGuard = syncData.enableHallucinationGuard;
+      }
+
+      // 3. Custom Prompts
+      if (backupInclude.prompts) {
+        backupData.customPrompts = syncData.customPrompts || [];
+        if (syncData.defaultPromptId !== undefined) backupData.defaultPromptId = syncData.defaultPromptId;
+      }
+
+      // 4. API Keys & Secrets (Tavily, STT, etc.)
+      if (backupInclude.apiKeys) {
+        if (syncData.tavilyApiKey !== undefined) backupData.tavilyApiKey = syncData.tavilyApiKey;
+        if (syncData.sttApiKey !== undefined) backupData.sttApiKey = syncData.sttApiKey;
+        if (syncData.sttCustomHeaders !== undefined) backupData.sttCustomHeaders = syncData.sttCustomHeaders;
+      }
+
+      // 5. Anki Settings
+      if (backupInclude.anki && syncData.ankiSettings !== undefined) {
+        backupData.ankiSettings = syncData.ankiSettings;
+      }
+
+      // 6. Voice & Audio (TTS / STT)
+      if (backupInclude.voice) {
+        if (syncData.ttsSettings !== undefined) backupData.ttsSettings = syncData.ttsSettings;
+        if (syncData.sttEngine !== undefined) backupData.sttEngine = syncData.sttEngine;
+        if (syncData.sttApiUrl !== undefined) {
+          backupData.sttApiUrl = backupInclude.apiKeys ? syncData.sttApiUrl : sanitizeUrlSecrets(syncData.sttApiUrl);
+        }
+        if (syncData.sttModel !== undefined) backupData.sttModel = syncData.sttModel;
+        if (syncData.sttCustomFormData !== undefined) backupData.sttCustomFormData = syncData.sttCustomFormData;
+      }
+
+      // 7. PDF Annotations & Settings
+      if (backupInclude.pdf) {
+        const pdfAnnotations = {};
+        for (const key of Object.keys(localData)) {
+          if (key === 'pdf_author_name' || key.startsWith('pdf_highlights_') || key.startsWith('pdf_bookmarks_') || key.startsWith('pdf_lastpage_')) {
+            pdfAnnotations[key] = localData[key];
+          }
+        }
+        backupData.pdfAnnotations = pdfAnnotations;
+        if (syncData.pdfViewerEnabled !== undefined) backupData.pdfViewerEnabled = syncData.pdfViewerEnabled;
+      }
+
+      // 8. General & UI Preferences
+      if (backupInclude.general) {
+        if (syncData.uiTheme !== undefined) backupData.uiTheme = syncData.uiTheme;
+        if (syncData.followupCustomMessage !== undefined) backupData.followupCustomMessage = syncData.followupCustomMessage;
+        if (syncData.showUserQuestions !== undefined) backupData.showUserQuestions = syncData.showUserQuestions;
+        if (syncData.backupReminderFrequency !== undefined) backupData.backupReminderFrequency = syncData.backupReminderFrequency;
+        if (syncData.backupSubfolder !== undefined) backupData.backupSubfolder = syncData.backupSubfolder;
+      }
 
       // 2. Create Data URI (Base64) - Service Worker safe
       const jsonString = JSON.stringify(backupData, null, 2);

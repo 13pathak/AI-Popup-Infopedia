@@ -198,8 +198,27 @@ document.addEventListener('DOMContentLoaded', () => {
 
   safeAddListener('save-reminder-settings-btn', 'click', saveReminderSettings);
   safeAddListener('manual-backup-btn', 'click', () => {
-    chrome.runtime.sendMessage({ type: "manualBackup" });
+    const backupInclude = getBackupIncludeFromUI();
+    const hasAnySelected = Object.values(backupInclude).some(Boolean);
+    if (!hasAnySelected) {
+      updateReminderStatus('Please select at least one item to back up.', 'error');
+      return;
+    }
+    chrome.storage.sync.set({ backupInclude: backupInclude });
+    chrome.runtime.sendMessage({ type: "manualBackup", backupInclude });
     updateReminderStatus('Manual backup initiated... check Downloads.', 'info');
+  });
+  safeAddListener('backup-select-all-btn', 'click', () => {
+    for (const elementId of Object.values(BACKUP_INCLUDE_KEYS)) {
+      const el = document.getElementById(elementId);
+      if (el) el.checked = true;
+    }
+  });
+  safeAddListener('backup-deselect-all-btn', 'click', () => {
+    for (const elementId of Object.values(BACKUP_INCLUDE_KEYS)) {
+      const el = document.getElementById(elementId);
+      if (el) el.checked = false;
+    }
   });
 
   safeAddListener('restore-backup-btn', 'click', () => document.getElementById('restore-backup-file').click());
@@ -267,8 +286,8 @@ document.addEventListener('DOMContentLoaded', () => {
   chrome.storage.onChanged.addListener((changes, namespace) => {
     if (namespace === 'local') {
       if (changes.lastBackupTime || changes.lastBackupError || changes.lastBackupType) {
-        // Reload status
-        loadReminderSettings();
+        // Reload status display only (avoid resetting active UI inputs)
+        loadBackupStatus();
       }
     }
   });
@@ -2232,16 +2251,67 @@ async function handleSendToAnkiClick(event) {
 }
 
 // ---
-// --- NEW: REMINDER SETTINGS FUNCTIONS
+// --- NEW: REMINDER & BACKUP SETTINGS FUNCTIONS
 // ---
 
+const BACKUP_INCLUDE_KEYS = {
+  history: 'backup-include-history',
+  models: 'backup-include-models',
+  prompts: 'backup-include-prompts',
+  apiKeys: 'backup-include-apikeys',
+  anki: 'backup-include-anki',
+  voice: 'backup-include-voice',
+  pdf: 'backup-include-pdf',
+  general: 'backup-include-general'
+};
+
+const DEFAULT_BACKUP_INCLUDE = {
+  history: true,
+  models: true,
+  prompts: true,
+  apiKeys: true,
+  anki: true,
+  voice: true,
+  pdf: true,
+  general: true
+};
+
+function getBackupIncludeFromUI() {
+  const include = {};
+  for (const [key, elementId] of Object.entries(BACKUP_INCLUDE_KEYS)) {
+    const el = document.getElementById(elementId);
+    include[key] = el ? el.checked : true;
+  }
+  return include;
+}
+
+function setBackupIncludeInUI(include) {
+  const merged = { ...DEFAULT_BACKUP_INCLUDE, ...(include || {}) };
+  for (const [key, elementId] of Object.entries(BACKUP_INCLUDE_KEYS)) {
+    const el = document.getElementById(elementId);
+    if (el) el.checked = merged[key] !== false;
+  }
+}
+
 function saveReminderSettings() {
-  const frequency = document.getElementById('reminder-frequency-select').value;
-  const subfolder = document.getElementById('backup-subfolder').value.trim();
+  const freqEl = document.getElementById('reminder-frequency');
+  const subfolderEl = document.getElementById('backup-subfolder');
+  if (!freqEl || !subfolderEl) return;
+
+  const frequency = freqEl.value;
+  const subfolder = subfolderEl.value.trim();
+  const backupInclude = getBackupIncludeFromUI();
+
+  const hasAnySelected = Object.values(backupInclude).some(Boolean);
+  if (!hasAnySelected) {
+    updateReminderStatus('Please select at least one item to include in backups.', 'error');
+    return;
+  }
 
   chrome.storage.sync.set({
     backupReminderFrequency: parseInt(frequency, 10),
-    backupSubfolder: subfolder
+    backupSubfolder: subfolder,
+    backupInclude: backupInclude
   }, () => {
     updateReminderStatus('Backup settings saved!', 'success');
 
@@ -2256,16 +2326,10 @@ function saveReminderSettings() {
   });
 }
 
-function loadReminderSettings() {
-  // Load settings from sync
-  chrome.storage.sync.get({ backupReminderFrequency: 0, backupSubfolder: '' }, (syncData) => {
-    document.getElementById('reminder-frequency-select').value = syncData.backupReminderFrequency;
-    document.getElementById('backup-subfolder').value = syncData.backupSubfolder;
-  });
-
-  // Load status from local
+function loadBackupStatus() {
   chrome.storage.local.get({ lastBackupTime: 0, lastBackupType: '', lastBackupError: null }, (localData) => {
     const statusEl = document.getElementById('backup-status');
+    if (!statusEl) return;
 
     if (localData.lastBackupError) {
       statusEl.textContent = `Last Backup Error: ${localData.lastBackupError}`;
@@ -2285,6 +2349,20 @@ function loadReminderSettings() {
       statusEl.style.color = 'var(--primary-color)';
     }
   });
+}
+
+function loadReminderSettings() {
+  // Load settings from sync
+  chrome.storage.sync.get({ backupReminderFrequency: 0, backupSubfolder: '', backupInclude: DEFAULT_BACKUP_INCLUDE }, (syncData) => {
+    const freqEl = document.getElementById('reminder-frequency');
+    if (freqEl) freqEl.value = syncData.backupReminderFrequency;
+    const subfolderEl = document.getElementById('backup-subfolder');
+    if (subfolderEl) subfolderEl.value = syncData.backupSubfolder;
+    setBackupIncludeInUI(syncData.backupInclude);
+  });
+
+  // Load status from local
+  loadBackupStatus();
 }
 
 function updateReminderStatus(message, type = 'info') {
@@ -2393,7 +2471,7 @@ function restoreBackup() {
       const pdfAnnotations = backupData.pdfAnnotations;
       if (pdfAnnotations && typeof pdfAnnotations === 'object' && !Array.isArray(pdfAnnotations)) {
         for (const key of Object.keys(pdfAnnotations)) {
-          if (key.startsWith('pdf_')) {
+          if (key.startsWith('pdf_') || key === 'pdf_author_name') {
             dataToSave[key] = pdfAnnotations[key];
             pdfAnnotationCount++;
           }
@@ -2401,35 +2479,91 @@ function restoreBackup() {
         if (pdfAnnotationCount > 0) restoredCount++;
       }
 
-      if (restoredCount > 0) {
-        chrome.storage.local.set(dataToSave, () => {
-          // Also check for sync settings if any
-          const syncKeys = ['models', 'customPrompts', 'defaultModelId', 'defaultPromptId', 'ttsSettings', 'ankiSettings', 'backupReminderFrequency', 'backupSubfolder', 'followupCustomMessage', 'showUserQuestions', 'sttEngine', 'sttApiKey', 'sttApiUrl', 'sttModel', 'sttCustomHeaders', 'sttCustomFormData', 'pdfViewerEnabled', 'uiTheme'];
-          const syncData = {};
-          let syncCount = 0;
-          for (const key of syncKeys) {
-            if (backupData[key] !== undefined) {
-              syncData[key] = backupData[key];
-              syncCount++;
+      // Fetch currently stored sync data so we can merge models preserving existing API keys
+      chrome.storage.sync.get(null, (existingSyncData) => {
+        const syncKeys = [
+          'models', 'customPrompts', 'defaultModelId', 'defaultPromptId',
+          'tavilyApiKey', 'enableHallucinationGuard', 'verificationModelId',
+          'ttsSettings', 'ankiSettings', 'backupReminderFrequency', 'backupSubfolder',
+          'backupInclude', 'followupCustomMessage', 'showUserQuestions',
+          'sttEngine', 'sttApiKey', 'sttApiUrl', 'sttModel', 'sttCustomHeaders',
+          'sttCustomFormData', 'pdfViewerEnabled', 'uiTheme'
+        ];
+        const syncData = {};
+        let syncCount = 0;
+        for (const key of syncKeys) {
+          if (backupData[key] !== undefined) {
+            syncData[key] = backupData[key];
+            syncCount++;
+          }
+        }
+
+        // Intelligently merge models so blank API keys in sanitized backup don't wipe existing live keys
+        if (Array.isArray(backupData.models)) {
+          const currentModels = existingSyncData.models || [];
+          const currentModelMap = new Map();
+          currentModels.forEach(m => {
+            if (m.id) currentModelMap.set(m.id, m);
+          });
+
+          syncData.models = backupData.models.map(incoming => {
+            const hasIncomingKey = typeof incoming.apiKey === 'string' && incoming.apiKey.trim().length > 0;
+            if (!hasIncomingKey) {
+              const existing = currentModelMap.get(incoming.id) || currentModels.find(m => m.name === incoming.name && m.endpointUrl === incoming.endpointUrl);
+              if (existing && typeof existing.apiKey === 'string' && existing.apiKey.trim().length > 0) {
+                return { ...incoming, apiKey: existing.apiKey };
+              }
             }
-          }
+            return { ...incoming };
+          });
+        }
 
-          const pdfPart = pdfAnnotationCount > 0 ? `, ${pdfAnnotationCount} PDF annotation keys` : '';
-          const msg = `Restored: ${dataToSave.history ? dataToSave.history.length : 0} items, ${dataToSave.wordLists ? dataToSave.wordLists.length : 0} lists, ${syncCount} settings${pdfPart}. Reloading...`;
+        // Preserve existing individual credentials if incoming values are empty strings (sanitized backup)
+        if (syncData.tavilyApiKey === "" && existingSyncData.tavilyApiKey) {
+          syncData.tavilyApiKey = existingSyncData.tavilyApiKey;
+        }
+        if (syncData.sttApiKey === "" && existingSyncData.sttApiKey) {
+          syncData.sttApiKey = existingSyncData.sttApiKey;
+        }
+        if (syncData.sttCustomHeaders === "" && existingSyncData.sttCustomHeaders) {
+          syncData.sttCustomHeaders = existingSyncData.sttCustomHeaders;
+        }
 
-          if (syncCount > 0) {
-            chrome.storage.sync.set(syncData, () => {
-              updateRestoreStatus(msg, 'success');
+        if (restoredCount > 0 || syncCount > 0) {
+          const parts = [];
+          if (dataToSave.history && Array.isArray(dataToSave.history)) parts.push(`${dataToSave.history.length} history items`);
+          if (dataToSave.wordLists && Array.isArray(dataToSave.wordLists)) parts.push(`${dataToSave.wordLists.length} lists`);
+          if (pdfAnnotationCount > 0) parts.push(`${pdfAnnotationCount} PDF items`);
+          if (syncData.models && Array.isArray(syncData.models)) parts.push(`${syncData.models.length} models`);
+          if (syncData.customPrompts && Array.isArray(syncData.customPrompts)) parts.push(`${syncData.customPrompts.length} prompts`);
+          if (syncData.ankiSettings) parts.push('Anki settings');
+          if (syncData.ttsSettings || syncData.sttEngine) parts.push('Voice settings');
+          if (syncData.tavilyApiKey) parts.push('Tavily API key');
+          if (syncCount > 0 && parts.length === 0) parts.push(`${syncCount} settings`);
+
+          const summaryMsg = `Restored: ${parts.join(', ')}. Reloading...`;
+
+          const applySync = () => {
+            if (syncCount > 0) {
+              chrome.storage.sync.set(syncData, () => {
+                updateRestoreStatus(summaryMsg, 'success');
+                setTimeout(() => location.reload(), 2000);
+              });
+            } else {
+              updateRestoreStatus(summaryMsg, 'success');
               setTimeout(() => location.reload(), 2000);
-            });
+            }
+          };
+
+          if (Object.keys(dataToSave).length > 0) {
+            chrome.storage.local.set(dataToSave, applySync);
           } else {
-            updateRestoreStatus(msg, 'success');
-            setTimeout(() => location.reload(), 2000);
+            applySync();
           }
-        });
-      } else {
-        updateRestoreStatus('Invalid backup file format.', 'error');
-      }
+        } else {
+          updateRestoreStatus('Invalid backup file format or no recognized data found.', 'error');
+        }
+      });
 
     } catch (err) {
       console.error("Restore failed:", err);
