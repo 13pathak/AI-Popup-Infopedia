@@ -29,6 +29,23 @@ function optIcon(name, size = 1, extraClass = '') {
 document.addEventListener('DOMContentLoaded', () => {
   const tabs = document.querySelectorAll('.tab-button');
   const tabContents = document.querySelectorAll('.tab-content');
+  const tabIndicator = document.querySelector('.tab-indicator');
+
+  // Moves the shared underline to the active tab. animate=false jumps instantly
+  // (initial placement, resize, font swap) instead of gliding.
+  function positionTabIndicator(animate = true) {
+    const activeTab = document.querySelector('.tab-button.active');
+    if (!tabIndicator || !activeTab) return;
+    if (!animate) tabIndicator.classList.add('no-transition');
+    tabIndicator.style.width = `${activeTab.offsetWidth}px`;
+    tabIndicator.style.transform =
+      `translate(${activeTab.offsetLeft}px, ${activeTab.offsetTop + activeTab.offsetHeight}px)`;
+    if (!animate) {
+      void tabIndicator.offsetWidth; // force reflow before re-enabling transitions
+      tabIndicator.classList.remove('no-transition');
+    }
+    tabIndicator.classList.add('positioned');
+  }
 
   tabs.forEach(tab => {
     tab.addEventListener('click', () => {
@@ -39,6 +56,8 @@ document.addEventListener('DOMContentLoaded', () => {
       // Activate clicked
       tab.classList.add('active');
       document.getElementById(tab.dataset.tab).classList.add('active');
+
+      positionTabIndicator();
 
       // Reload history every time you open the History tab
       if (tab.dataset.tab === "history-content") {
@@ -82,6 +101,15 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   });
+
+  // Place the indicator under the default tab without animating on load
+  positionTabIndicator(false);
+
+  // Keep the indicator aligned when the tab bar re-wraps or the web font loads
+  window.addEventListener('resize', () => positionTabIndicator(false), { passive: true });
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(() => positionTabIndicator(false));
+  }
 
   loadModels();
   loadLists(); // Load lists on initial page load

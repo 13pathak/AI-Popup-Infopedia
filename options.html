@@ -260,6 +260,7 @@
 
         /* --- TAB STYLES --- */
         .tab-nav {
+            position: relative;
             display: flex;
             flex-wrap: wrap;
             align-items: center;
@@ -283,10 +284,36 @@
         }
 
         .tab-button.active {
-            background-color: rgba(59, 130, 246, 0.12);
-            border-color: rgba(59, 130, 246, 0.3);
             color: var(--primary-color);
             font-weight: 600;
+        }
+
+        /* Shared underline that glides between tabs; positioned via transform in options.js */
+        .tab-indicator {
+            position: absolute;
+            left: 0;
+            top: 0;
+            height: 3px;
+            background-color: var(--primary-color);
+            border-radius: 3px;
+            opacity: 0;
+            pointer-events: none;
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), width 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease;
+        }
+
+        /* Stay hidden until first positioned so the bar never flashes at the top-left */
+        .tab-indicator.positioned {
+            opacity: 1;
+        }
+
+        .tab-indicator.no-transition {
+            transition: none;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .tab-indicator {
+                transition: opacity 0.2s ease;
+            }
         }
 
         .tab-button:hover:not(.active) {
@@ -979,6 +1006,7 @@
         <button class="tab-button" data-tab="tts-content">Text-to-Speech</button>
         <button class="tab-button" data-tab="stt-content">Speech-to-Text</button>
         <button class="tab-button" data-tab="support-content">Support & Feedback</button>
+        <span class="tab-indicator" aria-hidden="true"></span>
     </div>
 
     <div id="status-global"></div>
