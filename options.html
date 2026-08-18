@@ -825,6 +825,7 @@
             display: flex;
             flex-direction: column;
             justify-content: center;
+            perspective: 1400px; /* viewing depth for the flip card below */
         }
 
         #flashcard-front h3 {
@@ -834,15 +835,55 @@
             word-break: break-word;
         }
 
+        /* Two-faced flip card. Both faces occupy the same grid cell, so the
+           card's height is the taller of the two and never jumps mid-flip;
+           backface-visibility swaps which face the viewer sees. Perspective
+           lives on #flashcard-container (the card's parent). */
+        #flashcard-card {
+            display: grid;
+            margin: 6px 0 20px;
+            transform-style: preserve-3d;
+            transition: transform 0.55s cubic-bezier(0.2, 0.7, 0.25, 1);
+        }
+
+        #flashcard-card.flipped {
+            transform: rotateY(180deg);
+        }
+
+        #flashcard-front,
         #flashcard-back {
-            margin: 24px 0;
-            padding: 24px;
+            grid-area: 1 / 1;
+            box-sizing: border-box; /* max-height caps the visible card, not just its content box */
+            backface-visibility: hidden;
+            -webkit-backface-visibility: hidden;
             background-color: var(--card-bg);
             border: 1px solid var(--border-color);
-            border-radius: 8px;
+            border-radius: 12px;
+        }
+
+        #flashcard-front {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 220px;
+            padding: 20px;
+        }
+
+        #flashcard-back {
+            transform: rotateY(180deg);
             text-align: left;
             font-size: 1.1em;
             color: var(--text-color);
+            padding: 18px 20px;
+            max-height: 340px; /* long definitions scroll inside the card face */
+            overflow-y: auto;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            #flashcard-card {
+                transition: none;
+            }
         }
 
         #show-answer-btn {
@@ -1352,15 +1393,16 @@
                 Card <span id="current-card-num">0</span> of <span id="total-cards-num">0</span>
             </div>
 
-            <div id="flashcard-front" style="margin-bottom: 20px;">
-                <h3 id="flashcard-word" style="font-size: 1.8em; color: var(--primary-color); margin-bottom: 10px;">Word
-                </h3>
-                <p id="flashcard-source" style="font-size: 0.85em; color: var(--text-muted);"></p>
-            </div>
+            <div id="flashcard-card">
+                <div id="flashcard-front">
+                    <h3 id="flashcard-word" style="font-size: 1.8em; color: var(--primary-color); margin-bottom: 10px;">Word
+                    </h3>
+                    <p id="flashcard-source" style="font-size: 0.85em; color: var(--text-muted);"></p>
+                </div>
 
-            <div id="flashcard-back"
-                style="display: none; margin-bottom: 20px; padding: 15px; background-color: var(--input-bg); border-radius: 4px; text-align: left;">
-                <div id="flashcard-definition" style="line-height: 1.6;"></div>
+                <div id="flashcard-back">
+                    <div id="flashcard-definition" style="line-height: 1.6;"></div>
+                </div>
             </div>
 
             <button id="show-answer-btn"

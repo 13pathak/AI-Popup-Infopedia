@@ -3372,9 +3372,19 @@ function startFlashcardReview() {
   });
 }
 
+// Shared markdown-lite formatter for card backs (escape first, then apply
+// our own bold/line-break transformations).
+function formatFlashcardDefinition(card) {
+  return escapeHTML(card.definition)
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\n/g, '<br>');
+}
+
 function showCurrentCard() {
   if (currentCardIndex >= flashcardQueue.length) {
-    // Review complete
+    // Review complete. Also reset the flip so a session ending mid-flip
+    // can't carry a stale .flipped into the next one.
+    document.getElementById('flashcard-card').classList.remove('flipped');
     document.getElementById('flashcard-container').style.display = 'none';
     document.getElementById('review-complete').style.display = 'block';
     return;
@@ -3388,21 +3398,19 @@ function showCurrentCard() {
   document.getElementById('flashcard-word').textContent = card.word;
   document.getElementById('flashcard-source').textContent = card.sourceTitle ? `From: ${card.sourceTitle}` : '';
 
-  // Reset card state
-  document.getElementById('flashcard-back').style.display = 'none';
+  // The back face gets its content up front, not at flip time: the card's
+  // grid height is the taller of the two faces, so filling the definition
+  // only on reveal would grow the card mid-flip.
+  document.getElementById('flashcard-definition').innerHTML = formatFlashcardDefinition(card);
+
+  // Reset card state (flip back to the word face)
+  document.getElementById('flashcard-card').classList.remove('flipped');
   document.getElementById('show-answer-btn').style.display = 'inline-block';
   document.getElementById('rating-buttons').style.display = 'none';
 }
 
 function showFlashcardAnswer() {
-  const card = flashcardQueue[currentCardIndex];
-
-  let formattedDef = escapeHTML(card.definition)
-    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\n/g, '<br>');
-
-  document.getElementById('flashcard-definition').innerHTML = formattedDef;
-  document.getElementById('flashcard-back').style.display = 'block';
+  document.getElementById('flashcard-card').classList.add('flipped');
   document.getElementById('show-answer-btn').style.display = 'none';
   document.getElementById('rating-buttons').style.display = 'block';
 }
