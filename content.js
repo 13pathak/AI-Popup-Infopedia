@@ -87,7 +87,6 @@ const popupStyles = `
     --popup-role-user: #94a3b8;
     --popup-role-ai: #2dd4bf; /* mint accent */
     --popup-link-color: #a5d6ff;
-    --popup-select-chevron: url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
     --popup-error-text: #f87171;
     color-scheme: dark;
   }
@@ -120,7 +119,6 @@ const popupStyles = `
     --popup-role-user: #64748b;
     --popup-role-ai: #0d9488;
     --popup-link-color: #0284c7;
-    --popup-select-chevron: url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
     --popup-error-text: #dc2626;
     color-scheme: light;
   }
@@ -154,7 +152,6 @@ const popupStyles = `
       --popup-role-user: #64748b;
       --popup-role-ai: #0d9488;
       --popup-link-color: #0284c7;
-      --popup-select-chevron: url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
       --popup-error-text: #dc2626;
       color-scheme: light;
     }
@@ -329,12 +326,26 @@ const popupStyles = `
       border-radius: 8px; margin-bottom: 6px; max-height: 250px; overflow-y: auto;
       z-index: 2000; display: none; box-shadow: 0 -4px 10px var(--popup-shadow-1);
       font-size: 13px; font-family: inherit;
+      padding: 5px; transform-origin: bottom center;
   }
-  .custom-options.show { display: block; }
-  .custom-option { padding: 6px 10px; cursor: pointer; display: flex; align-items: center; min-width: 0; color: var(--popup-field-text); }
+  /* Top-row selectors (model/prompt) drop down instead of up */
+  .custom-options.drop-down {
+      top: 100%; bottom: auto;
+      margin-top: 6px; margin-bottom: 0;
+      box-shadow: 0 6px 16px var(--popup-shadow-1);
+      transform-origin: top center;
+  }
+  .custom-options.show { display: block; animation: ai-popup-menu-in 130ms ease-out; }
+  @keyframes ai-popup-menu-in {
+    from { opacity: 0; transform: scale(0.98); }
+    to { opacity: 1; transform: scale(1); }
+  }
+  .custom-option { padding: 7px 9px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; min-width: 0; color: var(--popup-field-text); }
   .custom-option:hover { background-color: var(--popup-dropdown-hover); }
-  .custom-option.selected { background-color: rgba(var(--popup-accent-rgb), 0.2); }
-  .custom-option > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .custom-option.selected { background-color: rgba(var(--popup-accent-rgb), 0.18); }
+  .custom-option-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .custom-option-check { flex-shrink: 0; display: inline-flex; color: rgba(var(--popup-accent-rgb), 1); }
+  .custom-select.disabled { opacity: 0.6; cursor: not-allowed; }
   .expand-toggle { cursor: pointer; display: inline-block; width: 16px; text-align: center; color: var(--popup-text-muted); font-size: 10px;}
   .expand-toggle:hover { color: var(--popup-text-header); }
   .indent-spacer { display: inline-block; width: 16px; }
@@ -345,30 +356,11 @@ const popupStyles = `
     gap: 7px;
     margin-bottom: 12px;
   }
-
-  #ai-popup-model-selector,
-  #ai-popup-prompt-selector {
-    width: 50%; /* 50:50 split */
-    appearance: none;
-    -webkit-appearance: none; /* hide the OS arrow; the chevron below replaces it */
-    background-color: var(--popup-field-bg);
-    background-image: var(--popup-select-chevron);
-    background-repeat: no-repeat;
-    background-position: right 8px center;
-    background-size: 12px 12px;
-    color: var(--popup-field-text);
-    border: 1px solid var(--popup-field-border);
-    border-radius: 8px; /* matches .custom-select */
-    padding: 7px 28px 7px 10px; /* extra right padding clears the painted chevron */
-    font-family: inherit;
-    font-size: 13px;
-    box-sizing: border-box;
-    cursor: pointer;
-  }
-  #ai-popup-model-selector:disabled,
-  #ai-popup-prompt-selector:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
+  /* flex-basis 0 so both rows split 50:50 no matter how long their labels are
+     (flex-grow alone would size each container by its content first) */
+  #ai-popup-selectors-container .custom-select-container {
+    flex: 1 1 0;
+    min-width: 0;
   }
 
   /* Wrapper for the AI-generated text */
@@ -748,7 +740,8 @@ const popupStyles = `
     .ai-popup-loading-dot,
     .ai-popup-toast,
     .ai-popup-followup-mic.recording,
-    .ai-feedback-banner {
+    .ai-feedback-banner,
+    .custom-options {
       animation: none;
     }
     .ai-popup-toast.toast-hiding {
@@ -857,6 +850,9 @@ function createCustomDropdown(lists, currentValue, onChange, options = {}) {
 
   function setSelectedLabel(name) {
     valueDisplay.textContent = name;
+    // Tooltip on the whole trigger (not just the text span) so the full name
+    // shows when hovering anywhere over a truncated label.
+    selectBtn.title = name;
     valueDisplay.title = name;
   }
 
@@ -867,6 +863,8 @@ function createCustomDropdown(lists, currentValue, onChange, options = {}) {
   
   const optionsContainer = document.createElement('div');
   optionsContainer.className = 'custom-options';
+  if (options.direction === 'down') optionsContainer.classList.add('drop-down');
+  if (options.disabled) selectBtn.classList.add('disabled');
 
   container.append(selectBtn, optionsContainer);
 
@@ -930,9 +928,18 @@ function createCustomDropdown(lists, currentValue, onChange, options = {}) {
       }
 
       const textNode = document.createElement('span');
+      textNode.className = 'custom-option-label';
       textNode.textContent = item.name;
       textNode.title = item.name;
       optEl.appendChild(textNode);
+      optEl.title = item.name; // row-level tooltip so padding/edges hover too
+
+      if (item.id === selectedId) {
+        const check = document.createElement('span');
+        check.className = 'custom-option-check';
+        check.innerHTML = iconSvg('check', 12);
+        optEl.appendChild(check);
+      }
 
       optEl.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -953,29 +960,63 @@ function createCustomDropdown(lists, currentValue, onChange, options = {}) {
     curr = allItems.find(i => i.id === curr.parentId);
   }
   
-  if (!selectedId && allItems.length > 0) {
+  if (selectedId == null && allItems.length > 0) {
     selectedId = allItems[0].id;
     setSelectedLabel(allItems[0].name);
   }
 
   renderOptions();
 
+  function closeOtherDropdowns() {
+    const root = container.getRootNode();
+    if (root && root.querySelectorAll) {
+      root.querySelectorAll('.custom-options.show').forEach(el => {
+        if (!container.contains(el)) el.classList.remove('show');
+      });
+    }
+  }
+
+  function toggleDropdown() {
+    const willOpen = !optionsContainer.classList.contains('show');
+    optionsContainer.classList.toggle('show');
+    if (willOpen) closeOtherDropdowns();
+  }
+
   selectBtn.addEventListener('click', (e) => {
     e.stopPropagation();
-    optionsContainer.classList.toggle('show');
+    if (options.disabled) return;
+    toggleDropdown();
   });
 
   // The trigger is a div, so Enter/Space do not synthesize a click.
+  // Escape only closes the panel; stopPropagation keeps the page-level
+  // Escape handler from closing the whole popup.
   selectBtn.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      if (optionsContainer.classList.contains('show')) {
+        e.stopPropagation();
+        optionsContainer.classList.remove('show');
+      }
+      return;
+    }
     if (e.key === 'Enter' || e.key === ' ') {
+      if (options.disabled) return;
       e.preventDefault();
       e.stopPropagation();
-      optionsContainer.classList.toggle('show');
+      toggleDropdown();
     }
   });
 
-  // Adding document listener here won't work perfectly inside shadow root if we just listen on document,
-  // but we can listen on the shadow root document or window, we will fix this in populateListOptions.
+  // Clicking elsewhere in the same tree closes the panel. Registered one tick
+  // later because callers append the container to its host after this returns.
+  setTimeout(() => {
+    const root = container.getRootNode();
+    if (root && root.addEventListener) {
+      root.addEventListener('click', (e) => {
+        if (!container.contains(e.target)) optionsContainer.classList.remove('show');
+      });
+    }
+  }, 0);
 
   Object.defineProperty(container, 'value', {
     get: function() { return selectedId; },
@@ -1811,74 +1852,75 @@ function createSelectors(instance, models, prompts, currentModelId, currentPromp
   container.id = 'ai-popup-selectors-container';
 
   // --- Model Selector ---
-  const modelSelector = document.createElement('select');
-  modelSelector.id = 'ai-popup-model-selector';
-
-  models.forEach(model => {
-    const option = document.createElement('option');
-    option.value = model.id;
-    option.textContent = model.name;
-    if (model.id === currentModelId) {
-      option.selected = true;
-    }
-    modelSelector.appendChild(option);
-  });
-
-  modelSelector.addEventListener('change', () => {
-    triggerRedefine();
-  });
+  // Uses the themed custom dropdown (same component as the save-list picker)
+  // so the open list matches the popup's design; a native <select> panel is
+  // OS-drawn and cannot be styled. Value semantics are unchanged: the id of
+  // the chosen model, falling back to the first model when none matches.
+  let lastModelId = activeModel ? activeModel.id : undefined;
+  const modelSelector = createCustomDropdown(
+    models.map(model => ({ id: model.id, name: model.name })),
+    lastModelId,
+    (val) => {
+      // Native selects fire change only for a DIFFERENT choice; re-picking the
+      // current model must not redefine (which flags follow-ups for retry).
+      if (val === lastModelId) return;
+      lastModelId = val;
+      triggerRedefine();
+    },
+    { direction: 'down' }
+  );
 
   // --- Prompt Selector ---
-  const promptSelector = document.createElement('select');
-  promptSelector.id = 'ai-popup-prompt-selector';
-
+  // Item ids are prompt CONTENT strings ('' = System Default), matching what
+  // redefineWithModelAndPrompt expects as customPrompt — identical to the old
+  // <select>, which also used content as the option value.
+  let promptSelector;
+  let lastPromptValue;
   if (prompts && prompts.length > 0) {
-    // Add System Default option
-    const systemOption = document.createElement('option');
-    systemOption.value = ''; // Empty string represents system default
-    systemOption.textContent = defaultPromptId === 'system' ? 'System Default (Default)' : 'System Default';
-    
-    // Select the system option if it's explicitly the current one (empty string), or if no current one is set and it's the default.
-    if (currentPromptContent === '') {
-      systemOption.selected = true;
-    } else if (!currentPromptContent && defaultPromptId === 'system') {
-      systemOption.selected = true;
-    }
-    
-    promptSelector.appendChild(systemOption);
-
+    const promptItems = [{
+      id: '',
+      name: defaultPromptId === 'system' ? 'System Default (Default)' : 'System Default'
+    }];
     prompts.forEach(prompt => {
-      const option = document.createElement('option');
-      option.value = prompt.content; // Use content as value for simplicity
-
-      let displayName = prompt.name;
-      if (prompt.id === defaultPromptId) {
-        displayName += " (Default)";
-      }
-      option.textContent = displayName;
-
-      if (prompt.content === currentPromptContent) {
-        option.selected = true;
-      } else if (!currentPromptContent && prompt.id === defaultPromptId) {
-        option.selected = true;
-      }
-
-      promptSelector.appendChild(option);
+      promptItems.push({
+        id: prompt.content,
+        name: prompt.id === defaultPromptId ? `${prompt.name} (Default)` : prompt.name
+      });
     });
+
+    // Same initial-selection rules as the old <select>: explicit '' wins,
+    // then a content match, then the configured default, then System Default.
+    let initialPromptValue;
+    if (currentPromptContent) {
+      initialPromptValue = prompts.some(p => p.content === currentPromptContent) ? currentPromptContent : '';
+    } else if (currentPromptContent === '') {
+      initialPromptValue = '';
+    } else {
+      const def = defaultPromptId === 'system' ? null : prompts.find(p => p.id === defaultPromptId);
+      initialPromptValue = def ? def.content : '';
+    }
+    lastPromptValue = initialPromptValue;
+
+    promptSelector = createCustomDropdown(promptItems, initialPromptValue, (val) => {
+      if (val === lastPromptValue) return; // change-only-on-different-choice, like native
+      lastPromptValue = val;
+      triggerRedefine();
+    }, { direction: 'down' });
   } else {
-    // Handle case with no prompts - use empty value and disable selector
-    const option = document.createElement('option');
-    option.value = ''; // Empty value so redefine uses default system prompt
-    option.textContent = "No Custom Prompts";
-    option.disabled = true;
-    option.selected = true;
-    promptSelector.appendChild(option);
-    promptSelector.disabled = true; // Disable the entire selector
+    lastPromptValue = '';
+    promptSelector = createCustomDropdown(
+      [{ id: '', name: 'No Custom Prompts' }],
+      '',
+      null,
+      { direction: 'down', disabled: true }
+    );
   }
 
-  promptSelector.addEventListener('change', () => {
-    triggerRedefine();
-  });
+  // Keep the historical ids: follow-up sends read the live model via
+  // popup.querySelector('#ai-popup-model-selector').value, and the component
+  // exposes the same .value contract on its container element.
+  modelSelector.id = 'ai-popup-model-selector';
+  promptSelector.id = 'ai-popup-prompt-selector';
 
   container.appendChild(modelSelector);
   container.appendChild(promptSelector);
@@ -2146,24 +2188,9 @@ function createActionButtons(instance, word, definition, modelName, promptName, 
         previousSelector.parentNode.replaceChild(listSelector, previousSelector);
       }
 
-      // It is appended with the other action controls once they have all been
-      // created. `selectorsContainer` is scoped to createSelectors(), so using
-      // it here previously threw a ReferenceError and stopped this callback.
-
-      // Handle clicking outside custom dropdown (inside shadow root).
-      // Registered once per popup instance; the handler resolves the live
-      // dropdown at click time, so recreateDropdown() never stacks listeners
-      // or keeps detached dropdowns alive via stale closures.
-      if (!instance.listDropdownOutsideClickBound) {
-        instance.listDropdownOutsideClickBound = true;
-        instance.container.shadowRoot.addEventListener('click', (e) => {
-          const dropdown = instance.container.shadowRoot.querySelector('.custom-select-container');
-          if (dropdown && !dropdown.contains(e.target)) {
-            const optionsContainer = dropdown.querySelector('.custom-options');
-            if (optionsContainer) optionsContainer.classList.remove('show');
-          }
-        });
-      }
+      // Clicking outside a dropdown now closes it via the component's own
+      // root-node listener (registered per instance), so no popup-level
+      // outside-click bookkeeping is needed here.
     }
 
     recreateDropdown(lists, validListId);
