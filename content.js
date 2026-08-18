@@ -358,6 +358,25 @@ const popupStyles = `
     padding: 2px 5px 2px 1px; /* Spacing for the scrollbar */
     line-height: 1.62;
   }
+
+  /* Thin rounded scrollbars, accent-muted (shared pattern with options page and PDF viewer) */
+  #ai-popup-content::-webkit-scrollbar,
+  .custom-options::-webkit-scrollbar {
+    width: 8px;
+  }
+  #ai-popup-content::-webkit-scrollbar-track,
+  .custom-options::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  #ai-popup-content::-webkit-scrollbar-thumb,
+  .custom-options::-webkit-scrollbar-thumb {
+    background: rgba(var(--popup-accent-rgb), 0.4);
+    border-radius: 8px;
+  }
+  #ai-popup-content::-webkit-scrollbar-thumb:hover,
+  .custom-options::-webkit-scrollbar-thumb:hover {
+    background: rgba(var(--popup-accent-rgb), 0.65);
+  }
   
   #ai-popup-content p {
     margin-top: 0;
@@ -398,6 +417,9 @@ const popupStyles = `
     background: var(--popup-accent-btn-hover);
     transform: translateY(-1px);
   }
+  .ai-popup-button:active {
+    transform: translateY(0) scale(0.98);
+  }
 
   /* SPEECH, PDF & PIN BUTTONS */
   #ai-popup-speak-btn, #ai-popup-pdf-btn, #ai-popup-pin-btn {
@@ -420,6 +442,9 @@ const popupStyles = `
     color: var(--popup-btn-icon-hover);
     background: rgba(var(--popup-accent-rgb), 0.15);
     transform: translateY(-1px);
+  }
+  #ai-popup-speak-btn:active, #ai-popup-pdf-btn:active, #ai-popup-pin-btn:active {
+    transform: translateY(0) scale(0.98);
   }
 
   /* --- Follow-up Prompt --- */
@@ -649,6 +674,20 @@ const popupStyles = `
   .ai-popup-verification.verified {
     background-color: rgba(var(--popup-accent-rgb), 0.1);
     border-left: 3px solid rgba(var(--popup-accent-rgb), 0.9);
+  }
+
+  /* --- Reduced motion: show elements at rest, no enter/bounce/pulse --- */
+  @media (prefers-reduced-motion: reduce) {
+    #ai-definition-popup,
+    .ai-popup-loading-dot,
+    .ai-popup-toast,
+    .ai-popup-followup-mic.recording,
+    .ai-feedback-banner {
+      animation: none;
+    }
+    .ai-popup-toast.toast-hiding {
+      transition: none;
+    }
   }
 `;
 

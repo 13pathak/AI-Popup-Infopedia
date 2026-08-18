@@ -230,7 +230,7 @@
         }
 
         button:active {
-            transform: translateY(0);
+            transform: translateY(0) scale(0.98);
         }
 
         /* Keyboard focus rings (matches the popup's ring pattern) */
@@ -361,19 +361,31 @@
             background-color: var(--bg-color);
         }
 
-        #history-list::-webkit-scrollbar {
+        /* Thin rounded scrollbars, accent-muted (shared pattern with popup and PDF viewer) */
+        #history-list::-webkit-scrollbar,
+        #flashcard-back::-webkit-scrollbar,
+        .custom-options::-webkit-scrollbar,
+        .reorder-container::-webkit-scrollbar {
             width: 8px;
         }
-        #history-list::-webkit-scrollbar-track {
-            background: var(--bg-color);
+        #history-list::-webkit-scrollbar-track,
+        #flashcard-back::-webkit-scrollbar-track,
+        .custom-options::-webkit-scrollbar-track,
+        .reorder-container::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        #history-list::-webkit-scrollbar-thumb,
+        #flashcard-back::-webkit-scrollbar-thumb,
+        .custom-options::-webkit-scrollbar-thumb,
+        .reorder-container::-webkit-scrollbar-thumb {
+            background: rgba(59, 130, 246, 0.4);
             border-radius: 8px;
         }
-        #history-list::-webkit-scrollbar-thumb {
-            background: var(--border-color);
-            border-radius: 8px;
-        }
-        #history-list::-webkit-scrollbar-thumb:hover {
-            background: var(--button-hover-bg);
+        #history-list::-webkit-scrollbar-thumb:hover,
+        #flashcard-back::-webkit-scrollbar-thumb:hover,
+        .custom-options::-webkit-scrollbar-thumb:hover,
+        .reorder-container::-webkit-scrollbar-thumb:hover {
+            background: rgba(59, 130, 246, 0.65);
         }
 
         .history-item {
@@ -1000,6 +1012,17 @@
         .reorder-item.dragging { opacity: 0.5; border: 1px dashed var(--primary-color); }
         .drag-handle { margin-right: 10px; color: var(--text-muted); cursor: grab; }
         .reorder-item.over { border-top: 2px solid var(--primary-color); }
+
+        /* Reduced motion: complement the tab-indicator and flashcard rules above
+           with the page's remaining animations (spinners, fades). */
+        @media (prefers-reduced-motion: reduce) {
+            .oi-spin,
+            .tab-content.active,
+            .test-spinner,
+            #model-form-container {
+                animation: none;
+            }
+        }
 
     </style>
 </head>

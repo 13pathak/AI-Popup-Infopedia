@@ -34,6 +34,7 @@
     --findbar-btn-hover-bg: #d8d8d8;   /* findbar nav button hover */
     --btn-neutral-bg: #f1f3f4;         /* password cancel, modal secondary */
     --accent: #0078D7;                 /* focus rings, active tab, list actions */
+    --accent-rgb: 0, 120, 215;         /* accent as RGB triplet for rgba() tints */
     --markup-active-bg: #d0e8ff;       /* active highlight tool */
     --danger: #d32f2f;                 /* destructive actions */
     --toolbar-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
@@ -1030,6 +1031,7 @@ body.dark-mode {
     --findbar-btn-hover-bg: #4e4f50;
     --btn-neutral-bg: #3a3b3c;
     --accent: #4da3ff;
+    --accent-rgb: 77, 163, 255;
     --markup-active-bg: #1a3a5c;
     --danger: #ff6b6b;
     --toolbar-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
@@ -1045,4 +1047,29 @@ body.dark-mode .page {
     filter: invert(90%) hue-rotate(180deg);
     box-shadow: 0px 0px 8px rgba(0,0,0,0.8);
     border: 1px solid #333;
+}
+
+/* Reduced motion: show modal and outline chevron at rest, no slide/spin */
+@media (prefers-reduced-motion: reduce) {
+    .viewer-modal {
+        animation: none;
+    }
+    .outline-toggle {
+        transition: none;
+    }
+}
+
+/* Thin rounded scrollbars, accent-muted (shared pattern with options page and popup) */
+#viewerContainer::-webkit-scrollbar {
+    width: 8px;
+}
+#viewerContainer::-webkit-scrollbar-track {
+    background: transparent;
+}
+#viewerContainer::-webkit-scrollbar-thumb {
+    background: rgba(var(--accent-rgb), 0.4);
+    border-radius: 8px;
+}
+#viewerContainer::-webkit-scrollbar-thumb:hover {
+    background: rgba(var(--accent-rgb), 0.65);
 }

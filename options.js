@@ -3510,25 +3510,58 @@ function rateFlashcard(rating) {
 // --- NEW: STATS DASHBOARD
 // ---
 
+// --- Animated stat counters ---
+// Counts a stat value from its current number up/down to target over ~400ms
+// with an ease-out settle. Jumps instantly when the value is unchanged,
+// the element is missing, or the user prefers reduced motion.
+function animateStatValue(el, target) {
+  if (!el) return;
+  const start = parseInt(el.textContent, 10);
+  if (!Number.isFinite(start) || start === target) {
+    el.textContent = target;
+    return;
+  }
+  if (el._statAnim) cancelAnimationFrame(el._statAnim);
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    el.textContent = target;
+    return;
+  }
+
+  const duration = 400;
+  const t0 = performance.now();
+  const step = (now) => {
+    if (!el.isConnected) {
+      el.textContent = target;
+      el._statAnim = null;
+      return;
+    }
+    const p = Math.min((now - t0) / duration, 1);
+    const eased = 1 - Math.pow(1 - p, 3);
+    el.textContent = Math.round(start + (target - start) * eased);
+    el._statAnim = p < 1 ? requestAnimationFrame(step) : null;
+  };
+  el._statAnim = requestAnimationFrame(step);
+}
+
 function loadStats() {
   chrome.storage.local.get(['history'], (result) => {
     const history = result.history || [];
-    
+
     // 1. Calculate Simple Metrics
     const totalWords = history.length;
     const favorites = history.filter(item => item.favorite === true).length;
-    
+
     const now = Date.now();
     const dueCards = history.filter(item => (item.nextReview || 0) <= now).length;
-    
+
     // Estimate total reviews (if we don't have exact counts, we can estimate based on intervals)
     // For now, let's just count how many items have an interval set (meaning they've been reviewed at least once)
     const totalReviews = history.filter(item => item.interval > 0).length;
 
-    document.getElementById('stat-total-words').textContent = totalWords;
-    document.getElementById('stat-favorites').textContent = favorites;
-    document.getElementById('stat-due-cards').textContent = dueCards;
-    document.getElementById('stat-total-reviews').textContent = totalReviews;
+    animateStatValue(document.getElementById('stat-total-words'), totalWords);
+    animateStatValue(document.getElementById('stat-favorites'), favorites);
+    animateStatValue(document.getElementById('stat-due-cards'), dueCards);
+    animateStatValue(document.getElementById('stat-total-reviews'), totalReviews);
 
     // 2. Render Heatmap (90 Days)
     const heatmapGrid = document.getElementById('heatmap-grid');
