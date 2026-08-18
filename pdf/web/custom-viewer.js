@@ -28,6 +28,23 @@ function darkModeButtonHtml(isDark) {
     : `${viewerIconSvg('moon', 14)} Dark Mode`;
 }
 
+function applyViewerDarkMode(isDark) {
+  document.body.classList.toggle('dark-mode', isDark);
+  const darkBtn = document.getElementById('dark_mode_toggle');
+  if (darkBtn) darkBtn.innerHTML = darkModeButtonHtml(isDark);
+}
+
+// uiTheme ('dark' | 'light' | 'auto') is the extension-wide theme from the
+// options page. 'auto' resolves to dark unless the system prefers light,
+// matching the popup CSS in content.js, whose no-match default is dark.
+function uiThemePrefersDark(uiTheme) {
+  if (uiTheme === 'light') return false;
+  if (uiTheme === 'auto') {
+    return !(window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches);
+  }
+  return true;
+}
+
 // Icon + title + hint for empty sidebar tabs (static strings, no user data).
 function sidebarEmptyHtml(iconName, title, hint) {
   return `<div class="sidebar-empty-msg">${viewerIconSvg(iconName, 26)}<div>${title}</div><div class="sidebar-empty-hint">${hint}</div></div>`;
@@ -186,12 +203,18 @@ async function loadStorageData() {
         const highlightsKey = 'pdf_highlights_' + fileUrl;
         const bookmarksKey = 'pdf_bookmarks_' + fileUrl;
         const lastPageKey = 'pdf_lastpage_' + fileUrl;
-        
-        chrome.storage.local.get([highlightsKey, bookmarksKey, lastPageKey, 'pdf_dark_mode'], (result) => {
-            if (result.pdf_dark_mode) {
-                document.body.classList.add('dark-mode');
-                const darkBtn = document.getElementById('dark_mode_toggle');
-                if (darkBtn) darkBtn.innerHTML = darkModeButtonHtml(true);
+        // Per-document toggle override; when unset, the viewer defaults to
+        // the extension-wide uiTheme (supersedes the old global
+        // 'pdf_dark_mode' key, which is no longer read).
+        const darkModeKey = 'pdf_dark_mode_' + fileUrl;
+
+        chrome.storage.local.get([highlightsKey, bookmarksKey, lastPageKey, darkModeKey], (result) => {
+            if (result[darkModeKey] !== undefined) {
+                applyViewerDarkMode(result[darkModeKey] === true);
+            } else if (chrome.storage && chrome.storage.sync) {
+                chrome.storage.sync.get({ uiTheme: 'dark' }, (syncData) => {
+                    applyViewerDarkMode(uiThemePrefersDark(syncData && syncData.uiTheme));
+                });
             }
             if (result[highlightsKey]) {
                 highlights = result[highlightsKey];
@@ -1228,12 +1251,10 @@ document.getElementById('ai-btn-new').addEventListener('click', () => {
 });
 
 document.getElementById('dark_mode_toggle').addEventListener('click', () => {
-    document.body.classList.toggle('dark-mode');
-    const isDark = document.body.classList.contains('dark-mode');
-    const btn = document.getElementById('dark_mode_toggle');
-    btn.innerHTML = darkModeButtonHtml(isDark);
+    const isDark = !document.body.classList.contains('dark-mode');
+    applyViewerDarkMode(isDark);
     if (hasChromeStorage()) {
-        chrome.storage.local.set({ 'pdf_dark_mode': isDark });
+        chrome.storage.local.set({ ['pdf_dark_mode_' + fileUrl]: isDark });
     }
 });
 
