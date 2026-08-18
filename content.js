@@ -88,6 +88,7 @@ const popupStyles = `
     --popup-role-ai: #2dd4bf; /* mint accent */
     --popup-link-color: #a5d6ff;
     --popup-select-chevron: url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+    --popup-error-text: #f87171;
     color-scheme: dark;
   }
 
@@ -120,6 +121,7 @@ const popupStyles = `
     --popup-role-ai: #0d9488;
     --popup-link-color: #0284c7;
     --popup-select-chevron: url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+    --popup-error-text: #dc2626;
     color-scheme: light;
   }
 
@@ -153,6 +155,7 @@ const popupStyles = `
       --popup-role-ai: #0d9488;
       --popup-link-color: #0284c7;
       --popup-select-chevron: url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+      --popup-error-text: #dc2626;
       color-scheme: light;
     }
   }
@@ -268,7 +271,8 @@ const popupStyles = `
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--popup-text-header);
-    font-size: 15px;
+    font-size: 17px;
+    letter-spacing: -0.01em; /* tighter tracking suits the larger display size */
     font-weight: 650;
   }
   .ai-popup-context-model {
@@ -402,6 +406,41 @@ const popupStyles = `
     margin-bottom: 0;
   }
 
+  /* --- Follow-up conversation rows (chat-style transcript) --- */
+  .ai-chat-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-top: 12px;
+    min-width: 0;
+  }
+  .ai-chat-row-user {
+    justify-content: flex-end;
+  }
+  .ai-chat-icon {
+    flex-shrink: 0;
+    display: inline-flex;
+    margin-top: 4px; /* optically centers the glyph on the first text line */
+    color: var(--popup-role-ai);
+  }
+  .ai-chat-bubble {
+    box-sizing: border-box;
+    max-width: 85%;
+    min-width: 0;
+    padding: 7px 11px;
+    background: var(--popup-field-bg);
+    border: 1px solid var(--popup-field-border);
+    border-radius: 12px 12px 4px 12px;
+    overflow-wrap: anywhere;
+  }
+  .ai-chat-text {
+    min-width: 0;
+  }
+  .ai-chat-retry {
+    font-style: italic;
+    color: var(--popup-text-muted);
+  }
+
   /* --- STYLES FOR BUTTONS --- */
   .ai-popup-actions {
     display: flex;
@@ -411,7 +450,7 @@ const popupStyles = `
     padding: 8px;
     background: var(--popup-card-bg);
     border: none;
-    border-radius: 10px;
+    border-radius: 8px;
   }
 
   .ai-popup-button {
@@ -422,7 +461,7 @@ const popupStyles = `
     cursor: pointer;
     background: var(--popup-accent-btn-bg);
     border: 1px solid var(--popup-accent-btn-border);
-    border-radius: 10px;
+    border-radius: 8px;
     padding: 6px 11px;
     white-space: nowrap; /* Prevent wrapping */
     flex-shrink: 0; /* Prevent button from shrinking */
@@ -450,7 +489,7 @@ const popupStyles = `
     flex-shrink: 0;
     background: transparent;
     border: none;
-    border-radius: 10px;
+    border-radius: 8px;
     transition: transform 140ms ease, background-color 140ms ease;
   }
   #ai-popup-speak-btn:hover, #ai-popup-pdf-btn:hover, #ai-popup-pin-btn:hover {
@@ -460,6 +499,11 @@ const popupStyles = `
   }
   #ai-popup-speak-btn:active, #ai-popup-pdf-btn:active, #ai-popup-pin-btn:active {
     transform: translateY(0) scale(0.98);
+  }
+  /* Pinned state: accent-tinted instead of hardcoded teal so it tracks the theme */
+  #ai-popup-pin-btn.pinned {
+    color: rgba(var(--popup-accent-rgb), 1);
+    opacity: 0.5;
   }
 
   /* --- Follow-up Prompt --- */
@@ -478,7 +522,7 @@ const popupStyles = `
     background-color: var(--popup-field-bg);
     color: var(--popup-field-text);
     border: 1px solid var(--popup-field-border);
-    border-radius: 10px;
+    border-radius: 8px;
     padding: 6px 36px 6px 10px;
     font-family: inherit;
     font-size: 13px;
@@ -495,7 +539,7 @@ const popupStyles = `
     background: var(--popup-accent-btn-bg);
     color: var(--popup-accent-btn-text);
     border: 1px solid var(--popup-accent-btn-border);
-    border-radius: 10px;
+    border-radius: 8px;
     padding: 6px 12px;
     cursor: pointer;
     font-weight: bold;
@@ -520,7 +564,7 @@ const popupStyles = `
     align-items: center;
     justify-content: center;
     transition: all 0.2s;
-    border-radius: 6px;
+    border-radius: 8px;
   }
 
   .ai-popup-followup-mic:hover {
@@ -547,7 +591,7 @@ const popupStyles = `
     background-color: var(--popup-accent-btn-bg);
     color: var(--popup-accent-btn-text);
     border: 1px solid var(--popup-accent-btn-border);
-    border-radius: 6px;
+    border-radius: 8px;
     padding: 6px 12px;
     font-family: var(--popup-font-family);
     font-size: 13px;
@@ -590,7 +634,7 @@ const popupStyles = `
     font-size: 14px;
     padding: 0 4px;
     line-height: 1;
-    border-radius: 4px;
+    border-radius: 8px;
   }
   .ai-feedback-close:hover {
     color: var(--popup-text-header);
@@ -604,7 +648,7 @@ const popupStyles = `
   .ai-feedback-btn {
     background: var(--popup-field-bg);
     border: 1px solid var(--popup-field-border);
-    border-radius: 6px;
+    border-radius: 8px;
     color: var(--popup-text);
     padding: 5px 9px;
     font-size: 11px;
@@ -630,11 +674,18 @@ const popupStyles = `
     background: var(--popup-accent-btn-hover);
   }
 
+  .ai-popup-error-text {
+    color: var(--popup-error-text);
+  }
+  .ai-popup-error-reload {
+    margin-left: 5px;
+  }
+
   .ai-popup-retry-btn {
     background: var(--popup-accent-btn-bg);
     color: var(--popup-accent-btn-text);
     border: 1px solid var(--popup-accent-btn-border);
-    border-radius: 4px;
+    border-radius: 8px;
     cursor: pointer;
     padding: 4px 8px;
     font-size: 12px;
@@ -651,7 +702,7 @@ const popupStyles = `
   .ai-popup-citations {
     margin-top: 8px;
     padding: 7px 9px;
-    border-radius: 6px;
+    border-radius: 8px;
     background-color: rgba(var(--popup-accent-rgb), 0.1);
     border-left: 3px solid rgba(var(--popup-accent-rgb), 0.9);
     font-size: 12px;
@@ -670,7 +721,7 @@ const popupStyles = `
   .ai-popup-verification {
     margin-top: 12px;
     padding: 8px;
-    border-radius: 6px;
+    border-radius: 8px;
     font-size: 12px;
     color: inherit;
   }
@@ -726,7 +777,8 @@ const POPUP_ICON_PATHS = {
   check: '<polyline points="20 6 9 17 4 12"/>',
   checkCircle: '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>',
   chevronDown: '<polyline points="6 9 12 15 18 9"/>',
-  chevronRight: '<polyline points="9 18 15 12 9 6"/>'
+  chevronRight: '<polyline points="9 18 15 12 9 6"/>',
+  sparkles: '<path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/>'
 };
 
 function iconSvg(name, size = 16) {
@@ -1191,7 +1243,7 @@ function initiatePopupSequence(rect, selectedText, customPrompt) {
 
       if (response && response.error) {
         const errorId = 'error-' + Date.now();
-        const errorHtml = `<span style="color:red;">Error: ${String(response.error).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;')}</span> <button id="${errorId}-retry" class="ai-popup-retry-btn" style="background:#4db6ac; color:white; border:none; border-radius:3px; cursor:pointer; padding:2px 6px; font-size:11px; margin-left:5px;">Reload</button>`;
+        const errorHtml = `<span class="ai-popup-error-text">Error: ${String(response.error).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;')}</span> <button id="${errorId}-retry" class="ai-popup-retry-btn ai-popup-error-reload">Reload</button>`;
         
         // Temporarily put error in messages to render it
         popupInstance.messages = [
@@ -1563,26 +1615,21 @@ function renderMessages(instance) {
         // If it's the very first main definition, don't prefix with AI:
         contentWrapper.insertAdjacentHTML('beforeend', `<div>${formattedContent}</div>`);
       } else {
-        // Conversational flow UI for follow-ups
-        const roleName = msg.role === 'user' ? 'You' : 'AI';
-        const color = msg.role === 'user' ? 'var(--popup-role-user)' : 'var(--popup-role-ai)';
-        
-        let html = '';
+        // Conversational flow UI for follow-ups: the user's question sits in a
+        // right-aligned tinted bubble, the AI's answer in a plain row marked
+        // by a small icon (no more "You:"/"AI:" text labels).
+        const retryBtnId = `retry-msg-${index}`;
+        const bodyHtml = msg.needsRetry
+          ? `<div class="ai-chat-retry"><button id="${retryBtnId}" class="ai-popup-retry-btn">${iconSvg('refresh', 12)} Retry with ${instance.lastModelName || 'New Model'}</button></div>`
+          : formattedContent;
+
+        if (msg.role === 'user') {
+          contentWrapper.insertAdjacentHTML('beforeend', `<div class="ai-chat-row ai-chat-row-user"><div class="ai-chat-bubble">${bodyHtml}</div></div>`);
+        } else {
+          contentWrapper.insertAdjacentHTML('beforeend', `<div class="ai-chat-row ai-chat-row-ai"><span class="ai-chat-icon">${iconSvg('sparkles', 13)}</span><div class="ai-chat-text">${bodyHtml}</div></div>`);
+        }
+
         if (msg.needsRetry) {
-          // Output a retry button instead of the message content
-          const retryBtnId = `retry-msg-${index}`;
-          const targetModelName = instance.lastModelName || 'New Model';
-          html = `<div style="margin-top: 12px; font-style: italic; color: var(--popup-text-muted);">
-                    <strong style="color: ${color};">${roleName}:</strong>
-                    <div style="margin-top: 5px;">
-                       <button id="${retryBtnId}" class="ai-popup-retry-btn">
-                         ${iconSvg('refresh', 12)} Retry with ${targetModelName}
-                       </button>
-                    </div>
-                  </div>`;
-                  
-          contentWrapper.insertAdjacentHTML('beforeend', html);
-          
           // Attach listener
           setTimeout(() => {
              const btn = contentWrapper.querySelector(`#${retryBtnId}`);
@@ -1592,9 +1639,6 @@ function renderMessages(instance) {
                 });
              }
           }, 0);
-        } else {
-          html = `<div style="margin-top: 12px;"><strong style="color: ${color};">${roleName}:</strong> ${formattedContent}</div>`;
-          contentWrapper.insertAdjacentHTML('beforeend', html);
         }
       }
 
@@ -1629,7 +1673,7 @@ function renderMessages(instance) {
     }
   } catch (err) {
     console.error("Popup render loop crashed:", err);
-    contentWrapper.insertAdjacentHTML('beforeend', `<div style="color: red;">Error rendering messages: ${err.message}</div>`);
+    contentWrapper.insertAdjacentHTML('beforeend', `<div class="ai-popup-error-text">Error rendering messages: ${err.message}</div>`);
   }
 }
 
@@ -1722,7 +1766,7 @@ function retryMessage(instance, messageIndex) {
       } else {
         instance.messages[messageIndex] = { 
            role: 'assistant', 
-           content: `<span style="color:red;">Error retrying message: ${String(response?.error || 'Unknown error').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;')}</span>`, 
+           content: `<span class="ai-popup-error-text">Error retrying message: ${String(response?.error || 'Unknown error').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;')}</span>`,
            isError: true 
         };
       }
@@ -1902,7 +1946,7 @@ function redefineWithModelAndPrompt(instance, word, modelId, promptContent) {
 
         if (response && response.error) {
           const errorId = 'error-' + Date.now();
-          const errorHtml = `<span style="color:red;">Error: ${String(response.error).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;')}</span> <button id="${errorId}-retry" class="ai-popup-retry-btn" style="background:#4db6ac; color:white; border:none; border-radius:3px; cursor:pointer; padding:2px 6px; font-size:11px; margin-left:5px;">Reload</button>`;
+          const errorHtml = `<span class="ai-popup-error-text">Error: ${String(response.error).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;')}</span> <button id="${errorId}-retry" class="ai-popup-retry-btn ai-popup-error-reload">Reload</button>`;
           
           // Temporarily put error in messages to render it
           instance.messages = [
@@ -2063,15 +2107,11 @@ function createActionButtons(instance, word, definition, modelName, promptName, 
     pinButton.id = 'ai-popup-pin-btn';
     pinButton.innerHTML = iconSvg('pin', 16);
     pinButton.title = 'Pin conversation';
-    if (instance.isPinned) {
-      pinButton.style.opacity = '0.5';
-      pinButton.style.color = '#80cbc4';
-    }
+    pinButton.classList.toggle('pinned', !!instance.isPinned);
     pinButton.onclick = (e) => {
       e.stopPropagation();
       instance.isPinned = !instance.isPinned;
-      pinButton.style.opacity = instance.isPinned ? '0.5' : '1';
-      pinButton.style.color = instance.isPinned ? '#80cbc4' : '#4db6ac';
+      pinButton.classList.toggle('pinned', instance.isPinned);
     };
 
     // 2. Create list selector using Custom Dropdown Component
@@ -2532,7 +2572,7 @@ function createFollowupInput(instance, word) {
         } else {
           // Add error message with retry button to history
           const errorId = 'error-' + Date.now();
-          const errorHtml = `<span style="color:red;">Error: ${String(response?.error || 'Unknown error').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;')}</span> <button id="${errorId}-retry" class="ai-popup-retry-btn" style="background:#4db6ac; color:white; border:none; border-radius:3px; cursor:pointer; padding:2px 6px; font-size:11px; margin-left:5px;">Reload</button>`;
+          const errorHtml = `<span class="ai-popup-error-text">Error: ${String(response?.error || 'Unknown error').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;')}</span> <button id="${errorId}-retry" class="ai-popup-retry-btn ai-popup-error-reload">Reload</button>`;
           instance.messages.push({ role: 'assistant', content: errorHtml, isError: true, errorId: errorId });
 
           // Setup the error retry button (errorId is unique to this error)
