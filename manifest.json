@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AI Popup Infopedia",
-  "version": "8.1",
+  "version": "8.2",
   "description": "Select a word to get an AI-powered explanation.",
   "permissions": [
     "storage",
