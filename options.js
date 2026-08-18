@@ -1026,7 +1026,26 @@ function createCustomDropdown(lists, currentValue, onChange, options = {}) {
 // --- LIST MANAGEMENT FUNCTIONS
 // ---
 
+// --- History skeleton ---
+// Fills the history area with pulsing placeholder bars while loadLists()
+// round-trips chrome.storage. renderFilteredHistory() clears it by rewriting
+// the list contents (empty state or items), so no separate teardown is needed.
+function showHistorySkeleton() {
+  const historyList = document.getElementById('history-list');
+  if (!historyList) return;
+  const noHistoryMessage = document.getElementById('no-history-message');
+  if (noHistoryMessage) noHistoryMessage.style.display = 'none';
+  historyList.style.display = 'block';
+  historyList.innerHTML = `
+    <div class="history-skeleton" aria-hidden="true">
+      <div class="history-skeleton-bar"></div>
+      <div class="history-skeleton-bar"></div>
+      <div class="history-skeleton-bar"></div>
+    </div>`;
+}
+
 function loadLists() {
+  showHistorySkeleton();
   chrome.storage.local.get({ wordLists: [] }, (data) => {
     let lists = data.wordLists;
     const container = document.getElementById('list-select-container');

@@ -388,6 +388,28 @@
             background: rgba(59, 130, 246, 0.65);
         }
 
+        /* Skeleton bars while chrome.storage reads the history
+           (same pulse cadence as the popup's loading dots) */
+        .history-skeleton {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            padding: 16px;
+        }
+        .history-skeleton-bar {
+            height: 14px;
+            border-radius: 7px;
+            background-color: var(--button-bg);
+            animation: historySkeletonPulse 1.2s ease-in-out infinite;
+        }
+        .history-skeleton-bar:nth-child(1) { width: 45%; }
+        .history-skeleton-bar:nth-child(2) { width: 85%; animation-delay: 0.15s; }
+        .history-skeleton-bar:nth-child(3) { width: 60%; animation-delay: 0.3s; }
+        @keyframes historySkeletonPulse {
+            0%, 60%, 100% { opacity: 0.45; }
+            30% { opacity: 1; }
+        }
+
         .history-item {
             border-bottom: 1px solid var(--border-color);
             padding: 16px;
@@ -1019,7 +1041,8 @@
             .oi-spin,
             .tab-content.active,
             .test-spinner,
-            #model-form-container {
+            #model-form-container,
+            .history-skeleton-bar {
                 animation: none;
             }
         }
@@ -1342,7 +1365,13 @@
                 <div class="empty-state-hint" id="no-history-hint">Select a word on any webpage and save it from the
                     AI popup to see it here.</div>
             </div>
-            <div id="history-list"></div>
+            <div id="history-list">
+                <div class="history-skeleton" aria-hidden="true">
+                    <div class="history-skeleton-bar"></div>
+                    <div class="history-skeleton-bar"></div>
+                    <div class="history-skeleton-bar"></div>
+                </div>
+            </div>
         </div>
     </div>
 
