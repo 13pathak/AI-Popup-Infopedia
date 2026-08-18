@@ -233,6 +233,18 @@
             transform: translateY(0);
         }
 
+        /* Keyboard focus rings (matches the popup's ring pattern) */
+        button:focus-visible,
+        a:focus-visible,
+        input[type="checkbox"]:focus-visible,
+        input[type="file"]:focus-visible,
+        input[type="range"]:focus-visible,
+        .custom-select:focus-visible {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+        }
+
         button[style*="--primary-color"],
         button[style*="--secondary-color"],
         button[style*="--danger-color"],
