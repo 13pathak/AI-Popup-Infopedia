@@ -58,6 +58,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
       positionTabIndicator();
 
+      // Keep the onboarding checklist fresh when returning to Settings
+      if (tab.dataset.tab === "settings-content") refreshOnboarding();
+
       // Reload history every time you open the History tab
       if (tab.dataset.tab === "history-content") {
         loadLists(); // This will in turn load history for the selected list
@@ -111,6 +114,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   loadModels();
+  initShortcutCard(); // Show the user's actual popup shortcut (may be remapped)
   loadLists(); // Load lists on initial page load
 
   loadThemeSetting(); // Load visual theme setting
@@ -166,6 +170,21 @@ document.addEventListener('DOMContentLoaded', () => {
   safeAddListener('delete-model-btn', 'click', deleteSelectedModel);
   safeAddListener('model-select', 'change', (e) => setDefaultModel(e.target.value));
   safeAddListener('save-model-btn', 'click', saveModel);
+  safeAddListener('provider-preset-select', 'change', applyProviderPreset);
+  safeAddListener('detect-ollama-btn', 'click', detectOllamaModels);
+  safeAddListener('ollama-model-select', 'change', (e) => {
+    document.getElementById('modelName').value = e.target.value;
+  });
+  safeAddListener('onboarding-dismiss-btn', 'click', () => {
+    chrome.storage.local.set({ onboardingDismissed: true });
+    const card = document.getElementById('onboarding-card');
+    if (card) card.style.display = 'none';
+  });
+  safeAddListener('open-shortcuts-btn', 'click', () => {
+    const url = 'chrome://extensions/shortcuts';
+    if (chrome.tabs && chrome.tabs.create) chrome.tabs.create({ url });
+    else window.open(url, '_blank');
+  });
   safeAddListener('default-prompt-select', 'change', (e) => saveDefaultPromptId(e.target.value));
   safeAddListener('cancel-model-btn', 'click', hideModelForm);
   safeAddListener('save-pdf-author-btn', 'click', savePdfAuthorName);
@@ -214,6 +233,7 @@ document.addEventListener('DOMContentLoaded', () => {
   safeAddListener('import-all-history', 'click', () => document.getElementById('import-file-input').click());
 
   safeAddListener('clear-history', 'click', clearAllHistory);
+  safeAddListener('reset-all-settings-btn', 'click', resetAllSettings);
 
   safeAddListener('export-all-settings-btn', 'click', exportAllSettings);
   safeAddListener('import-all-settings-btn', 'click', () => document.getElementById('import-settings-file-input').click());
@@ -323,6 +343,82 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // --- NEW: MODEL MANAGEMENT ---
 
+// --- PROVIDER PRESETS (form helper only; never persisted with the model) ---
+const PROVIDER_PRESETS = {
+  gemini:     { name: 'Gemini Flash',     endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', model: 'gemini-2.5-flash' },
+  groq:       { name: 'Groq Llama',       endpoint: 'https://api.groq.com/openai/v1/chat/completions',                        model: 'llama-3.3-70b-versatile' },
+  openrouter: { name: 'OpenRouter Model', endpoint: 'https://openrouter.ai/api/v1/chat/completions',                          model: 'meta-llama/llama-3.3-70b-instruct:free' },
+  openai:     { name: 'OpenAI Mini',      endpoint: 'https://api.openai.com/v1/chat/completions',                             model: 'gpt-4o-mini' },
+  ollama:     { name: 'Local Ollama',     endpoint: 'http://localhost:11434/v1/chat/completions',                             model: 'llama3.2' }
+};
+
+function resetOllamaHelpers() {
+  const row = document.getElementById('ollama-detect-row');
+  const select = document.getElementById('ollama-model-select');
+  const status = document.getElementById('ollama-detect-status');
+  if (row) row.style.display = 'none';
+  if (select) { select.style.display = 'none'; select.innerHTML = ''; }
+  if (status) status.textContent = '';
+}
+
+function applyProviderPreset() {
+  const key = document.getElementById('provider-preset-select').value;
+  const preset = PROVIDER_PRESETS[key];
+  resetOllamaHelpers();
+  // "custom" leaves every field untouched
+  if (!preset) return;
+  document.getElementById('endpoint').value = preset.endpoint;
+  document.getElementById('modelName').value = preset.model;
+  // Only fill the name if empty or still an untouched preset default, so we
+  // never stomp a name the user typed themselves.
+  const nameInput = document.getElementById('configName');
+  const currentName = nameInput.value.trim();
+  const isPresetName = !currentName || Object.values(PROVIDER_PRESETS).some(p => p.name === currentName);
+  if (isPresetName) nameInput.value = preset.name;
+  if (key === 'ollama') {
+    document.getElementById('ollama-detect-row').style.display = 'block';
+    document.getElementById('ollama-detect-status').textContent =
+      'Tip: Ollama only accepts browser requests when started with OLLAMA_ORIGINS="*" (see FAQ → Local LLMs Setup).';
+  }
+}
+
+async function detectOllamaModels() {
+  const status = document.getElementById('ollama-detect-status');
+  const select = document.getElementById('ollama-model-select');
+  const btn = document.getElementById('detect-ollama-btn');
+  if (!status || !select || !btn) return;
+  btn.disabled = true;
+  status.textContent = 'Looking for Ollama on localhost:11434…';
+  select.style.display = 'none';
+  select.innerHTML = '';
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    const res = await fetch('http://localhost:11434/api/tags', { signal: controller.signal });
+    clearTimeout(timer);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const models = (data.models || []).map(m => m.name).filter(Boolean);
+    if (models.length === 0) {
+      status.textContent = 'Ollama is running but has no models installed. Run "ollama pull llama3.2" first, then detect again.';
+      return;
+    }
+    models.forEach(name => {
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name;
+      select.appendChild(opt);
+    });
+    document.getElementById('modelName').value = models[0];
+    select.style.display = 'block';
+    status.textContent = `${models.length} model${models.length > 1 ? 's' : ''} found — the first was filled in; pick another below if you prefer.`;
+  } catch (err) {
+    status.textContent = 'Could not reach Ollama. Make sure it is running on localhost:11434 and was started with OLLAMA_ORIGINS="*" (see FAQ → Local LLMs Setup).';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 function showModelForm(isEdit = false, model = {}) {
   document.getElementById('form-title').textContent = isEdit ? 'Edit Model' : 'Add New Model';
   document.getElementById('model-id').value = model.id || '';
@@ -331,6 +427,15 @@ function showModelForm(isEdit = false, model = {}) {
   document.getElementById('modelName').value = model.modelName || '';
   document.getElementById('apiKey').value = model.apiKey || '';
   document.getElementById('enableSearchGrounding').checked = model.enableSearchGrounding || false;
+
+  // Display the matching provider when editing. Setting .value programmatically
+  // fires no "change" event, so the user's stored fields are never overwritten.
+  const presetEntry = Object.entries(PROVIDER_PRESETS).find(([, p]) => p.endpoint === (model.endpointUrl || '').trim());
+  document.getElementById('provider-preset-select').value = presetEntry ? presetEntry[0] : 'custom';
+  resetOllamaHelpers();
+  if (presetEntry && presetEntry[0] === 'ollama') {
+    document.getElementById('ollama-detect-row').style.display = 'block';
+  }
 
   document.getElementById('model-form-container').style.display = 'block';
   document.getElementById('model-selection-container').style.display = 'none';
@@ -348,6 +453,8 @@ function hideModelForm() {
   document.getElementById('modelName').value = '';
   document.getElementById('apiKey').value = '';
   document.getElementById('enableSearchGrounding').checked = false;
+  document.getElementById('provider-preset-select').value = 'custom';
+  resetOllamaHelpers();
 }
 
 function saveModel() {
@@ -424,6 +531,7 @@ function loadModels() {
         selectEl.appendChild(option);
       });
     }
+    refreshOnboarding(); // any model add/delete/import re-runs the checklist
   });
 }
 
@@ -3881,11 +3989,81 @@ function executeDiagnosticCheck(requestData) {
       if (response.success) {
         summaryBox.className = 'test-summary-box success';
         summaryBox.innerHTML = `<span>${optIcon('checkCircle', 1.2)}</span><span>${escapeHTML(response.summary || 'All checks passed!')}</span>`;
+        // A full pass completes onboarding step 2
+        chrome.storage.local.set({ onboardingTestPassed: true }, refreshOnboarding);
       } else {
         summaryBox.className = 'test-summary-box failure';
         summaryBox.innerHTML = `<span>${optIcon('xCircle', 1.2)}</span><span>${escapeHTML(response.summary || 'One or more diagnostic checks failed.')}</span>`;
       }
     }
+  });
+}
+
+// --- ONBOARDING CHECKLIST & SHORTCUT CARD ---
+function setOnboardingStep(stepEl, done) {
+  if (!stepEl) return;
+  stepEl.classList.toggle('done', done);
+  const icon = stepEl.querySelector('.onboarding-step-icon');
+  if (icon) {
+    icon.innerHTML = done
+      ? `<span style="color: var(--secondary-color);">${optIcon('checkCircle', 1.1)}</span>`
+      : optIcon('circle', 1.1);
+  }
+}
+
+function refreshOnboarding() {
+  const card = document.getElementById('onboarding-card');
+  if (!card) return;
+  chrome.storage.local.get(['onboardingDismissed', 'onboardingTestPassed', 'history'], (local) => {
+    chrome.storage.sync.get(['models'], (sync) => {
+      const steps = [
+        (sync.models || []).length > 0,
+        !!local.onboardingTestPassed,
+        Array.isArray(local.history) && local.history.length > 0
+      ];
+      const complete = steps.every(Boolean);
+      if (local.onboardingDismissed || complete) {
+        card.style.display = 'none';
+        // A finished checklist collapses away permanently
+        if (complete && !local.onboardingDismissed) {
+          chrome.storage.local.set({ onboardingDismissed: true });
+        }
+        return;
+      }
+      card.style.display = 'block';
+      steps.forEach((done, i) => {
+        setOnboardingStep(document.getElementById(`onboarding-step-${i + 1}`), done);
+      });
+    });
+  });
+}
+
+function initShortcutCard() {
+  // Show the real binding — the user may have remapped it in chrome://extensions/shortcuts
+  const kbds = document.querySelectorAll('.popup-shortcut');
+  if (!kbds.length) return;
+  if (chrome.commands && chrome.commands.getAll) {
+    chrome.commands.getAll((cmds) => {
+      const cmd = (cmds || []).find(c => c.name === 'trigger-popup');
+      kbds.forEach(k => { k.textContent = (cmd && cmd.shortcut) ? cmd.shortcut : 'Not set'; });
+    });
+  }
+}
+
+function resetAllSettings() {
+  const ok = confirm(
+    'Reset EVERYTHING to a fresh install?\n\n' +
+    'This permanently erases your models and API keys, custom prompts, vocabulary history and word lists, ' +
+    'flashcard progress, and all other settings (Anki, TTS/STT, PDF, backup schedule).\n\n' +
+    'Export a backup first if you might want anything back — this cannot be undone.'
+  );
+  if (!ok) return;
+  Promise.all([
+    new Promise(resolve => chrome.storage.sync.clear(() => resolve())),
+    new Promise(resolve => chrome.storage.local.clear(() => resolve()))
+  ]).then(() => {
+    // Fresh state: reload so every loader re-runs against empty storage
+    location.reload();
   });
 }
 
