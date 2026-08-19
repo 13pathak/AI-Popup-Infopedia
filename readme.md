@@ -7,7 +7,8 @@ A powerful browser extension to get instant AI explanations for any word or phra
 
 
 #### Settings Menu
-<img width="1893" height="917" alt="image" src="https://github.com/user-attachments/assets/a6d1e6a9-3a4d-4a52-9022-12d75e99bb16" />
+<img width="1892" height="921" alt="image" src="https://github.com/user-attachments/assets/fc9ffbdf-a505-4674-85cd-ef7d7ca61f0d" />
+
 
 #### Hallucination Guard (Works only when AI bot used its trained data, not real time grounded data)
 <img width="1119" height="579" alt="image" src="https://github.com/user-attachments/assets/e00681be-7473-4b5a-b7d1-179b378f7fb5" />
