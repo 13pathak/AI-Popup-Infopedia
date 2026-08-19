@@ -1026,6 +1026,11 @@ function createCustomDropdown(lists, currentValue, onChange, options = {}) {
   return container;
 }
 
+// The floating "Ask AI" button appears for selections up to this many words.
+// Longer selections (likely an accidental select-all) fall back to the hotkey,
+// which works on any length and also opens the empty-question scratchpad.
+const MAX_FLOATING_BUTTON_WORDS = 500;
+
 // --- Main mouseup listener ---
 document.addEventListener('mouseup', (event) => {
   // 1. Check for selection inside existing popups (Nested Selection) FIRST
@@ -1049,7 +1054,7 @@ document.addEventListener('mouseup', (event) => {
   // 2. If a nested selection was found, trigger NEW popup and ignore "click inside" blocking
   if (selectedText.length > 0) {
     const wordCount = selectedText.split(/\s+/).length;
-    if (wordCount > 0 && wordCount <= 6) {
+    if (wordCount > 0 && wordCount <= MAX_FLOATING_BUTTON_WORDS) {
       // Reset flags to avoid sticking
       activePopups.forEach(p => { p.isClickInside = false; p.isInteracting = false; });
       showOpenButtonPopup(selectionRect, selectedText);
@@ -1076,7 +1081,7 @@ document.addEventListener('mouseup', (event) => {
   if (selectedText.length > 0) {
     selectionRect = selection.getRangeAt(0).getBoundingClientRect();
     const wordCount = selectedText.split(/\s+/).length;
-    if (wordCount > 0 && wordCount <= 6) {
+    if (wordCount > 0 && wordCount <= MAX_FLOATING_BUTTON_WORDS) {
 
       // --- NEW: Duplicate Check ---
       // If the top-most popup was opened with the SAME text, ignore this trigger.

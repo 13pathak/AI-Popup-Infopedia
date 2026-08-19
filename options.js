@@ -61,7 +61,7 @@ document.addEventListener('DOMContentLoaded', () => {
       // Keep the onboarding checklist fresh when returning to Settings or Get Started
       if (tab.dataset.tab === "settings-content" || tab.dataset.tab === "get-started-content") refreshOnboarding();
 
-      // Reload history every time you open the History tab
+      // Reload saved words every time you open the Saved Words tab
       if (tab.dataset.tab === "history-content") {
         loadLists(); // This will in turn load history for the selected list
       }
@@ -440,13 +440,11 @@ function showModelForm(isEdit = false, model = {}) {
 
   document.getElementById('model-form-container').style.display = 'block';
   document.getElementById('model-selection-container').style.display = 'none';
-  document.getElementById('default-prompt-container').style.display = 'none';
 }
 
 function hideModelForm() {
   document.getElementById('model-form-container').style.display = 'none';
   document.getElementById('model-selection-container').style.display = 'flex';
-  document.getElementById('default-prompt-container').style.display = 'block';
   // Clear form fields
   document.getElementById('model-id').value = '';
   document.getElementById('configName').value = '';
