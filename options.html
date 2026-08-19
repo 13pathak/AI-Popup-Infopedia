@@ -464,6 +464,7 @@
             display: flex;
             align-items: center;
             gap: 10px;
+            flex-wrap: wrap;
             padding: 7px 0;
             color: var(--text-muted);
         }
@@ -1234,7 +1235,11 @@
             </div>
             <div class="onboarding-step" id="onboarding-step-3">
                 <span class="onboarding-step-icon"></span>
-                <span>Try the popup: select any text on a webpage and press <kbd class="popup-shortcut">Ctrl+Shift+Y</kbd>.</span>
+                <span>Try the popup: select any text on a webpage and click the <strong>Ask AI</strong> button — for
+                    selections longer than <strong>6 words</strong>, use the popup shortcut<span
+                    id="onboarding-shortcut-clause">: press <kbd class="popup-shortcut">Ctrl+Shift+Y</kbd></span>.</span>
+                <button id="onboarding-set-shortcut-btn" type="button" title="Optional — the shortcut is handy when selecting longer text. Opens Chrome's extension shortcuts page."
+                    style="display: none; padding: 5px 12px; font-size: 0.85em; background-color: var(--button-bg); white-space: nowrap;">Set popup shortcut…</button>
             </div>
         </div>
 

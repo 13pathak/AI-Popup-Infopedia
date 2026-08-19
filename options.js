@@ -184,11 +184,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const card = document.getElementById('onboarding-card');
     if (card) card.style.display = 'none';
   });
-  safeAddListener('open-shortcuts-btn', 'click', () => {
-    const url = 'chrome://extensions/shortcuts';
-    if (chrome.tabs && chrome.tabs.create) chrome.tabs.create({ url });
-    else window.open(url, '_blank');
-  });
+  safeAddListener('open-shortcuts-btn', 'click', openShortcutsPage);
+  safeAddListener('onboarding-set-shortcut-btn', 'click', openShortcutsPage);
   safeAddListener('default-prompt-select', 'change', (e) => saveDefaultPromptId(e.target.value));
   safeAddListener('cancel-model-btn', 'click', hideModelForm);
   safeAddListener('save-pdf-author-btn', 'click', savePdfAuthorName);
@@ -4046,12 +4043,25 @@ function initShortcutCard() {
   // Show the real binding — the user may have remapped it in chrome://extensions/shortcuts
   const kbds = document.querySelectorAll('.popup-shortcut');
   if (!kbds.length) return;
+  const clause = document.getElementById('onboarding-shortcut-clause');
+  const setBtn = document.getElementById('onboarding-set-shortcut-btn');
   if (chrome.commands && chrome.commands.getAll) {
     chrome.commands.getAll((cmds) => {
       const cmd = (cmds || []).find(c => c.name === 'trigger-popup');
-      kbds.forEach(k => { k.textContent = (cmd && cmd.shortcut) ? cmd.shortcut : 'Not set'; });
+      const shortcut = (cmd && cmd.shortcut) || '';
+      kbds.forEach(k => { k.textContent = shortcut || 'Not set'; });
+      // Onboarding step 3 never shows a confusing "Not set" — the keyboard
+      // clause disappears and a "Set popup shortcut" button takes its place.
+      if (clause) clause.style.display = shortcut ? '' : 'none';
+      if (setBtn) setBtn.style.display = shortcut ? 'none' : '';
     });
   }
+}
+
+function openShortcutsPage() {
+  const url = 'chrome://extensions/shortcuts';
+  if (chrome.tabs && chrome.tabs.create) chrome.tabs.create({ url });
+  else window.open(url, '_blank');
 }
 
 function resetAllSettings() {
