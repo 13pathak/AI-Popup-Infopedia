@@ -115,6 +115,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   loadModels();
   initShortcutCard(); // Show the user's actual popup shortcut (may be remapped)
+  initBrandVersion(); // Show the extension version (+ Web Store update nudge)
   loadLists(); // Load lists on initial page load
 
   loadThemeSetting(); // Load visual theme setting
@@ -186,6 +187,10 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   safeAddListener('open-shortcuts-btn', 'click', openShortcutsPage);
   safeAddListener('onboarding-set-shortcut-btn', 'click', openShortcutsPage);
+  safeAddListener('open-practice-page-btn', 'click', () => {
+    // A fresh page with plenty of selectable text — the natural place to try the popup
+    openInNewTab('https://en.wikipedia.org/wiki/Special:Random');
+  });
   safeAddListener('default-prompt-select', 'change', (e) => saveDefaultPromptId(e.target.value));
   safeAddListener('cancel-model-btn', 'click', hideModelForm);
   safeAddListener('save-pdf-author-btn', 'click', savePdfAuthorName);
@@ -4056,10 +4061,69 @@ function initShortcutCard() {
   }
 }
 
-function openShortcutsPage() {
-  const url = 'chrome://extensions/shortcuts';
+function openInNewTab(url) {
   if (chrome.tabs && chrome.tabs.create) chrome.tabs.create({ url });
   else window.open(url, '_blank');
+}
+
+function isNewerVersion(latest, current) {
+  const a = String(latest).split('.').map(Number);
+  const b = String(current).split('.').map(Number);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const x = a[i] || 0;
+    const y = b[i] || 0;
+    if (x !== y) return x > y;
+  }
+  return false;
+}
+
+function renderUpdateHint(el, current, latest) {
+  if (!latest || !isNewerVersion(latest, current)) return;
+  const storeUrl = `https://chromewebstore.google.com/detail/${chrome.runtime.id}`;
+  const link = document.createElement('a');
+  link.href = storeUrl;
+  link.textContent = `${latest} available`;
+  link.title = 'A newer version is on the Chrome Web Store — click to open it';
+  link.style.cssText = 'color: var(--primary-color); text-decoration: none; font-weight: 600;';
+  link.addEventListener('click', (e) => {
+    e.preventDefault();
+    openInNewTab(storeUrl);
+  });
+  el.appendChild(document.createTextNode(' · '));
+  el.appendChild(link);
+}
+
+function initBrandVersion() {
+  const el = document.getElementById('tab-brand-version');
+  if (!el) return;
+  const current = chrome.runtime.getManifest().version || '';
+  if (current) el.textContent = `v${current}`;
+
+  // Optional nudge: check the Web Store for a newer build. Cached for a day;
+  // every failure path (offline, unpacked install, changed store markup) stays
+  // silent so the sidebar only ever shows the local version.
+  chrome.storage.local.get(['latestVersionCheck'], (data) => {
+    const cached = data.latestVersionCheck || {};
+    const now = Date.now();
+    const DAY = 24 * 60 * 60 * 1000;
+    if (cached.at && now - cached.at < DAY && cached.latest !== undefined) {
+      renderUpdateHint(el, current, cached.latest);
+      return;
+    }
+    fetch(`https://chromewebstore.google.com/detail/${chrome.runtime.id}`)
+      .then(r => (r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then(html => {
+        const m = html.match(/"version"\s*:\s*"([\d.]+)"/) || html.match(/itemprop="version"[^>]*>\s*([\d.]+)/);
+        const latest = m ? m[1] : null;
+        chrome.storage.local.set({ latestVersionCheck: { at: now, latest } });
+        renderUpdateHint(el, current, latest);
+      })
+      .catch(() => { /* stay quiet — the store check is best-effort */ });
+  });
+}
+
+function openShortcutsPage() {
+  openInNewTab('chrome://extensions/shortcuts');
 }
 
 function resetAllSettings() {

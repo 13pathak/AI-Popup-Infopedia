@@ -339,12 +339,25 @@
             flex-shrink: 0;
         }
 
+        .tab-brand-text {
+            display: flex;
+            flex-direction: column;
+            line-height: 1.25;
+            min-width: 0;
+        }
+
         .tab-brand-name {
             font-size: 1.8em;
             font-weight: 600;
             color: var(--text-color);
             letter-spacing: -0.02em;
             white-space: nowrap;
+        }
+
+        .tab-brand-version {
+            font-size: 0.78em;
+            font-weight: 500;
+            color: var(--text-muted);
         }
 
         /* Narrow windows: fall back to a horizontal scrollable tab row
@@ -1195,7 +1208,10 @@
     <div class="tab-nav">
         <div class="tab-brand">
             <img class="tab-brand-logo" src="icons/icon128.png" alt="AI Popup Infopedia">
-            <span class="tab-brand-name">AI Popup Infopedia</span>
+            <span class="tab-brand-text">
+                <span class="tab-brand-name">AI Popup Infopedia</span>
+                <span class="tab-brand-version" id="tab-brand-version"></span>
+            </span>
         </div>
         <button class="tab-button" data-tab="get-started-content"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg> Get Started</button>
         <button class="tab-button" data-tab="settings-content"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg> Model Settings</button>
@@ -1238,6 +1254,8 @@
                 <span>Try the popup: select any text on a webpage and click the <strong>Ask AI</strong> button<span
                     id="onboarding-shortcut-clause"> — or press <kbd class="popup-shortcut">Ctrl+Shift+Y</kbd> to ask
                     anything without selecting text first</span>.</span>
+                <button id="open-practice-page-btn" type="button" title="Opens a random Wikipedia article in a new tab — select any word or sentence there to try the popup."
+                    style="padding: 5px 12px; font-size: 0.85em; background-color: var(--primary-color); white-space: nowrap;"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg> Open a practice page</button>
                 <button id="onboarding-set-shortcut-btn" type="button" title="Optional — the shortcut opens the popup with nothing selected, for free-form questions. Opens Chrome's extension shortcuts page."
                     style="display: none; padding: 5px 12px; font-size: 0.85em; background-color: var(--button-bg); white-space: nowrap;">Set popup shortcut…</button>
             </div>
@@ -1356,8 +1374,8 @@
                     placeholder="e.g., https://api.groq.com/openai/v1/chat/completions or https://generativelanguage.googleapis.com/v1beta/openai/chat/completions">
             </div>
             <div>
-                <label for="modelName">Model Name (e.g., "gemini-1.5-flash")</label>
-                <input type="text" id="modelName" placeholder="e.g., gemini-1.5-flash, llama-3.3-70b-versatile, gpt-4o-mini">
+                <label for="modelName">Model Name (e.g., "gemini-2.5-flash")</label>
+                <input type="text" id="modelName" placeholder="e.g., gemini-2.5-flash, llama-3.3-70b-versatile, gpt-4o-mini">
             </div>
             <div id="ollama-detect-row" style="display: none;">
                 <button type="button" id="detect-ollama-btn" style="background-color: var(--primary-color);">Detect local
@@ -2064,7 +2082,7 @@
                     <div class="faq-answer">
                         <p><strong>401 Unauthorized</strong> means the AI provider rejected your API key. Here is how to get free/supported keys:</p>
                         <ul>
-                            <li><strong>Google Gemini (Free tier):</strong> Get a key at <a href="https://aistudio.google.com/" target="_blank" style="color: var(--primary-color);">Google AI Studio</a>. Endpoint: <code>https://generativelanguage.googleapis.com/v1beta/openai/chat/completions</code>, Model: <code>gemini-1.5-flash</code>.</li>
+                            <li><strong>Google Gemini (Free tier):</strong> Get a key at <a href="https://aistudio.google.com/" target="_blank" style="color: var(--primary-color);">Google AI Studio</a>. Endpoint: <code>https://generativelanguage.googleapis.com/v1beta/openai/chat/completions</code>, Model: <code>gemini-2.5-flash</code>.</li>
                             <li><strong>Groq (Ultra-fast, Free tier):</strong> Get a key at <a href="https://console.groq.com/" target="_blank" style="color: var(--primary-color);">Groq Console</a>. Endpoint: <code>https://api.groq.com/openai/v1/chat/completions</code>, Model: <code>llama-3.3-70b-versatile</code>.</li>
                             <li><strong>OpenRouter:</strong> Supports dozens of models at <a href="https://openrouter.ai/" target="_blank" style="color: var(--primary-color);">openrouter.ai</a>. Endpoint: <code>https://openrouter.ai/api/v1/chat/completions</code>.</li>
                         </ul>

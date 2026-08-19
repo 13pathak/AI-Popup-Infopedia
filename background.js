@@ -1119,7 +1119,7 @@ async function handleTestConnection(request, sendResponse) {
 
     if (!modelName || typeof modelName !== 'string' || !modelName.trim()) {
       failEarly(
-        "Model Name is missing. Please enter the model ID (e.g. gemini-1.5-flash, llama3, gpt-4o-mini).",
+        "Model Name is missing. Please enter the model ID (e.g. gemini-2.5-flash, llama3, gpt-4o-mini).",
         "Setup test failed: Model Name is missing."
       );
       return;
