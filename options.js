@@ -58,8 +58,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
       positionTabIndicator();
 
-      // Keep the onboarding checklist fresh when returning to Settings
-      if (tab.dataset.tab === "settings-content") refreshOnboarding();
+      // Keep the onboarding checklist fresh when returning to Settings or Get Started
+      if (tab.dataset.tab === "settings-content" || tab.dataset.tab === "get-started-content") refreshOnboarding();
 
       // Reload history every time you open the History tab
       if (tab.dataset.tab === "history-content") {
@@ -137,9 +137,13 @@ document.addEventListener('DOMContentLoaded', () => {
     chrome.storage.local.remove('activeOptionsTab');
   }
 
-  chrome.storage.local.get(['activeOptionsTab'], (data) => {
+  chrome.storage.local.get(['activeOptionsTab', 'onboardingDismissed'], (data) => {
     if (data.activeOptionsTab) {
       activateRequestedTab(data.activeOptionsTab);
+    } else if (!data.onboardingDismissed) {
+      // First-time users land on Get Started until onboarding is done or dismissed
+      const gsBtn = document.querySelector('.tab-button[data-tab="get-started-content"]');
+      if (gsBtn) gsBtn.click();
     }
   });
 

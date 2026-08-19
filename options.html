@@ -1196,7 +1196,9 @@
             <img class="tab-brand-logo" src="icons/icon128.png" alt="AI Popup Infopedia">
             <span class="tab-brand-name">AI Popup Infopedia</span>
         </div>
+        <button class="tab-button" data-tab="get-started-content"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg> Get Started</button>
         <button class="tab-button" data-tab="settings-content"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg> Settings</button>
+        <button class="tab-button" data-tab="theme-content"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg> Theme</button>
         <button class="tab-button" data-tab="pdf-content"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg> PDF Reader</button>
         <button class="tab-button" data-tab="history-content"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> History</button>
         <button class="tab-button" data-tab="anki-content"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg> Anki</button>
@@ -1211,10 +1213,11 @@
 
     <div class="settings-main">
 
-    <div id="settings-content" class="tab-content active">
-        <h2>AI Chatbot Settings</h2>
+        <div id="get-started-content" class="tab-content">
+        <h2>Get Started</h2>
+        <p style="margin-bottom: 20px;">Set up your first AI model, verify your connection, and get the hang of the popup. Follow the checklist — it tracks your progress automatically.</p>
 
-        <div id="onboarding-card" class="settings-section" style="display: none;">
+<div id="onboarding-card" class="settings-section" style="display: none;">
             <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px;">
                 <h3 class="section-title" style="margin: 0;">Get started</h3>
                 <button id="onboarding-dismiss-btn" type="button" title="Dismiss checklist"
@@ -1223,7 +1226,7 @@
             <p style="margin-bottom: 8px;">Three quick steps to your first AI explanation:</p>
             <div class="onboarding-step" id="onboarding-step-1">
                 <span class="onboarding-step-icon"></span>
-                <span>Add your first AI model — click <strong>+</strong> below, pick a provider, and paste your API key.</span>
+                <span>Add your first AI model — open the <strong>Settings</strong> tab, click <strong>+</strong>, pick a provider, and paste your API key.</span>
             </div>
             <div class="onboarding-step" id="onboarding-step-2">
                 <span class="onboarding-step-icon"></span>
@@ -1235,17 +1238,62 @@
             </div>
         </div>
 
-        <div class="settings-section" style="display: flex; align-items: center; justify-content: flex-start; flex-wrap: wrap; gap: 10px;">
-            <div>
-                <label for="ui-theme-select" style="font-weight: 600; margin-bottom: 2px;">Interface Theme</label>
-                <small style="margin-top: 0;">Choose the visual theme for the settings page and AI popup.</small>
+<!-- Test Connection & Setup Diagnostic Card -->
+        <div id="test-setup-container" class="test-setup-card">
+            <div style="display: flex; justify-content: flex-start; align-items: center; flex-wrap: wrap; gap: 12px;">
+                <div>
+                    <h4 class="section-title" style="margin: 0; display: flex; align-items: center; gap: 8px;">
+                        <span><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></span> Test Connection & Setup
+                    </h4>
+                    <p style="margin: 4px 0 0 0; color: var(--text-muted); font-size: 0.85em;">
+                        Verify model configuration, API credentials, server reachability, and web search in real time.
+                    </p>
+                </div>
+                <button id="run-test-setup-btn" style="background-color: var(--primary-color); padding: 8px 16px; font-weight: 600; display: flex; align-items: center; gap: 6px; white-space: nowrap;">
+                    <span id="test-btn-icon"><svg class="oi" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><polygon points="6 3 20 12 6 21 6 3"/></svg></span> <span id="test-btn-label">Run Diagnostic Test</span>
+                </button>
             </div>
-            <select id="ui-theme-select" style="max-width: 220px; width: auto; font-weight: 500;">
-                <option value="dark">Dark Theme (Default)</option>
-                <option value="light">Light Theme</option>
-                <option value="auto">Auto (Follow System)</option>
-            </select>
+            
+            <div id="test-setup-results" style="display: none; margin-top: 16px; border-top: 1px solid var(--border-color); padding-top: 14px;">
+                <div id="test-step-config" class="test-step-row">
+                    <span class="test-step-icon"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/></svg></span>
+                    <div class="test-step-body" style="flex-grow: 1;">
+                        <div class="test-step-title">1. Storage & Configuration Check</div>
+                        <div class="test-step-detail">Waiting to start...</div>
+                    </div>
+                </div>
+                
+                <div id="test-step-reachability" class="test-step-row">
+                    <span class="test-step-icon"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/></svg></span>
+                    <div class="test-step-body" style="flex-grow: 1;">
+                        <div class="test-step-title">2. Endpoint Reachability Check</div>
+                        <div class="test-step-detail">Waiting...</div>
+                    </div>
+                </div>
+                
+                <div id="test-step-auth" class="test-step-row">
+                    <span class="test-step-icon"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/></svg></span>
+                    <div class="test-step-body" style="flex-grow: 1;">
+                        <div class="test-step-title">3. Authentication & Model Response Check</div>
+                        <div class="test-step-detail">Waiting...</div>
+                    </div>
+                </div>
+                
+                <div id="test-step-search" class="test-step-row">
+                    <span class="test-step-icon"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/></svg></span>
+                    <div class="test-step-body" style="flex-grow: 1;">
+                        <div class="test-step-title">4. Web Search Integration Check</div>
+                        <div class="test-step-detail">Waiting...</div>
+                    </div>
+                </div>
+
+                <div id="test-final-summary" class="test-summary-box" style="display: none;"></div>
+            </div>
         </div>
+    </div>
+
+<div id="settings-content" class="tab-content active">
+        <h2>AI Chatbot Settings</h2>
 
         <div class="settings-section" style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
             <div>
@@ -1327,59 +1375,6 @@
             </div>
         </div>
 
-        <!-- Test Connection & Setup Diagnostic Card -->
-        <div id="test-setup-container" class="test-setup-card">
-            <div style="display: flex; justify-content: flex-start; align-items: center; flex-wrap: wrap; gap: 12px;">
-                <div>
-                    <h4 class="section-title" style="margin: 0; display: flex; align-items: center; gap: 8px;">
-                        <span><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></span> Test Connection & Setup
-                    </h4>
-                    <p style="margin: 4px 0 0 0; color: var(--text-muted); font-size: 0.85em;">
-                        Verify model configuration, API credentials, server reachability, and web search in real time.
-                    </p>
-                </div>
-                <button id="run-test-setup-btn" style="background-color: var(--primary-color); padding: 8px 16px; font-weight: 600; display: flex; align-items: center; gap: 6px; white-space: nowrap;">
-                    <span id="test-btn-icon"><svg class="oi" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><polygon points="6 3 20 12 6 21 6 3"/></svg></span> <span id="test-btn-label">Run Diagnostic Test</span>
-                </button>
-            </div>
-            
-            <div id="test-setup-results" style="display: none; margin-top: 16px; border-top: 1px solid var(--border-color); padding-top: 14px;">
-                <div id="test-step-config" class="test-step-row">
-                    <span class="test-step-icon"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/></svg></span>
-                    <div class="test-step-body" style="flex-grow: 1;">
-                        <div class="test-step-title">1. Storage & Configuration Check</div>
-                        <div class="test-step-detail">Waiting to start...</div>
-                    </div>
-                </div>
-                
-                <div id="test-step-reachability" class="test-step-row">
-                    <span class="test-step-icon"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/></svg></span>
-                    <div class="test-step-body" style="flex-grow: 1;">
-                        <div class="test-step-title">2. Endpoint Reachability Check</div>
-                        <div class="test-step-detail">Waiting...</div>
-                    </div>
-                </div>
-                
-                <div id="test-step-auth" class="test-step-row">
-                    <span class="test-step-icon"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/></svg></span>
-                    <div class="test-step-body" style="flex-grow: 1;">
-                        <div class="test-step-title">3. Authentication & Model Response Check</div>
-                        <div class="test-step-detail">Waiting...</div>
-                    </div>
-                </div>
-                
-                <div id="test-step-search" class="test-step-row">
-                    <span class="test-step-icon"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/></svg></span>
-                    <div class="test-step-body" style="flex-grow: 1;">
-                        <div class="test-step-title">4. Web Search Integration Check</div>
-                        <div class="test-step-detail">Waiting...</div>
-                    </div>
-                </div>
-
-                <div id="test-final-summary" class="test-summary-box" style="display: none;"></div>
-            </div>
-        </div>
-
         <div id="default-prompt-container" class="settings-section">
             <label for="default-prompt-select">Default Prompt</label>
             <select id="default-prompt-select" style="max-width: 480px; margin-bottom: 5px;"></select>
@@ -1444,7 +1439,24 @@
         <div id="status"></div>
     </div>
 
-    <!-- NEW PDF CONTENT TAB -->
+        <div id="theme-content" class="tab-content">
+        <h2>Theme</h2>
+        <p>Choose how AI Popup Infopedia looks. The theme applies to this settings page and the AI popup.</p>
+
+<div class="settings-section" style="display: flex; align-items: center; justify-content: flex-start; flex-wrap: wrap; gap: 10px;">
+            <div>
+                <label for="ui-theme-select" style="font-weight: 600; margin-bottom: 2px;">Interface Theme</label>
+                <small style="margin-top: 0;">Choose the visual theme for the settings page and AI popup.</small>
+            </div>
+            <select id="ui-theme-select" style="max-width: 220px; width: auto; font-weight: 500;">
+                <option value="dark">Dark Theme (Default)</option>
+                <option value="light">Light Theme</option>
+                <option value="auto">Auto (Follow System)</option>
+            </select>
+        </div>
+    </div>
+
+<!-- NEW PDF CONTENT TAB -->
     <div id="pdf-content" class="tab-content">
         <h2>PDF Reader Settings</h2>
         <div id="pdf-settings-container" class="settings-section">
