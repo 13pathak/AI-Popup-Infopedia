@@ -140,7 +140,8 @@
         body {
             font-family: 'Google Sans', 'Google Sans Text', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             padding: calc(var(--spacing-unit) * 2.5);
-            max-width: 1200px;
+            box-sizing: border-box;
+            max-width: 1260px;
             width: 94%;
             margin: 0;
             background-color: var(--bg-color);
@@ -1205,7 +1206,7 @@
 <body>
 
     <div class="settings-layout">
-    <div class="tab-nav">
+    <div class="tab-nav" role="tablist" aria-label="Settings sections">
         <div class="tab-brand">
             <img class="tab-brand-logo" src="icons/icon128.png" alt="AI Popup Infopedia">
             <span class="tab-brand-text">
@@ -1213,24 +1214,24 @@
                 <span class="tab-brand-version" id="tab-brand-version"></span>
             </span>
         </div>
-        <button class="tab-button" data-tab="get-started-content"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg> Get Started</button>
-        <button class="tab-button" data-tab="settings-content"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg> Model Settings</button>
-        <button class="tab-button" data-tab="prompts-content"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> Prompts</button>
-        <button class="tab-button" data-tab="history-content"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg> Saved Words</button>
-        <button class="tab-button" data-tab="anki-content"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg> Anki</button>
-        <button class="tab-button" data-tab="flashcards-content"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg> Flashcards</button>
-        <button class="tab-button" data-tab="pdf-content"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg> PDF Reader</button>
-        <button class="tab-button" data-tab="reminder-content"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Backup</button>
-        <button class="tab-button" data-tab="tts-content"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg> Text-to-Speech</button>
-        <button class="tab-button" data-tab="stt-content"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg> Speech-to-Text</button>
-        <button class="tab-button" data-tab="theme-content"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg> Themes</button>
-        <button class="tab-button" data-tab="support-content"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg> Support & Feedback</button>
+        <button class="tab-button" id="tab-get-started-content" role="tab" aria-selected="false" aria-controls="get-started-content" data-tab="get-started-content"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg> Get Started</button>
+        <button class="tab-button" id="tab-settings-content" role="tab" aria-selected="false" aria-controls="settings-content" data-tab="settings-content"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg> Model Settings</button>
+        <button class="tab-button" id="tab-prompts-content" role="tab" aria-selected="false" aria-controls="prompts-content" data-tab="prompts-content"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> Prompts</button>
+        <button class="tab-button" id="tab-history-content" role="tab" aria-selected="false" aria-controls="history-content" data-tab="history-content"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg> Saved Words</button>
+        <button class="tab-button" id="tab-anki-content" role="tab" aria-selected="false" aria-controls="anki-content" data-tab="anki-content"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg> Anki</button>
+        <button class="tab-button" id="tab-flashcards-content" role="tab" aria-selected="false" aria-controls="flashcards-content" data-tab="flashcards-content"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg> Flashcards</button>
+        <button class="tab-button" id="tab-pdf-content" role="tab" aria-selected="false" aria-controls="pdf-content" data-tab="pdf-content"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg> PDF Reader</button>
+        <button class="tab-button" id="tab-reminder-content" role="tab" aria-selected="false" aria-controls="reminder-content" data-tab="reminder-content"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Backup</button>
+        <button class="tab-button" id="tab-tts-content" role="tab" aria-selected="false" aria-controls="tts-content" data-tab="tts-content"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg> Text-to-Speech</button>
+        <button class="tab-button" id="tab-stt-content" role="tab" aria-selected="false" aria-controls="stt-content" data-tab="stt-content"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg> Speech-to-Text</button>
+        <button class="tab-button" id="tab-theme-content" role="tab" aria-selected="false" aria-controls="theme-content" data-tab="theme-content"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg> Themes</button>
+        <button class="tab-button" id="tab-support-content" role="tab" aria-selected="false" aria-controls="support-content" data-tab="support-content"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg> Support & Feedback</button>
         <span class="tab-indicator" aria-hidden="true"></span>
     </div>
 
     <div class="settings-main">
 
-        <div id="get-started-content" class="tab-content">
+        <div id="get-started-content" class="tab-content" role="tabpanel" tabindex="0" aria-labelledby="tab-get-started-content">
         <h2>Get Started</h2>
         <p style="margin-bottom: 20px;">Set up your first AI model, verify your connection, and get the hang of the popup. Follow the checklist — it tracks your progress automatically.</p>
 
@@ -1327,7 +1328,7 @@
         </div>
     </div>
 
-<div id="settings-content" class="tab-content active">
+<div id="settings-content" class="tab-content active" role="tabpanel" tabindex="0" aria-labelledby="tab-settings-content">
         <h2>Model Settings</h2>
 
         <div class="settings-section">
@@ -1423,19 +1424,6 @@
             <div id="tavily-status" style="margin-top: 10px; font-weight: bold; min-height: 1em; color: var(--secondary-color);"></div>
         </div>
 
-        <div id="global-io-container" class="settings-section">
-            <h3 class="section-title">Models & Prompts Import/Export</h3>
-            <p style="margin-bottom: 15px;">Export or import all your configured models and the global prompt. This does
-                not include your word history or lists. <strong>Warning:</strong> the export file contains your API
-                keys (model, web-search, and speech-to-text) in plain text — store it securely and do not share it.</p>
-            <button id="export-all-settings-btn" style="background-color: var(--primary-color);">Export Models & Prompts
-                (.json)</button>
-            <button id="import-all-settings-btn" style="background-color: var(--primary-color);">Import Models & Prompts
-                (.json)</button>
-            <input type="file" id="import-settings-file-input" accept=".json" style="display: none;">
-            <div id="global-io-status" style="margin-top: 10px; font-weight: bold; min-height: 1em;"></div>
-        </div>
-        
         <div id="followup-settings-container" class="settings-section">
             <h3 class="section-title">Follow-up Settings</h3>
             <label for="followup-custom-message">Custom Follow-up Message</label>
@@ -1454,7 +1442,7 @@
         <div id="status"></div>
     </div>
 
-        <div id="theme-content" class="tab-content">
+        <div id="theme-content" class="tab-content" role="tabpanel" tabindex="0" aria-labelledby="tab-theme-content">
         <h2>Themes</h2>
         <p>Choose how AI Popup Infopedia looks. The theme applies to this settings page and the AI popup.</p>
 
@@ -1472,7 +1460,7 @@
     </div>
 
 <!-- NEW PDF CONTENT TAB -->
-    <div id="pdf-content" class="tab-content">
+    <div id="pdf-content" class="tab-content" role="tabpanel" tabindex="0" aria-labelledby="tab-pdf-content">
         <h2>PDF Reader Settings</h2>
         <div id="pdf-settings-container" class="settings-section">
             <p style="margin-bottom: 10px;">The AI Popup Infopedia supports reading and translating PDFs using a built-in viewer.</p>
@@ -1504,7 +1492,7 @@
         </div>
     </div>
 
-    <div id="history-content" class="tab-content">
+    <div id="history-content" class="tab-content" role="tabpanel" tabindex="0" aria-labelledby="tab-history-content">
         <h2>Saved Words</h2>
 
         <!-- --- NEW: Search and Filter Section --- -->
@@ -1598,7 +1586,7 @@
     </div>
 
     <!-- --- NEW ANKI TAB CONTENT --- -->
-    <div id="anki-content" class="tab-content">
+    <div id="anki-content" class="tab-content" role="tabpanel" tabindex="0" aria-labelledby="tab-anki-content">
         <h2>Anki Connect Settings</h2>
         <p>Configure your connection to Anki. Make sure Anki is running with the Anki Connect add-on installed.</p>
 
@@ -1651,7 +1639,7 @@
     </div>
 
     <!-- --- NEW FLASHCARDS TAB CONTENT --- -->
-    <div id="flashcards-content" class="tab-content">
+    <div id="flashcards-content" class="tab-content" role="tabpanel" tabindex="0" aria-labelledby="tab-flashcards-content">
         <h2>Flashcards & Stats</h2>
         <p style="margin-bottom: 20px;">Review your saved words and track your learning progress.</p>
 
@@ -1759,7 +1747,7 @@
     </div>
 
     <!-- --- NEW REMINDER TAB CONTENT --- -->
-    <div id="reminder-content" class="tab-content">
+    <div id="reminder-content" class="tab-content" role="tabpanel" tabindex="0" aria-labelledby="tab-reminder-content">
         <h2>Backup & Export Settings</h2>
         <p>Set up automatic reminders to backup your vocabulary data, or create a full backup now.</p>
 
@@ -1848,7 +1836,20 @@
         <div id="restore-status" style="margin-top: 10px; font-weight: bold; min-height: 1em;"></div>
         </div>
 
-        <div class="settings-section">
+        <div id="global-io-container" class="settings-section">
+            <h3 class="section-title">Models & Prompts Import/Export</h3>
+            <p style="margin-bottom: 15px;">Export or import all your configured models and the global prompt. This does
+                not include your word history or lists. <strong>Warning:</strong> the export file contains your API
+                keys (model, web-search, and speech-to-text) in plain text — store it securely and do not share it.</p>
+            <button id="export-all-settings-btn" style="background-color: var(--primary-color);">Export Models & Prompts
+                (.json)</button>
+            <button id="import-all-settings-btn" style="background-color: var(--primary-color);">Import Models & Prompts
+                (.json)</button>
+            <input type="file" id="import-settings-file-input" accept=".json" style="display: none;">
+            <div id="global-io-status" style="margin-top: 10px; font-weight: bold; min-height: 1em;"></div>
+        </div>
+
+<div class="settings-section">
             <h3 class="section-title" style="color: var(--danger-color);">Danger Zone</h3>
             <p style="color: var(--text-muted); font-size: 0.9em; margin-bottom: 15px;">Erase <strong>everything</strong>
                 — models and API keys, custom prompts, vocabulary history and word lists, flashcard progress, and all
@@ -1860,7 +1861,7 @@
     </div>
 
     <!-- --- NEW PROMPTS TAB CONTENT --- -->
-    <div id="prompts-content" class="tab-content">
+    <div id="prompts-content" class="tab-content" role="tabpanel" tabindex="0" aria-labelledby="tab-prompts-content">
         <h2>Custom Prompts</h2>
         <p>Create and manage custom prompts to use in the popup.</p>
 
@@ -1905,7 +1906,7 @@
     </div>
 
     <!-- --- NEW TTS TAB CONTENT --- -->
-    <div id="tts-content" class="tab-content">
+    <div id="tts-content" class="tab-content" role="tabpanel" tabindex="0" aria-labelledby="tab-tts-content">
         <h2>Text-to-Speech Settings</h2>
         <p>Configure the voice used for reading aloud AI responses.</p>
 
@@ -1933,7 +1934,7 @@
     </div>
 
     <!-- --- NEW STT TAB CONTENT --- -->
-    <div id="stt-content" class="tab-content">
+    <div id="stt-content" class="tab-content" role="tabpanel" tabindex="0" aria-labelledby="tab-stt-content">
         <h2>Speech-to-Text Settings</h2>
         <p>Configure the speech recognition engine used for typing by speaking.</p>
 
@@ -1982,7 +1983,7 @@
     </div>
 
     <!-- SUPPORT & FEEDBACK TAB -->
-    <div id="support-content" class="tab-content">
+    <div id="support-content" class="tab-content" role="tabpanel" tabindex="0" aria-labelledby="tab-support-content">
         <h2>Support & Troubleshooting</h2>
         <p style="margin-bottom: calc(var(--spacing-unit) * 2);">Need help getting Infopedia working or have a suggestion? Run diagnostics, browse common fixes, or get in touch.</p>
 

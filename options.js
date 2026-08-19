@@ -56,6 +56,13 @@ document.addEventListener('DOMContentLoaded', () => {
       tab.classList.add('active');
       document.getElementById(tab.dataset.tab).classList.add('active');
 
+      // Keep ARIA state in sync with the visual selection (roving tabindex)
+      tabs.forEach(t => {
+        const selected = t.classList.contains('active');
+        t.setAttribute('aria-selected', selected ? 'true' : 'false');
+        t.tabIndex = selected ? 0 : -1;
+      });
+
       positionTabIndicator();
 
       // Keep the onboarding checklist fresh when returning to Settings or Get Started
@@ -103,6 +110,30 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   });
+
+  // Arrow keys / Home / End move between tabs; selection follows focus
+  const tabNavEl = document.querySelector('.tab-nav');
+  if (tabNavEl) {
+    tabNavEl.addEventListener('keydown', (e) => {
+      if (!['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+      e.preventDefault();
+      const idx = Array.from(tabs).findIndex(t => t.classList.contains('active'));
+      let next;
+      if (e.key === 'Home') next = 0;
+      else if (e.key === 'End') next = tabs.length - 1;
+      else if (e.key === 'ArrowDown' || e.key === 'ArrowRight') next = (idx + 1) % tabs.length;
+      else next = (idx - 1 + tabs.length) % tabs.length;
+      const target = tabs[next];
+      if (target) { target.click(); target.focus(); }
+    });
+  }
+
+  // The HTML ships with the settings panel visible; activate its tab button so
+  // the indicator and ARIA state are correct on first paint.
+  if (!document.querySelector('.tab-button.active')) {
+    const initialTab = document.querySelector('.tab-button[data-tab="settings-content"]');
+    if (initialTab) initialTab.click();
+  }
 
   // Place the indicator under the default tab without animating on load
   positionTabIndicator(false);
