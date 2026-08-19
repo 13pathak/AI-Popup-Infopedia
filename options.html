@@ -143,7 +143,7 @@
             box-sizing: border-box;
             max-width: 1260px;
             width: 94%;
-            margin: 0;
+            margin: 0 auto;
             background-color: var(--bg-color);
             color: var(--text-color);
             font-size: 15px;
@@ -476,14 +476,26 @@
         /* --- ONBOARDING CHECKLIST --- */
         .onboarding-step {
             display: flex;
-            align-items: center;
-            gap: 10px;
-            flex-wrap: wrap;
-            padding: 7px 0;
+            align-items: flex-start;
+            gap: 12px;
+            padding: 8px 0;
             color: var(--text-muted);
         }
 
         .onboarding-step.done { color: var(--text-color); }
+
+        .onboarding-step-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            margin-top: 2px;
+            flex-shrink: 0;
+        }
+
+        .onboarding-step-body {
+            flex: 1;
+            min-width: 0;
+        }
 
         .onboarding-step .oi { color: var(--text-muted); flex-shrink: 0; }
 
@@ -1244,21 +1256,31 @@
             <p style="margin-bottom: 8px;">Three quick steps to your first AI explanation:</p>
             <div class="onboarding-step" id="onboarding-step-1">
                 <span class="onboarding-step-icon"></span>
-                <span>Add your first AI model — open the <strong>Model Settings</strong> tab, click <strong>+</strong>, pick a provider, and paste your API key.</span>
+                <div class="onboarding-step-body">
+                    <span>Add your first AI model — open the <strong>Model Settings</strong> tab, click <strong>+</strong>, pick a provider, and paste your API key.</span>
+                </div>
             </div>
             <div class="onboarding-step" id="onboarding-step-2">
                 <span class="onboarding-step-icon"></span>
-                <span>Run the <strong>diagnostic test</strong> below to verify your key and endpoint.</span>
+                <div class="onboarding-step-body">
+                    <span>Run the <strong>diagnostic test</strong> below to verify your key and endpoint.</span>
+                </div>
             </div>
             <div class="onboarding-step" id="onboarding-step-3">
                 <span class="onboarding-step-icon"></span>
-                <span>Try the popup: select any text on a webpage and click the <strong>Ask AI</strong> button<span
-                    id="onboarding-shortcut-clause"> — or press <kbd class="popup-shortcut">Ctrl+Shift+Y</kbd> to ask
-                    anything without selecting text first</span>.</span>
-                <button id="open-practice-page-btn" type="button" title="Opens a random Wikipedia article in a new tab — select any word or sentence there to try the popup."
-                    style="padding: 5px 12px; font-size: 0.85em; background-color: var(--primary-color); white-space: nowrap;"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg> Open a practice page</button>
-                <button id="onboarding-set-shortcut-btn" type="button" title="Optional — the shortcut opens the popup with nothing selected, for free-form questions. Opens Chrome's extension shortcuts page."
-                    style="display: none; padding: 5px 12px; font-size: 0.85em; background-color: var(--button-bg); white-space: nowrap;">Set popup shortcut…</button>
+                <div class="onboarding-step-body">
+                    <div>
+                        <span>Try the popup: select any text on a webpage and click the <strong>Ask AI</strong> button<span
+                            id="onboarding-shortcut-clause"> — or press <kbd class="popup-shortcut">Ctrl+Shift+Y</kbd> to ask
+                            anything without selecting text first</span>.</span>
+                    </div>
+                    <div style="margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap;">
+                        <button id="open-practice-page-btn" type="button" title="Opens a random Wikipedia article in a new tab — select any word or sentence there to try the popup."
+                            style="padding: 5px 12px; font-size: 0.85em; background-color: var(--primary-color); white-space: nowrap;"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg> Open a practice page</button>
+                        <button id="onboarding-set-shortcut-btn" type="button" title="Optional — the shortcut opens the popup with nothing selected, for free-form questions. Opens Chrome's extension shortcuts page."
+                            style="display: none; padding: 5px 12px; font-size: 0.85em; background-color: var(--button-bg); white-space: nowrap;">Set popup shortcut…</button>
+                    </div>
+                </div>
             </div>
         </div>
 
