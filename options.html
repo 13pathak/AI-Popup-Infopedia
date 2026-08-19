@@ -347,8 +347,9 @@
             white-space: nowrap;
         }
 
-        /* Narrow windows: fall back to a horizontal scrollable tab row */
-        @media (max-width: 720px) {
+        /* Narrow windows: fall back to a horizontal scrollable tab row
+           (below 1024px the fixed rail would squeeze the content column) */
+        @media (max-width: 1024px) {
             .settings-layout { flex-direction: column; gap: 0; }
             .tab-nav {
                 position: static;
