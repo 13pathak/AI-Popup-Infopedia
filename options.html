@@ -44,6 +44,8 @@
             --input-bg: #0F172A;
             --button-bg: #334155;
             --button-hover-bg: #475569;
+            --nav-hover-bg: rgba(255, 255, 255, 0.06);
+            --nav-active-bg: rgba(59, 130, 246, 0.15);
             --spacing-unit: 12px;
             color-scheme: dark;
         }
@@ -61,6 +63,8 @@
             --input-bg: #FFFFFF;
             --button-bg: #E2E8F0;
             --button-hover-bg: #CBD5E1;
+            --nav-hover-bg: rgba(15, 23, 42, 0.05);
+            --nav-active-bg: rgba(37, 99, 235, 0.10);
             color-scheme: light;
         }
 
@@ -78,6 +82,8 @@
                 --input-bg: #FFFFFF;
                 --button-bg: #E2E8F0;
                 --button-hover-bg: #CBD5E1;
+            --nav-hover-bg: rgba(15, 23, 42, 0.05);
+            --nav-active-bg: rgba(37, 99, 235, 0.10);
                 color-scheme: light;
             }
         }
@@ -134,9 +140,9 @@
         body {
             font-family: 'Google Sans', 'Google Sans Text', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             padding: calc(var(--spacing-unit) * 2.5);
-            max-width: 1100px;
+            max-width: 1200px;
             width: 94%;
-            margin: 0 auto;
+            margin: 0;
             background-color: var(--bg-color);
             color: var(--text-color);
             font-size: 15px;
@@ -175,7 +181,6 @@
         input[type="password"],
         textarea,
         select {
-            width: 100%;
             padding: 10px 12px;
             box-sizing: border-box;
             background-color: var(--input-bg);
@@ -185,6 +190,24 @@
             font-size: 1em;
             font-family: inherit;
             transition: all 0.2s ease;
+        }
+
+        input[type="text"],
+        input[type="password"] {
+            width: 100%;
+            max-width: 480px;
+        }
+
+        textarea {
+            width: 100%;
+            max-width: 640px;
+        }
+
+        /* Dropdowns hug their content instead of spanning the whole card */
+        select {
+            width: auto;
+            min-width: 180px;
+            max-width: 320px;
         }
 
         input[type="text"]:focus,
@@ -270,46 +293,127 @@
         }
 
         /* --- TAB STYLES --- */
-        .tab-nav {
-            position: relative;
+        .settings-layout {
             display: flex;
-            flex-wrap: wrap;
+            align-items: flex-start;
+            gap: 28px;
+        }
+
+        .settings-main {
+            flex: 1;
+            min-width: 0;
+            max-width: 820px;
+        }
+
+        /* Sticky vertical rail beside the content column */
+        .tab-nav {
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            width: 330px;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: stretch;
+            gap: 2px;
+            padding: 0 12px 16px;
+            border-right: 1px solid var(--border-color);
+            max-height: calc(100vh - 20px);
+            overflow-y: auto;
+            background-color: var(--bg-color);
+        }
+
+        .tab-brand {
+            display: flex;
             align-items: center;
-            gap: 6px;
-            border-bottom: 2px solid var(--border-color);
-            margin-bottom: calc(var(--spacing-unit) * 3);
-            padding-bottom: 12px;
+            gap: 10px;
+            padding: 0 12px 14px;
+            margin-bottom: 8px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .tab-brand-logo {
+            width: 32px;
+            height: 32px;
+            border-radius: 6px;
+            flex-shrink: 0;
+        }
+
+        .tab-brand-name {
+            font-size: 1.8em;
+            font-weight: 600;
+            color: var(--text-color);
+            letter-spacing: -0.02em;
+            white-space: nowrap;
+        }
+
+        /* Narrow windows: fall back to a horizontal scrollable tab row */
+        @media (max-width: 720px) {
+            .settings-layout { flex-direction: column; gap: 0; }
+            .tab-nav {
+                position: static;
+                width: 100%;
+                max-height: none;
+                overflow-y: hidden;
+                overflow-x: auto;
+                flex-direction: row;
+                flex-wrap: nowrap;
+                align-items: center;
+                gap: 6px;
+                padding: 10px 0 12px;
+                border-right: none;
+                border-bottom: 2px solid var(--border-color);
+                margin-bottom: calc(var(--spacing-unit) * 2);
+            }
+            .tab-brand { display: none; }
+            .tab-indicator { display: none; }
+            .settings-main { width: 100%; max-width: none; }
         }
 
         .tab-button {
-            padding: 8px 13px;
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+            gap: 10px;
+            padding: 9px 12px;
             cursor: pointer;
             border: 1px solid transparent;
             background-color: transparent;
-            font-size: 0.92em;
+            font-size: 0.95em;
             font-weight: 500;
             color: var(--text-muted);
             border-radius: 8px;
             transition: all 0.2s ease;
             white-space: nowrap;
+            text-align: left;
         }
+
+        .tab-button .oi {
+            width: 17px;
+            height: 17px;
+            flex-shrink: 0;
+            opacity: 0.8;
+        }
+
+        .tab-button.active .oi { opacity: 1; }
 
         .tab-button.active {
             color: var(--primary-color);
             font-weight: 600;
+            background-color: var(--nav-active-bg);
         }
 
-        /* Shared underline that glides between tabs; positioned via transform in options.js */
+        /* Shared bar that glides along the rail; positioned via transform in options.js */
         .tab-indicator {
             position: absolute;
-            left: 0;
+            left: 3px;
             top: 0;
-            height: 3px;
+            width: 3px;
             background-color: var(--primary-color);
             border-radius: 3px;
             opacity: 0;
             pointer-events: none;
-            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), width 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease;
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), height 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease;
         }
 
         /* Stay hidden until first positioned so the bar never flashes at the top-left */
@@ -328,17 +432,30 @@
         }
 
         .tab-button:hover:not(.active) {
-            background-color: rgba(255, 255, 255, 0.05);
+            background-color: var(--nav-hover-bg);
             color: var(--text-color);
         }
 
+        /* Tabs are transparent columns of section cards, not one monolithic card */
         .tab-content {
             display: none;
+            max-width: 820px;
+            margin: 0 auto;
+        }
+
+        .settings-section {
             background-color: var(--card-bg);
-            border-radius: 12px;
-            padding: 24px;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
             border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 20px 24px;
+            margin-bottom: 20px;
+        }
+
+        /* Card headers: one shared style instead of per-heading inline styles */
+        .section-title {
+            color: var(--primary-color);
+            font-size: 1.1em;
+            margin-top: 0;
         }
 
         .tab-content.active {
@@ -443,12 +560,12 @@
         
         /* --- DIAGNOSTIC TEST STYLES --- */
         .test-setup-card {
-            background-color: var(--input-bg);
+            background-color: var(--card-bg);
             border: 1px solid var(--border-color);
-            border-radius: 10px;
-            padding: 18px;
-            margin-top: 20px;
-            margin-bottom: 25px;
+            border-radius: 12px;
+            padding: 20px 24px;
+            margin-top: 0;
+            margin-bottom: 20px;
         }
 
         .test-step-row {
@@ -794,20 +911,17 @@
             flex-wrap: wrap;
         }
 
-        #model-selection-container select { flex-grow: 1; min-width: 200px; }
+        #model-selection-container select { min-width: 200px; }
         #model-selection-container button { padding: 10px 14px; }
 
         #model-form-container {
-            padding: 20px;
-            background-color: var(--bg-color);
+            padding: 20px 24px;
+            background-color: var(--card-bg);
             border: 1px solid var(--border-color);
-            border-radius: 8px;
+            border-radius: 12px;
             margin-top: 20px;
+            margin-bottom: 20px;
             animation: fadeIn 0.3s ease;
-        }
-
-        #model-form-container h3 {
-            color: var(--text-color);
         }
 
         #model-form-actions {
@@ -822,18 +936,6 @@
         #save-model-btn { background-color: var(--primary-color); }
         
         /* --- IMPORT/EXPORT & LIST MANAGEMENT --- */
-        .management-card {
-            margin-top: 24px;
-            padding-top: 24px;
-            border-top: 1px solid var(--border-color);
-        }
-
-        .management-card h3 {
-            color: var(--text-color);
-            font-size: 1.2em;
-        }
-
-        .management-card button,
         #history-io button,
         #history-io-all button {
             margin-right: 8px;
@@ -847,8 +949,14 @@
             margin-bottom: 20px;
             padding: 16px;
             border: 1px solid var(--border-color);
-            border-radius: 8px;
-            background-color: var(--bg-color);
+            border-radius: 12px;
+            background-color: var(--card-bg);
+        }
+
+        #history-list-container {
+            background-color: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
         }
         
         #history-filters {
@@ -1052,26 +1160,31 @@
 
 <body>
 
+    <div class="settings-layout">
     <div class="tab-nav">
-        <button class="tab-button" data-tab="settings-content">Settings</button>
-        <button class="tab-button" data-tab="pdf-content">PDF Reader</button>
-        <button class="tab-button" data-tab="history-content">History</button>
-        <button class="tab-button" data-tab="anki-content">Anki</button>
-        <button class="tab-button" data-tab="flashcards-content">Flashcards</button>
-        <button class="tab-button" data-tab="reminder-content">Backup</button>
-        <button class="tab-button" data-tab="prompts-content">Prompts</button>
-        <button class="tab-button" data-tab="tts-content">Text-to-Speech</button>
-        <button class="tab-button" data-tab="stt-content">Speech-to-Text</button>
-        <button class="tab-button" data-tab="support-content">Support & Feedback</button>
+        <div class="tab-brand">
+            <img class="tab-brand-logo" src="icons/icon128.png" alt="AI Popup Infopedia">
+            <span class="tab-brand-name">AI Popup Infopedia</span>
+        </div>
+        <button class="tab-button" data-tab="settings-content"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg> Settings</button>
+        <button class="tab-button" data-tab="pdf-content"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg> PDF Reader</button>
+        <button class="tab-button" data-tab="history-content"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> History</button>
+        <button class="tab-button" data-tab="anki-content"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg> Anki</button>
+        <button class="tab-button" data-tab="flashcards-content"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg> Flashcards</button>
+        <button class="tab-button" data-tab="reminder-content"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Backup</button>
+        <button class="tab-button" data-tab="prompts-content"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> Prompts</button>
+        <button class="tab-button" data-tab="tts-content"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg> Text-to-Speech</button>
+        <button class="tab-button" data-tab="stt-content"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg> Speech-to-Text</button>
+        <button class="tab-button" data-tab="support-content"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg> Support & Feedback</button>
         <span class="tab-indicator" aria-hidden="true"></span>
     </div>
 
-    <div id="status-global"></div>
+    <div class="settings-main">
 
     <div id="settings-content" class="tab-content active">
         <h2>AI Chatbot Settings</h2>
         
-        <div style="background-color: var(--bg-color); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 16px; margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+        <div class="settings-section" style="display: flex; align-items: center; justify-content: flex-start; flex-wrap: wrap; gap: 10px;">
             <div>
                 <label for="ui-theme-select" style="font-weight: 600; margin-bottom: 2px;">Interface Theme</label>
                 <small style="margin-top: 0;">Choose the visual theme for the settings page and AI popup.</small>
@@ -1083,12 +1196,14 @@
             </select>
         </div>
 
-        <p style="margin-bottom: calc(var(--spacing-unit) * 2);">Manage your AI model configurations. The "Default" model will
-            be used for pop-up definitions.</p>
+        <div class="settings-section">
+            <h3 class="section-title">Models</h3>
+            <p style="margin-bottom: calc(var(--spacing-unit) * 2);">Manage your AI model configurations. The "Default" model
+                will be used for pop-up definitions.</p>
 
         <div id="model-selection-container" style="display: flex; align-items: center; gap: 10px;">
             <label for="model-select" style="margin-bottom: 0;">Default Model:</label>
-            <select id="model-select" style="flex-grow: 1;"></select>
+            <select id="model-select"></select>
             <button id="add-model-btn" title="Add New Model"
                 style="background-color: var(--secondary-color);"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
             <button id="edit-model-btn" title="Edit Selected Model"
@@ -1097,12 +1212,13 @@
         </div>
         <p id="no-models-message" style="display: none; margin-top: 10px;">No models configured. Click '+' to add one.
         </p>
+        </div>
 
         <!-- Test Connection & Setup Diagnostic Card -->
         <div id="test-setup-container" class="test-setup-card">
-            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
-                <div style="flex: 1; min-width: 250px;">
-                    <h4 style="margin: 0; display: flex; align-items: center; gap: 8px; color: var(--text-color); font-size: 1.05em;">
+            <div style="display: flex; justify-content: flex-start; align-items: center; flex-wrap: wrap; gap: 12px;">
+                <div>
+                    <h4 class="section-title" style="margin: 0; display: flex; align-items: center; gap: 8px;">
                         <span><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></span> Test Connection & Setup
                     </h4>
                     <p style="margin: 4px 0 0 0; color: var(--text-muted); font-size: 0.85em;">
@@ -1152,7 +1268,7 @@
         </div>
 
         <div id="model-form-container" style="display: none;">
-            <h3 id="form-title">Add New Model</h3>
+            <h3 id="form-title" class="section-title">Add New Model</h3>
             <input type="hidden" id="model-id">
             <div>
                 <label for="configName">Configuration Name (e.g., "Local Llama")</label>
@@ -1182,16 +1298,16 @@
             </div>
         </div>
 
-        <div id="default-prompt-container" style="margin-top: 20px;">
+        <div id="default-prompt-container" class="settings-section">
             <label for="default-prompt-select">Default Prompt</label>
-            <select id="default-prompt-select" style="width: 100%; margin-bottom: 5px;"></select>
+            <select id="default-prompt-select" style="max-width: 480px; margin-bottom: 5px;"></select>
             <small style="display: block; margin-top: 5px;">Select which custom prompt should be used by default when
                 the
                 popup opens.</small>
         </div>
 
-        <div id="hallucination-guard-container" style="margin-top: 30px; padding-top: 20px; border-top: 1px solid var(--border-color);">
-            <h3 style="color: var(--primary-color); margin-top: 0;">Hallucination Guard (Advanced)</h3>
+        <div id="hallucination-guard-container" class="settings-section">
+            <h3 class="section-title">Hallucination Guard (Advanced)</h3>
             <p style="margin-bottom: 15px;">Enable a secondary model to verify the output of the primary model to reduce hallucinations. This will use extra API credits/tokens.</p>
             <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 15px;">
                 <input type="checkbox" id="enable-hallucination-guard" style="width: auto;">
@@ -1199,13 +1315,13 @@
             </div>
             <div>
                 <label for="verification-model-select">Verification Model</label>
-                <select id="verification-model-select" style="width: 100%;"></select>
+                <select id="verification-model-select"></select>
                 <small>Select the model to act as the fact-checker. We recommend using a different provider than your default model.</small>
             </div>
         </div>
 
-        <div id="search-api-container" style="margin-top: 30px; padding-top: 20px; border-top: 1px solid var(--border-color);">
-            <h3 style="color: var(--primary-color); margin-top: 0;">Search API Settings (Optional)</h3>
+        <div id="search-api-container" class="settings-section">
+            <h3 class="section-title">Search API Settings (Optional)</h3>
             <p style="margin-bottom: 15px;">Enter a free Tavily API key to enable AI models to search the web for up-to-date facts.</p>
             <div>
                 <label for="tavily-api-key">Tavily API Key</label>
@@ -1215,9 +1331,8 @@
             <div id="tavily-status" style="margin-top: 10px; font-weight: bold; min-height: 1em; color: var(--secondary-color);"></div>
         </div>
 
-        <div id="global-io-container"
-            style="margin-top: 30px; padding-top: 20px; border-top: 1px solid var(--border-color);">
-            <h3 style="color: var(--primary-color); margin-top: 0;">Models & Prompts Import/Export</h3>
+        <div id="global-io-container" class="settings-section">
+            <h3 class="section-title">Models & Prompts Import/Export</h3>
             <p style="margin-bottom: 15px;">Export or import all your configured models and the global prompt. This does
                 not include your word history or lists. <strong>Warning:</strong> the export file contains your API
                 keys (model, web-search, and speech-to-text) in plain text — store it securely and do not share it.</p>
@@ -1229,9 +1344,8 @@
             <div id="global-io-status" style="margin-top: 10px; font-weight: bold; min-height: 1em;"></div>
         </div>
         
-        <div id="followup-settings-container"
-            style="margin-top: 30px; padding-top: 20px; border-top: 1px solid var(--border-color);">
-            <h3 style="color: var(--primary-color); margin-top: 0;">Follow-up Settings</h3>
+        <div id="followup-settings-container" class="settings-section">
+            <h3 class="section-title">Follow-up Settings</h3>
             <label for="followup-custom-message">Custom Follow-up Message</label>
             <textarea id="followup-custom-message" rows="3" placeholder="e.g., restrict your reply within 500 characters"></textarea>
             <small style="display: block; margin-top: 5px;">This message will be automatically appended to every subsequent question you ask in the popup. For example, 'Provide a maximum 6-sentence response with each sentence not containing more than 10 words.'</small>
@@ -1251,7 +1365,7 @@
     <!-- NEW PDF CONTENT TAB -->
     <div id="pdf-content" class="tab-content">
         <h2>PDF Reader Settings</h2>
-        <div id="pdf-settings-container">
+        <div id="pdf-settings-container" class="settings-section">
             <p style="margin-bottom: 10px;">The AI Popup Infopedia supports reading and translating PDFs using a built-in viewer.</p>
             
             <div style="margin-bottom: 20px; display: flex; align-items: center; gap: 10px;">
@@ -1285,8 +1399,7 @@
         <h2>Search History</h2>
 
         <!-- --- NEW: Search and Filter Section --- -->
-        <div id="history-filters"
-            style="margin-bottom: 15px; padding: 10px; border: 1px solid var(--border-color); border-radius: 4px; background-color: var(--input-bg);">
+        <div id="history-filters">
             <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
                 <input type="text" id="history-search" placeholder="Search words or definitions..."
                     style="flex-grow: 1; min-width: 150px;">
@@ -1303,7 +1416,7 @@
         </div>
 
         <div id="list-management">
-            <h4>Manage & View Lists</h4>
+            <h4 class="section-title">Manage & View Lists</h4>
             <div id="list-controls">
                 <div id="list-select-container" style="flex-grow: 1;"></div>
                 <button id="add-list-btn" title="Add New List"
@@ -1335,8 +1448,8 @@
             </div>
         </div>
 
-        <div id="history-io">
-            <h4>Import / Export (Selected List)</h4>
+        <div id="history-io" class="settings-section">
+            <h4 class="section-title">Import / Export (Selected List)</h4>
             <button id="export-history" style="background-color: var(--primary-color);">Export Selected List
                 (.csv)</button>
             <button id="import-history" style="background-color: var(--primary-color);">Import to Selected List
@@ -1345,8 +1458,8 @@
             <div id="io-status"></div>
         </div>
 
-        <div id="history-io-all">
-            <h4>Global Actions (All Lists)</h4>
+        <div id="history-io-all" class="settings-section">
+            <h4 class="section-title">Global Actions (All Lists)</h4>
             <button id="export-all-history" style="background-color: var(--button-bg);">Export All History
                 (.csv)</button>
             <button id="import-all-history" style="background-color: var(--button-bg);">Import All History
@@ -1380,9 +1493,15 @@
         <h2>Anki Connect Settings</h2>
         <p>Configure your connection to Anki. Make sure Anki is running with the Anki Connect add-on installed.</p>
 
-        <button id="anki-refresh-btn" style="background-color: var(--primary-color); margin-bottom: 20px;">Test
-            Connection / Refresh Lists</button>
-        <div id="anki-status"></div>
+        <div class="settings-section">
+            <h3 class="section-title">Connection</h3>
+            <button id="anki-refresh-btn" style="background-color: var(--primary-color);">Test
+                Connection / Refresh Lists</button>
+            <div id="anki-status"></div>
+        </div>
+
+        <div class="settings-section">
+            <h3 class="section-title">Default Deck & Field Mapping</h3>
 
         <div>
             <label for="anki-deck-select">Default Deck</label>
@@ -1399,7 +1518,7 @@
         </div>
 
         <div id="anki-fields-mapping"
-            style="display: none; margin-top: 20px; padding: 15px; border: 1px solid var(--border-color); border-radius: 4px;">
+            style="display: none; margin-top: 20px; padding: 15px; border: 1px solid var(--border-color); border-radius: 4px; background-color: var(--input-bg);">
             <h4>Map Fields</h4>
             <p style="font-size: 0.9em; margin-top: -10px;">Select which fields in your Anki note type should receive
                 the Word and Definition.</p>
@@ -1419,6 +1538,7 @@
 
         <button id="anki-save-settings-btn" style="margin-top: 20px; background-color: var(--secondary-color);">Save
             Anki Settings</button>
+        </div>
     </div>
 
     <!-- --- NEW FLASHCARDS TAB CONTENT --- -->
@@ -1461,11 +1581,10 @@
                 <span>More</span>
             </div>
         </div>
-        <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 25px 0;">
 
         <!-- Flashcards Setup -->
         <div id="flashcard-setup"
-            style="margin-bottom: 20px; padding: 15px; background-color: var(--input-bg); border-radius: 4px; display: flex; gap: 10px; align-items: center;">
+            style="margin-bottom: 20px; padding: 15px; background-color: var(--input-bg); border: 1px solid var(--border-color); border-radius: 8px; display: flex; gap: 10px; align-items: center;">
             <select id="flashcard-list-select" style="flex-grow: 1;">
                 <option value="all">All Lists</option>
             </select>
@@ -1535,6 +1654,7 @@
         <h2>Backup & Export Settings</h2>
         <p>Set up automatic reminders to backup your vocabulary data, or create a full backup now.</p>
 
+        <div class="settings-section">
         <div class="form-group">
             <label for="reminder-frequency">Backup Frequency:</label>
             <select id="reminder-frequency" style="width: auto;">
@@ -1551,9 +1671,10 @@
                 style="max-width: 300px; display: block; margin-top: 5px;">
             <small>Leave empty to save directly in Downloads folder.</small>
         </div>
+        </div>
 
-        <div class="form-group" style="margin-top: 25px; padding: 18px; background-color: var(--card-bg); border: 1px solid var(--border-color); border-radius: 8px;">
-            <h3 style="margin-top: 0; margin-bottom: 8px; font-size: 1.1em; color: var(--text-color);">Data to Include in Backup</h3>
+        <div class="settings-section">
+            <h3 class="section-title">Data to Include in Backup</h3>
             <p style="color: var(--text-muted); font-size: 0.9em; margin-bottom: 15px;">Choose which categories to include when creating backups.</p>
 
             <div style="display: flex; gap: 10px; margin-bottom: 16px;">
@@ -1595,20 +1716,20 @@
                     <span><strong>General & UI Settings</strong><small style="display:block; color: var(--text-muted);">UI theme, search toggle & reminder preferences</small></span>
                 </label>
             </div>
+            <div id="backup-status" style="margin-top: 20px; font-weight: bold; color: var(--primary-color);">
+                Last Backup: Never
+            </div>
+
+            <button id="save-reminder-settings-btn" style="margin-top: 20px; background-color: var(--secondary-color);">Save
+                Settings</button>
+            <button id="manual-backup-btn"
+                style="margin-top: 20px; margin-left: 10px; background-color: var(--primary-color);">Backup Now</button>
+
+            <div id="reminder-status" style="margin-top: 10px; font-weight: bold; min-height: 1em;"></div>
         </div>
 
-        <div id="backup-status" style="margin-top: 20px; font-weight: bold; color: var(--primary-color);">
-            Last Backup: Never
-        </div>
-
-        <button id="save-reminder-settings-btn" style="margin-top: 20px; background-color: var(--secondary-color);">Save
-            Settings</button>
-        <button id="manual-backup-btn"
-            style="margin-top: 20px; margin-left: 10px; background-color: var(--primary-color);">Backup Now</button>
-
-        <hr style="border: 0; border-top: 1px solid var(--border-color); margin-top: 30px;">
-
-        <h3 style="margin-top: 20px;">Restore from Backup</h3>
+        <div class="settings-section">
+        <h3 class="section-title">Restore from Backup</h3>
         <p style="color: var(--text-muted); font-size: 0.9em; margin-bottom: 10px;">
             Restore your history, lists, and settings from a backup file. <br>
             <strong style="color: var(--danger-color);">Warning: This will overwrite your current data!</strong>
@@ -1616,8 +1737,7 @@
         <input type="file" id="restore-backup-file" accept=".json" style="display: none;">
         <button id="restore-backup-btn" style="background-color: var(--danger-color);">Restore Backup file</button>
         <div id="restore-status" style="margin-top: 10px; font-weight: bold; min-height: 1em;"></div>
-
-        <div id="reminder-status" style="margin-top: 10px; font-weight: bold; min-height: 1em;"></div>
+        </div>
     </div>
 
     <!-- --- NEW PROMPTS TAB CONTENT --- -->
@@ -1625,9 +1745,8 @@
         <h2>Custom Prompts</h2>
         <p>Create and manage custom prompts to use in the popup.</p>
 
-        <div id="prompt-form-container"
-            style="border: 1px solid var(--border-color); padding: 15px; border-radius: 4px; margin-bottom: 20px;">
-            <h3 style="margin-top: 0; color: var(--primary-color);">Add New Prompt</h3>
+        <div id="prompt-form-container" class="settings-section">
+            <h3 class="section-title">Add New Prompt</h3>
             <input type="hidden" id="prompt-id">
             <div>
                 <label for="prompt-name">Prompt Name</label>
@@ -1647,8 +1766,7 @@
         </div>
 
         <h3>Saved Prompts</h3>
-        <div id="prompts-list"
-            style="border: 1px solid var(--border-color); border-radius: 4px; padding: 10px; min-height: 100px;">
+        <div id="prompts-list" class="settings-section" style="padding: 10px; min-height: 100px;">
             <div id="no-prompts-message" class="empty-state" style="display: none;">
                 <div class="empty-state-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
                 <div class="empty-state-title">No custom prompts added yet</div>
@@ -1663,9 +1781,10 @@
         <h2>Text-to-Speech Settings</h2>
         <p>Configure the voice used for reading aloud AI responses.</p>
 
+        <div class="settings-section">
         <div class="form-group">
             <label for="tts-voice-select">Select Voice:</label>
-            <select id="tts-voice-select" style="width: 100%; margin-top: 5px;">
+            <select id="tts-voice-select" style="margin-top: 5px;">
                 <option value="" disabled selected>Loading voices...</option>
             </select>
         </div>
@@ -1673,7 +1792,7 @@
         <div class="form-group" style="margin-top: 20px;">
             <label for="tts-rate-range">Speed (Rate): <span id="tts-rate-value">1.0</span>x</label>
             <input type="range" id="tts-rate-range" min="0.5" max="2.0" step="0.1" value="1.0"
-                style="width: 100%; margin-top: 5px;">
+                style="width: 100%; max-width: 480px; margin-top: 5px;">
         </div>
 
         <div style="margin-top: 30px;">
@@ -1682,6 +1801,7 @@
             <button id="tts-save-btn" style="background-color: var(--secondary-color);">Save Settings</button>
         </div>
         <div id="tts-status" style="margin-top: 10px; font-weight: bold; min-height: 1em;"></div>
+        </div>
     </div>
 
     <!-- --- NEW STT TAB CONTENT --- -->
@@ -1689,9 +1809,10 @@
         <h2>Speech-to-Text Settings</h2>
         <p>Configure the speech recognition engine used for typing by speaking.</p>
 
+        <div class="settings-section">
         <div class="form-group">
             <label for="stt-engine-select">Select Engine:</label>
-            <select id="stt-engine-select" style="width: 100%; margin-top: 5px;">
+            <select id="stt-engine-select" style="margin-top: 5px;">
                 <option value="native">Chrome Native (Free)</option>
                 <option value="api">API-Based (e.g., Whisper)</option>
             </select>
@@ -1729,6 +1850,7 @@
             <button id="stt-save-btn" style="background-color: var(--secondary-color);">Save Settings</button>
         </div>
         <div id="stt-status" style="margin-top: 10px; font-weight: bold; min-height: 1em;"></div>
+        </div>
     </div>
 
     <!-- SUPPORT & FEEDBACK TAB -->
@@ -1738,8 +1860,8 @@
 
         <!-- 1. Quick Diagnostic Information Box -->
         <div style="background-color: var(--input-bg); border: 1px solid var(--border-color); border-radius: 10px; padding: 20px; margin-bottom: 25px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 12px;">
-                <h3 style="margin: 0; color: var(--primary-color); font-size: 1.15em; display: flex; align-items: center; gap: 8px;">
+            <div style="display: flex; justify-content: flex-start; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 12px;">
+                <h3 class="section-title" style="margin: 0; display: flex; align-items: center; gap: 8px;">
                     <span><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></span> Quick Diagnostic Information
                 </h3>
                 <div style="display: flex; gap: 8px; flex-wrap: wrap;">
@@ -1782,7 +1904,7 @@
 
         <!-- 2. Contact & Action Buttons -->
         <div style="background-color: var(--input-bg); border: 1px solid var(--border-color); border-radius: 10px; padding: 20px; margin-bottom: 25px;">
-            <h3 style="margin: 0 0 10px 0; color: var(--primary-color); font-size: 1.15em;">Get in Touch</h3>
+            <h3 class="section-title" style="margin: 0 0 10px 0;">Get in Touch</h3>
             <p style="font-size: 0.9em; color: var(--text-muted); margin-bottom: 15px;">
                 Found a bug, have an issue, or want to suggest a new feature?
             </p>
@@ -1807,7 +1929,7 @@
 
         <!-- 3. Built-in Interactive Troubleshooting Guide -->
         <div style="margin-top: 25px;">
-            <h3 style="margin: 0 0 15px 0; color: var(--primary-color); font-size: 1.15em;">Interactive Troubleshooting Guide</h3>
+            <h3 class="section-title" style="margin: 0 0 15px 0;">Interactive Troubleshooting Guide</h3>
             
             <div class="faq-accordion">
                 <!-- FAQ 1 -->
@@ -1891,6 +2013,8 @@
             </div>
         </div>
     </div>
+    </div><!-- /settings-main -->
+    </div><!-- /settings-layout -->
 
     <!-- Modal for reordering lists -->
     <div id="reorder-modal" class="modal-overlay" style="display: none;">
