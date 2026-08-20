@@ -2290,10 +2290,16 @@ function createSelectors(instance, models, prompts, currentModelId, currentPromp
 
     // The empty hotkey popup has no real word; "Custom Question" is a sentinel.
     // Redefining would query that literal string and wipe the conversation, so
-    // only record the choice — follow-ups read the selectors live.
+    // only record the choice — follow-ups read the selectors live. Confirm
+    // visibly, though: next to the re-querying text popups a silent switch
+    // reads as a dead control.
     if (selectedText === "Custom Question") {
       instance.lastModelId = newModelId;
       instance.lastModelName = models.find(m => m.id === newModelId)?.name;
+      const promptName = newPromptContent
+        ? ((prompts || []).find(p => p.content === newPromptContent)?.name || 'Custom prompt')
+        : 'System Default';
+      showPopupToast(instance, `Next answer: ${instance.lastModelName || 'selected model'} · ${promptName}`);
       return;
     }
 
@@ -2303,7 +2309,13 @@ function createSelectors(instance, models, prompts, currentModelId, currentPromp
 
 // --- Function to get a new definition with a specific model and prompt ---
 function redefineWithModelAndPrompt(instance, word, modelId, promptContent) {
-  if (!activePopups.includes(instance)) return;
+  if (!activePopups.includes(instance)) {
+    // Unreachable while the popup is visible; if it ever fires, the popup DOM
+    // outlived its registration and every control inside would be dead. Say
+    // so instead of silently dropping the user's model/prompt switch.
+    console.error('[AI Popup] model/prompt switch ignored: popup instance is no longer active');
+    return;
+  }
   const popup = instance.popup;
 
   // Set the interaction flag
