@@ -393,9 +393,102 @@ const popupStyles = `
     margin-top: 0;
     margin-bottom: 12px;
   }
-  
+
   #ai-popup-content p:last-child {
     margin-bottom: 0;
+  }
+
+  /* --- Markdown blocks inside AI responses --- */
+  #ai-popup-content h1, #ai-popup-content h2, #ai-popup-content h3,
+  #ai-popup-content h4, #ai-popup-content h5, #ai-popup-content h6 {
+    margin: 14px 0 6px;
+    line-height: 1.3;
+    color: var(--popup-text-header);
+  }
+  #ai-popup-content h1 { font-size: 1.3em; }
+  #ai-popup-content h2 { font-size: 1.2em; }
+  #ai-popup-content h3 { font-size: 1.1em; }
+  #ai-popup-content h4, #ai-popup-content h5, #ai-popup-content h6 { font-size: 1em; }
+  #ai-popup-content h1:first-child, #ai-popup-content h2:first-child,
+  #ai-popup-content h3:first-child, #ai-popup-content h4:first-child {
+    margin-top: 0;
+  }
+
+  #ai-popup-content ul, #ai-popup-content ol {
+    margin: 0 0 12px;
+    padding-left: 22px;
+  }
+  #ai-popup-content li { margin: 3px 0; }
+  #ai-popup-content ul:last-child, #ai-popup-content ol:last-child,
+  #ai-popup-content ul li:last-child, #ai-popup-content ol li:last-child { margin-bottom: 0; }
+
+  #ai-popup-content code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+    font-size: 0.88em;
+    background: var(--popup-field-bg);
+    border: 1px solid var(--popup-border);
+    border-radius: 5px;
+    padding: 1px 5px;
+    overflow-wrap: anywhere;
+  }
+  #ai-popup-content pre {
+    margin: 0 0 12px;
+    padding: 10px 12px;
+    background: var(--popup-field-bg);
+    border: 1px solid var(--popup-border);
+    border-radius: 8px;
+    overflow-x: auto;
+  }
+  #ai-popup-content pre code {
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    padding: 0;
+    font-size: 0.86em;
+    white-space: pre;
+  }
+  #ai-popup-content pre:last-child { margin-bottom: 0; }
+
+  #ai-popup-content blockquote {
+    margin: 0 0 12px;
+    padding: 2px 0 2px 12px;
+    border-left: 3px solid rgba(var(--popup-accent-rgb), 0.55);
+    color: var(--popup-text-muted);
+  }
+  #ai-popup-content blockquote:last-child { margin-bottom: 0; }
+
+  #ai-popup-content .ai-md-table-wrap {
+    max-width: 100%;
+    margin: 0 0 12px;
+    overflow-x: auto;
+  }
+  #ai-popup-content table {
+    border-collapse: collapse;
+    font-size: 0.92em;
+  }
+  #ai-popup-content th, #ai-popup-content td {
+    border: 1px solid var(--popup-field-border);
+    padding: 5px 9px;
+    text-align: left;
+    vertical-align: top;
+  }
+  #ai-popup-content th {
+    background: var(--popup-field-bg);
+    color: var(--popup-text-header);
+  }
+
+  #ai-popup-content a {
+    color: rgb(var(--popup-accent-rgb));
+    text-decoration: none;
+    border-bottom: 1px solid rgba(var(--popup-accent-rgb), 0.4);
+    overflow-wrap: anywhere;
+  }
+  #ai-popup-content a:hover { border-bottom-color: rgb(var(--popup-accent-rgb)); }
+
+  #ai-popup-content hr {
+    border: none;
+    border-top: 1px solid var(--popup-border);
+    margin: 14px 0;
   }
 
   /* --- Follow-up conversation rows (chat-style transcript) --- */
@@ -1603,6 +1696,233 @@ function makePopupDraggable(instance) {
   });
 }
 
+// --- Markdown rendering (shared by the popup and the PDF export) ---
+// AI responses arrive as Markdown, so render them to HTML here instead of
+// leaking raw `**`, backticks and bullet markers into the UI. The text is
+// HTML-escaped first and the only markup produced is what this function
+// itself emits, so untrusted model output can never inject elements.
+function escapeHtmlText(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function renderMarkdownHtml(raw) {
+  const text = String(raw == null ? '' : raw).replace(/\r\n?/g, '\n');
+
+  // Only http(s)/mailto links are emitted; everything else (javascript:,
+  // data:, ...) degrades to plain text.
+  function safeUrl(url) {
+    try {
+      const parsed = new URL(url);
+      return (parsed.protocol === 'http:' || parsed.protocol === 'https:' || parsed.protocol === 'mailto:')
+        ? parsed.href
+        : null;
+    } catch (err) {
+      return null;
+    }
+  }
+
+  // Runs on already-escaped text. Backtick spans are pulled out first (as
+  // \u0000<n>\u0000 placeholders) so emphasis/link rules never touch them.
+  function renderInline(escaped) {
+    const codeSpans = [];
+    let out = escaped.replace(/(`+)([^`]|[^`][\s\S]*?[^`])\1(?!`)/g, (m, ticks, body) => {
+      codeSpans.push('<code>' + body.replace(/^ | $/g, '') + '</code>');
+      return '\u0000' + (codeSpans.length - 1) + '\u0000';
+    });
+
+    out = out.replace(/\*\*(?=\S)([\s\S]*?\S)\*\*/g, '<strong>$1</strong>');
+    out = out.replace(/__(?=\S)([\s\S]*?\S)__/g, '<strong>$1</strong>');
+    out = out.replace(/\*(?=\S)([^*\n]*?\S)\*/g, '<em>$1</em>');
+    out = out.replace(/(?<![A-Za-z0-9])_(?=\S)([^_\n]*?\S)_(?![A-Za-z0-9])/g, '<em>$1</em>');
+    out = out.replace(/~~(?=\S)([\s\S]*?\S)~~/g, '<del>$1</del>');
+
+    // URL part allows one level of balanced parens, e.g. wiki links.
+    const urlPart = '([^()\\s]*(?:\\([^()]*\\)[^()\\s]*)*)';
+    const imageRe = new RegExp('!\\[([^\\]]*)\\]\\(' + urlPart + '\\)');
+    const linkRe = new RegExp('\\[([^\\]]*)\\]\\(' + urlPart + '\\)');
+    out = out.replace(imageRe, (m, alt, url) => {
+      const safe = safeUrl(url);
+      return safe ? `<a href="${escapeHtmlText(safe)}" target="_blank" rel="noopener noreferrer">${alt || escapeHtmlText(safe)}</a>` : (alt || m);
+    });
+    out = out.replace(linkRe, (m, label, url) => {
+      const safe = safeUrl(url);
+      return safe ? `<a href="${escapeHtmlText(safe)}" target="_blank" rel="noopener noreferrer">${label || escapeHtmlText(safe)}</a>` : (label || m);
+    });
+
+    return out.replace(/\u0000(\d+)\u0000/g, (m, idx) => codeSpans[+idx]);
+  }
+
+  // Builds a (possibly nested) list starting at lines[start]; returns the
+  // index of the first line after the list.
+  function parseList(lines, start) {
+    const stack = []; // { ordered, indent, items: [html] }
+
+    function closeTop() {
+      const list = stack.pop();
+      const tag = list.ordered ? 'ol' : 'ul';
+      const html = '<' + tag + '>' + list.items.map(it => '<li>' + it + '</li>').join('') + '</' + tag + '>';
+      if (stack.length) {
+        const parentItems = stack[stack.length - 1].items;
+        parentItems[parentItems.length - 1] += html;
+        return null;
+      }
+      return html;
+    }
+
+    let result = '';
+    let i = start;
+    while (i < lines.length) {
+      const m = lines[i].match(/^(\s*)([-*+]|\d{1,9}[.)])\s+(.*)$/);
+      if (m) {
+        const indent = m[1].replace(/\t/g, '  ').length;
+        const ordered = /\d/.test(m[2]);
+        while (stack.length && (indent < stack[stack.length - 1].indent ||
+               (indent === stack[stack.length - 1].indent && ordered !== stack[stack.length - 1].ordered))) {
+          const html = closeTop();
+          if (html !== null) result += html;
+        }
+        const top = stack[stack.length - 1];
+        if (!top || indent >= top.indent + 2) {
+          stack.push({ ordered, indent, items: [] });
+        }
+        let itemText = m[3];
+        const checkbox = itemText.match(/^\[( |x|X)\]\s+(.*)$/);
+        if (checkbox) itemText = (checkbox[1].trim() ? '☑ ' : '☐ ') + checkbox[2];
+        stack[stack.length - 1].items.push(renderInline(escapeHtmlText(itemText)));
+        i++;
+      } else if (lines[i].trim() && stack.length) {
+        // Non-list line directly under a list continues the current item.
+        const items = stack[stack.length - 1].items;
+        items[items.length - 1] += '<br>' + renderInline(escapeHtmlText(lines[i].trim()));
+        i++;
+      } else {
+        break;
+      }
+    }
+    while (stack.length) {
+      const html = closeTop();
+      if (html !== null) result += html;
+    }
+    return { html: result, next: i };
+  }
+
+  const lines = text.split('\n');
+  let htmlOut = '';
+  let paragraphLines = [];
+  let i = 0;
+
+  function flushParagraph() {
+    if (!paragraphLines.length) return;
+    htmlOut += '<p>' + paragraphLines.map(l => renderInline(escapeHtmlText(l))).join('<br>') + '</p>';
+    paragraphLines = [];
+  }
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    if (!line.trim()) {
+      flushParagraph();
+      i++;
+      continue;
+    }
+
+    // Fenced code block: content is escaped verbatim, no inline parsing.
+    const fence = line.match(/^\s{0,3}(`{3,}|~{3,})\s*(\S*)\s*$/);
+    if (fence) {
+      flushParagraph();
+      const fenceChar = fence[1][0];
+      const lang = fence[2] || '';
+      const closeRe = new RegExp('^\\s{0,3}\\' + fenceChar + '{3,}\\s*$');
+      const body = [];
+      i++;
+      while (i < lines.length && !closeRe.test(lines[i])) {
+        body.push(lines[i]);
+        i++;
+      }
+      i++; // skip the closing fence when present, else step past EOF
+      htmlOut += '<pre><code' + (lang ? ' class="language-' + escapeHtmlText(lang) + '"' : '') + '>' + escapeHtmlText(body.join('\n')) + '</code></pre>';
+      continue;
+    }
+
+    const heading = line.match(/^\s{0,3}(#{1,6})\s+(.*)$/);
+    if (heading) {
+      flushParagraph();
+      const level = heading[1].length;
+      const content = heading[2].replace(/\s+#+\s*$/, '');
+      htmlOut += '<h' + level + '>' + renderInline(escapeHtmlText(content)) + '</h' + level + '>';
+      i++;
+      continue;
+    }
+
+    // GFM table: a header row of cells followed by a |---|---| separator.
+    const isTableSep = (l) => l.includes('|') && /^\s{0,3}\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?\s*$/.test(l);
+    if (line.includes('|') && i + 1 < lines.length && isTableSep(lines[i + 1])) {
+      flushParagraph();
+      const splitRow = (row) => row.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim());
+      const aligns = splitRow(lines[i + 1]).map(c => {
+        if (c.startsWith(':') && c.endsWith(':')) return 'center';
+        if (c.endsWith(':')) return 'right';
+        return 'left';
+      });
+      const headerCells = splitRow(line);
+      const alignAttr = (idx) => ` style="text-align:${aligns[idx] || 'left'}"`;
+      let t = '<div class="ai-md-table-wrap"><table><thead><tr>';
+      headerCells.forEach((c, idx) => { t += `<th${alignAttr(idx)}>${renderInline(escapeHtmlText(c))}</th>`; });
+      t += '</tr></thead><tbody>';
+      let j = i + 2;
+      while (j < lines.length && lines[j].trim() && lines[j].includes('|')) {
+        const cells = splitRow(lines[j]);
+        t += '<tr>';
+        headerCells.forEach((_, idx) => { t += `<td${alignAttr(idx)}>${renderInline(escapeHtmlText(cells[idx] ?? ''))}</td>`; });
+        t += '</tr>';
+        j++;
+      }
+      t += '</tbody></table></div>';
+      htmlOut += t;
+      i = j;
+      continue;
+    }
+
+    if (/^\s{0,3}((-\s*){3,}|(\*\s*){3,}|(_\s*){3,})$/.test(line)) {
+      flushParagraph();
+      htmlOut += '<hr>';
+      i++;
+      continue;
+    }
+
+    if (/^\s{0,3}>/.test(line)) {
+      flushParagraph();
+      const inner = [];
+      while (i < lines.length && /^\s{0,3}>/.test(lines[i])) {
+        inner.push(lines[i].replace(/^\s{0,3}>\s?/, ''));
+        i++;
+      }
+      htmlOut += '<blockquote>' + renderMarkdownHtml(inner.join('\n')) + '</blockquote>';
+      continue;
+    }
+
+    const listMarker = line.match(/^(\s*)([-*+]|\d{1,9}[.)])\s+/);
+    if (listMarker) {
+      flushParagraph();
+      const parsed = parseList(lines, i);
+      htmlOut += parsed.html;
+      i = parsed.next;
+      continue;
+    }
+
+    paragraphLines.push(line);
+    i++;
+  }
+  flushParagraph();
+
+  return htmlOut;
+}
+
 // --- NEW: renderMessages maps state to UI ---
 function renderMessages(instance) {
   const popup = instance.popup;
@@ -1632,14 +1952,12 @@ function renderMessages(instance) {
       
       // Only format markdown if it's not an already HTML styled error/thinking message
       if (!msg.isError && !msg.isThinking && !msg.needsRetry && !msg.isStatus) {
-        // Escape HTML characters to prevent XSS
-        formattedContent = formattedContent.replace(/&/g, '&amp;')
-                                           .replace(/</g, '&lt;')
-                                           .replace(/>/g, '&gt;')
-                                           .replace(/"/g, '&quot;')
-                                           .replace(/'/g, '&#039;');
-        formattedContent = formattedContent.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-        formattedContent = formattedContent.replace(/\n/g, '<br>');
+        if (msg.role === 'user') {
+          // The user's own input is shown verbatim (escaped), not parsed as Markdown.
+          formattedContent = escapeHtmlText(formattedContent).replace(/\n/g, '<br>');
+        } else {
+          formattedContent = renderMarkdownHtml(formattedContent);
+        }
       }
 
       // Loading placeholders (isThinking/isStatus) render as an animated
@@ -2766,17 +3084,6 @@ function adjustPopupPosition(instance, selectionRect) {
 
 // --- NEW: Save Conversation as PDF ---
 function saveConversationAsPdf(instance) {
-  // Escape user/AI text before it is placed into the printable HTML so that
-  // untrusted content cannot inject markup or script into the PDF page.
-  function escapeHtml(str) {
-    return String(str)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#039;');
-  }
-
   let html = `<!DOCTYPE html><html><head><title>Conversation Backup</title>
   <style>
     body { font-family: 'Google Sans', 'Google Sans Text', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 20px; max-width: 800px; margin: auto; line-height: 1.6; }
@@ -2785,9 +3092,21 @@ function saveConversationAsPdf(instance) {
     .ai { background-color: #f5f5f5; border-left: 4px solid #4caf50; }
     .role { font-weight: bold; margin-bottom: 8px; font-size: 1.1em; }
     .title { text-align: center; color: #333; margin-bottom: 30px; border-bottom: 2px solid #ccc; padding-bottom: 10px; }
+    .message code { font-family: Consolas, Menlo, 'Liberation Mono', monospace; font-size: 0.9em; background-color: #eceff1; border-radius: 3px; padding: 1px 4px; }
+    .message pre { background-color: #eceff1; border: 1px solid #ddd; border-radius: 6px; padding: 10px 12px; overflow-x: auto; }
+    .message pre code { background-color: transparent; padding: 0; border-radius: 0; }
+    .message ul, .message ol { margin: 8px 0; padding-left: 22px; }
+    .message h1, .message h2, .message h3, .message h4 { margin: 12px 0 6px; line-height: 1.3; }
+    .message h1 { font-size: 1.25em; } .message h2 { font-size: 1.15em; } .message h3 { font-size: 1.05em; }
+    .message blockquote { margin: 8px 0; padding: 2px 0 2px 12px; border-left: 3px solid #4caf50; color: #555; }
+    .message table { border-collapse: collapse; margin: 8px 0; }
+    .message th, .message td { border: 1px solid #ccc; padding: 4px 8px; text-align: left; vertical-align: top; }
+    .message th { background-color: #e8e8e8; }
+    .message hr { border: none; border-top: 1px solid #ccc; margin: 12px 0; }
     @media print {
       body { max-width: 100%; padding: 0; }
       .message { page-break-inside: avoid; }
+      .message pre, .message table { page-break-inside: avoid; }
     }
   </style>
   </head><body>
@@ -2799,15 +3118,13 @@ function saveConversationAsPdf(instance) {
     const className = msg.role === 'user' ? 'user' : 'ai';
     const content = msg.displayContent || msg.content || "";
 
-    // ALWAYS escape first, then apply our own (safe) markdown transformations.
-    let formattedContent = escapeHtml(content);
+    // Markdown is rendered by our own escape-first renderer, so untrusted
+    // content cannot inject markup into the printable page.
+    let formattedContent = msg.role !== 'user'
+      ? renderMarkdownHtml(content)
+      : escapeHtmlText(content).replace(/\n/g, '<br>');
 
-    if (msg.role !== 'user') {
-      formattedContent = formattedContent.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-      formattedContent = formattedContent.replace(/\n/g, '<br>');
-    }
-
-    html += `<div class="message ${className}"><div class="role">${escapeHtml(roleName)}</div><div>${formattedContent}</div></div>`;
+    html += `<div class="message ${className}"><div class="role">${escapeHtmlText(roleName)}</div><div>${formattedContent}</div></div>`;
   });
 
   html += `<script>window.onload = function() { setTimeout(function() { window.print(); }, 500); }</script></body></html>`;
