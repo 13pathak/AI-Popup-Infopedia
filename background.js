@@ -399,7 +399,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   // --- Case 2.6: Escape hatch — reopen a failed PDF in Chrome's viewer ---
   if (request.type === "openNativeViewer") {
-    handleOpenNativeViewer(request, sender);
+    handleOpenNativeViewer(request, sender, sendResponse);
+    return true; // async — responded once the navigation is kicked off
   }
 
   // --- Case 2.8: Test AI Connection & Setup ---
@@ -968,15 +969,30 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
 });
 
 // "Open in Chrome's built-in viewer" from the custom viewer's error screen.
-// The dedupe map doubles as the bypass: a fresh bypass entry for this tab
-// makes isAlreadyRedirected() true, so the tabs.update below lands in the
-// native viewer instead of being scooped straight back into ours. The usual
-// TTL/lazy sweep cleans the entry up afterwards.
-async function handleOpenNativeViewer(request, sender) {
-  if (!sender.tab || typeof request.url !== 'string' || !request.url) return;
-  await redirectedTabsLoaded;
-  markRedirected(sender.tab.id, request.url, true);
-  chrome.tabs.update(sender.tab.id, { url: request.url });
+// Messages from the extension's own pages do not reliably carry sender.tab
+// (it is only documented for connections opened from a tab), so the viewer
+// names its tab itself via chrome.tabs.getCurrent and passes the id in the
+// message. The dedupe map doubles as the bypass: a fresh bypass entry for
+// this tab makes isAlreadyRedirected() true, so the tabs.update below lands
+// in the native viewer instead of being scooped straight back into ours.
+// The usual TTL/lazy sweep cleans the entry up afterwards.
+async function handleOpenNativeViewer(request, sender, sendResponse) {
+  const tabId = (sender.tab && sender.tab.id) ||
+    (typeof request.tabId === 'number' ? request.tabId : null);
+  if (!tabId || typeof request.url !== 'string' || !request.url) {
+    sendResponse({ ok: false });
+    return;
+  }
+  try {
+    await redirectedTabsLoaded;
+    markRedirected(tabId, request.url, true);
+    chrome.tabs.update(tabId, { url: request.url }, () => {
+      const err = chrome.runtime.lastError;
+      sendResponse({ ok: !err });
+    });
+  } catch (e) {
+    sendResponse({ ok: false });
+  }
 }
 
 // Common helper that performs the actual redirect once. It awaits the

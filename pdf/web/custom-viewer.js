@@ -373,6 +373,35 @@ const pageObserver = new IntersectionObserver((entries) => {
     rootMargin: '200% 0px 200% 0px' // Buffer 2 viewports above and below
 });
 
+// fetch() — which is what PDF.js uses for every URL — cannot read file://
+// origins: Chromium rejects the scheme outright, "Allow access to file
+// URLs" or not. XMLHttpRequest still honours that toggle, so local files
+// take a detour: read the bytes here and hand PDF.js a buffer instead of
+// a URL (giving up range requests, which local reads don't need anyway).
+function readLocalFileViaXhr(url) {
+    return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('GET', url);
+        xhr.responseType = 'arraybuffer';
+        xhr.onload = () => {
+            if (xhr.response) {
+                resolve(new Uint8Array(xhr.response));
+            } else {
+                const err = new Error('Local file read returned no data.');
+                err.name = 'LocalFileException';
+                reject(err);
+            }
+        };
+        xhr.onerror = () => {
+            // Near-always the "Allow access to file URLs" toggle being off.
+            const err = new Error('Local file could not be read.');
+            err.name = 'LocalFileException';
+            reject(err);
+        };
+        xhr.send();
+    });
+}
+
 async function loadPDF() {
     // Distinguishes "user closed the password prompt" from real failures
     // for the catch below: destroy() rejects with an internal PDF.js error
@@ -385,8 +414,7 @@ async function loadPDF() {
         // extraction (selection/search/highlights) fails on those documents.
         // This PDF.js build fetches both from the main thread, so the URLs
         // are document-relative (like workerSrc above).
-        const loadingTask = pdfjsLib.getDocument({
-            url: fileUrl,
+        const docParams = {
             cMapUrl: './cmaps/',
             cMapPacked: true,
             standardFontDataUrl: './standard_fonts/',
@@ -397,7 +425,13 @@ async function loadPDF() {
             // cookie-authenticated PDFs (university proxies etc.);
             // host_permissions already exempts the fetch from CORS.
             withCredentials: true
-        });
+        };
+        if (/^file:/i.test(fileUrl)) {
+            docParams.data = await readLocalFileViaXhr(fileUrl);
+        } else {
+            docParams.url = fileUrl;
+        }
+        const loadingTask = pdfjsLib.getDocument(docParams);
         // Protected documents open here instead of dead-ending: PDF.js
         // requests the password through this callback (reason 1 on the
         // first ask, 2 after a wrong password) and retries on its own once
@@ -436,8 +470,11 @@ async function loadPDF() {
 // Shared "hand this document to Chrome's own viewer" button, offered on the
 // password prompt and the load-error screen. The background worker marks
 // the tab as bypassed before navigating, so the interception listeners
-// don't immediately pull the document back into this viewer. Returns null
-// when there is no meaningful target (relative test path) or no runtime.
+// don't immediately pull the document back into this viewer. Messages from
+// extension pages like this one don't reliably carry sender.tab, so the
+// page names its own tab via chrome.tabs.getCurrent and includes the id.
+// Returns null when there is no meaningful target (relative test path) or
+// no runtime.
 function buildNativeViewerButton() {
     if (!/^(https?|file):/i.test(fileUrl)) return null;
     if (typeof chrome === 'undefined' || !chrome.runtime || !chrome.runtime.sendMessage) return null;
@@ -446,11 +483,21 @@ function buildNativeViewerButton() {
     nativeBtn.textContent = "Open in Chrome's built-in viewer";
     nativeBtn.addEventListener('click', () => {
         nativeBtn.disabled = true;
-        chrome.runtime.sendMessage({ type: 'openNativeViewer', url: fileUrl }, () => {
-            // No response is sent; read lastError so a restarting
-            // service worker doesn't log an unchecked-lastError warning.
-            void chrome.runtime.lastError;
+        const send = (tabId) => chrome.runtime.sendMessage({ type: 'openNativeViewer', url: fileUrl, tabId }, (resp) => {
+            if (chrome.runtime.lastError || !resp || !resp.ok) {
+                // Navigation never started (no tab id, blocked URL, dead
+                // worker); leave the button usable instead of a dead end.
+                nativeBtn.disabled = false;
+            }
         });
+        if (chrome.tabs && chrome.tabs.getCurrent) {
+            chrome.tabs.getCurrent((tab) => {
+                void chrome.runtime.lastError;
+                send(tab ? tab.id : undefined);
+            });
+        } else {
+            send(undefined);
+        }
     });
     return nativeBtn;
 }
@@ -536,7 +583,8 @@ function showLoadError(err) {
         PasswordCancelled: 'Password entry was cancelled.',
         InvalidPDFException: 'This file is not a valid PDF.',
         MissingPDFException: 'The PDF file could not be found at the requested location.',
-        UnexpectedResponseException: 'The server sent an unexpected response while fetching the PDF.'
+        UnexpectedResponseException: 'The server sent an unexpected response while fetching the PDF.',
+        LocalFileException: 'This local file could not be read. Check that "Allow access to file URLs" is enabled for this extension on chrome://extensions, and that the file still exists.'
     };
     // A password prompt may still be on screen if the load failed after
     // unlocking (or the user cancelled); it has nothing more to say.
@@ -1463,12 +1511,18 @@ document.getElementById('save_pdf').addEventListener('click', async () => {
         }
         // credentials:"include" to match getDocument above — without it
         // this export 401s on the cookie-authenticated PDFs the viewer
-        // itself can now load.
-        const res = await fetch(fileUrl, { credentials: 'include' });
-        if (!res.ok) {
-            throw new Error(`HTTP ${res.status}: ${res.statusText || 'Failed to fetch PDF file'}`);
+        // itself can now load. Local files bypass fetch for the same
+        // reason as there: Chromium's fetch has no file:// support.
+        let existingPdfBytes;
+        if (/^file:/i.test(fileUrl)) {
+            existingPdfBytes = await readLocalFileViaXhr(fileUrl);
+        } else {
+            const res = await fetch(fileUrl, { credentials: 'include' });
+            if (!res.ok) {
+                throw new Error(`HTTP ${res.status}: ${res.statusText || 'Failed to fetch PDF file'}`);
+            }
+            existingPdfBytes = await res.arrayBuffer();
         }
-        const existingPdfBytes = await res.arrayBuffer();
         const pdfDoc = await PDFLib.PDFDocument.load(existingPdfBytes);
 
         // Custom Author Name from the options page, stored in local
