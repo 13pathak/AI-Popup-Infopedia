@@ -1711,7 +1711,8 @@ function escapeHtmlText(str) {
 }
 
 function renderMarkdownHtml(raw) {
-  const text = String(raw == null ? '' : raw).replace(/\r\n?/g, '\n');
+  // NUL is the code-span placeholder marker, so it cannot appear in input.
+  const text = String(raw == null ? '' : raw).replace(/\r\n?/g, '\n').replace(/\u0000/g, '');
 
   // Only http(s)/mailto links are emitted; everything else (javascript:,
   // data:, ...) degrades to plain text.
@@ -1735,23 +1736,30 @@ function renderMarkdownHtml(raw) {
       return '\u0000' + (codeSpans.length - 1) + '\u0000';
     });
 
+    // Underscore emphasis (__bold__, _ital_) is intentionally NOT supported:
+    // this popup explains code, and rendering `__init__` or `snake_case` as
+    // emphasis would corrupt the very names being explained. Asterisk and
+    // tilde markers cover what models actually emit.
+    out = out.replace(/\*\*\*(?=\S)([\s\S]*?\S)\*\*\*/g, '<strong><em>$1</em></strong>');
     out = out.replace(/\*\*(?=\S)([\s\S]*?\S)\*\*/g, '<strong>$1</strong>');
-    out = out.replace(/__(?=\S)([\s\S]*?\S)__/g, '<strong>$1</strong>');
     out = out.replace(/\*(?=\S)([^*\n]*?\S)\*/g, '<em>$1</em>');
-    out = out.replace(/(?<![A-Za-z0-9])_(?=\S)([^_\n]*?\S)_(?![A-Za-z0-9])/g, '<em>$1</em>');
     out = out.replace(/~~(?=\S)([\s\S]*?\S)~~/g, '<del>$1</del>');
 
-    // URL part allows one level of balanced parens, e.g. wiki links.
-    const urlPart = '([^()\\s]*(?:\\([^()]*\\)[^()\\s]*)*)';
+    // URL part allows one level of balanced parens (wiki links) and an
+    // optional "title" suffix: [text](url "title")
+    const urlPart = '([^()\\s]*(?:\\([^()]*\\)[^()\\s]*)*)(?:\\s+&quot;[\\s\\S]*?&quot;)?';
     const imageRe = new RegExp('!\\[([^\\]]*)\\]\\(' + urlPart + '\\)');
     const linkRe = new RegExp('\\[([^\\]]*)\\]\\(' + urlPart + '\\)');
     out = out.replace(imageRe, (m, alt, url) => {
       const safe = safeUrl(url);
-      return safe ? `<a href="${escapeHtmlText(safe)}" target="_blank" rel="noopener noreferrer">${alt || escapeHtmlText(safe)}</a>` : (alt || m);
+      // `safe` is a slice of already-escaped text and URL normalization only
+      // percent-encodes, so it must NOT be escaped again (double-escaping
+      // would corrupt query strings like ?a=1&b=2).
+      return safe ? `<a href="${safe}" target="_blank" rel="noopener noreferrer">${alt || safe}</a>` : (alt || m);
     });
     out = out.replace(linkRe, (m, label, url) => {
       const safe = safeUrl(url);
-      return safe ? `<a href="${escapeHtmlText(safe)}" target="_blank" rel="noopener noreferrer">${label || escapeHtmlText(safe)}</a>` : (label || m);
+      return safe ? `<a href="${safe}" target="_blank" rel="noopener noreferrer">${label || safe}</a>` : (label || m);
     });
 
     return out.replace(/\u0000(\d+)\u0000/g, (m, idx) => codeSpans[+idx]);
@@ -1795,11 +1803,32 @@ function renderMarkdownHtml(raw) {
         if (checkbox) itemText = (checkbox[1].trim() ? '☑ ' : '☐ ') + checkbox[2];
         stack[stack.length - 1].items.push(renderInline(escapeHtmlText(itemText)));
         i++;
+      } else if (/^\s{0,3}(#{1,6}\s|>)/.test(lines[i]) || /^\s{0,3}-{3,}\s*$/.test(lines[i])) {
+        // Headings, blockquotes and horizontal rules interrupt the list
+        // instead of being swallowed into the last item.
+        break;
       } else if (lines[i].trim() && stack.length) {
         // Non-list line directly under a list continues the current item.
+        const stripped = lines[i].replace(/^\s+/, '');
         const items = stack[stack.length - 1].items;
-        items[items.length - 1] += '<br>' + renderInline(escapeHtmlText(lines[i].trim()));
-        i++;
+        if (/^(`{3,}|~{3,})/.test(stripped)) {
+          // Indented fenced code under a bullet (models do this often):
+          // emit a real code block attached to the item.
+          const closeRe = new RegExp('^\\s{0,3}\\' + stripped[0] + '{3,}\\s*$');
+          const body = [];
+          i++;
+          while (i < lines.length && !closeRe.test(lines[i])) {
+            body.push(lines[i]);
+            i++;
+          }
+          i++; // past the closing fence (or EOF)
+          const indents = body.filter(l => l.trim()).map(l => l.match(/^ */)[0].length);
+          const common = indents.length ? Math.min(...indents) : 0;
+          items[items.length - 1] += '<pre><code>' + escapeHtmlText(body.map(l => l.slice(common)).join('\n')) + '</code></pre>';
+        } else {
+          items[items.length - 1] += '<br>' + renderInline(escapeHtmlText(stripped));
+          i++;
+        }
       } else {
         break;
       }
@@ -1832,11 +1861,13 @@ function renderMarkdownHtml(raw) {
     }
 
     // Fenced code block: content is escaped verbatim, no inline parsing.
-    const fence = line.match(/^\s{0,3}(`{3,}|~{3,})\s*(\S*)\s*$/);
+    // The info string is anything after the fence; only its first token is
+    // kept as the language class.
+    const fence = line.match(/^\s{0,3}(`{3,}|~{3,})(.*)$/);
     if (fence) {
       flushParagraph();
       const fenceChar = fence[1][0];
-      const lang = fence[2] || '';
+      const lang = fence[2].trim().split(/\s+/)[0] || '';
       const closeRe = new RegExp('^\\s{0,3}\\' + fenceChar + '{3,}\\s*$');
       const body = [];
       i++;
@@ -3091,6 +3122,9 @@ function saveConversationAsPdf(instance) {
     .user { background-color: #e3f2fd; border-left: 4px solid #1976d2; }
     .ai { background-color: #f5f5f5; border-left: 4px solid #4caf50; }
     .role { font-weight: bold; margin-bottom: 8px; font-size: 1.1em; }
+    .message p { margin: 8px 0; }
+    .message div > p:first-child { margin-top: 0; }
+    .message div > p:last-child { margin-bottom: 0; }
     .title { text-align: center; color: #333; margin-bottom: 30px; border-bottom: 2px solid #ccc; padding-bottom: 10px; }
     .message code { font-family: Consolas, Menlo, 'Liberation Mono', monospace; font-size: 0.9em; background-color: #eceff1; border-radius: 3px; padding: 1px 4px; }
     .message pre { background-color: #eceff1; border: 1px solid #ddd; border-radius: 6px; padding: 10px 12px; overflow-x: auto; }
