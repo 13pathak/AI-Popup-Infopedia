@@ -931,6 +931,25 @@ body, html {
     object-fit: contain;
 }
 
+/* Notice sheet swapped in by the beforeprint handler for menu-initiated
+   prints. Explicit dark text: dark mode's light text would be invisible
+   on the white print background forced by @media print. */
+.print-notice {
+    box-sizing: border-box;
+    padding: 1in 0.9in;
+    color: #1a1a1a;
+}
+
+.print-notice h1 {
+    font-size: 16pt;
+    margin: 0 0 10pt;
+}
+
+.print-notice p {
+    font-size: 12pt;
+    margin: 0;
+}
+
 #print-overlay {
     position: fixed;
     inset: 0;

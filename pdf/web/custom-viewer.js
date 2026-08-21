@@ -640,6 +640,9 @@ function showLoadError(err) {
 const PRINT_TOTAL_PIXEL_BUDGET = 2e8;
 let printInProgress = false;
 let printJobCancelled = false;
+// True only while printPDF()'s own window.print() call is running, so the
+// beforeprint handler can tell a pipeline print from a menu-initiated one.
+let printFromPipeline = false;
 
 async function printPDF() {
     if (!pdfDoc || printInProgress) return;
@@ -704,7 +707,14 @@ async function printPDF() {
             container.appendChild(pageWrap);
         }
 
-        if (!printJobCancelled) window.print();
+        if (!printJobCancelled) {
+            printFromPipeline = true;
+            try {
+                window.print();
+            } finally {
+                printFromPipeline = false;
+            }
+        }
     } catch (err) {
         if (!printJobCancelled) {
             console.error('Print preparation failed:', err);
@@ -729,6 +739,32 @@ window.addEventListener('keydown', (e) => {
         e.preventDefault();
         printPDF();
     }
+});
+
+// The ⋮ menu and File→Print open the preview directly — no keydown to
+// intercept — and beforeprint is the only hook they fire. The pipeline
+// above can't run from here: rendering is async and the preview snapshots
+// the DOM the moment this handler returns, and the print can't be
+// cancelled either. So instead of the silently blank paper an empty
+// #print-container produces, swap in one sheet telling the user how to
+// print the document. The afterprint handler below removes it.
+window.addEventListener('beforeprint', () => {
+    if (printInProgress || printFromPipeline) return; // printPDF is driving
+    if (!pdfDoc) return; // load-error screen; nothing useful to print
+    const container = document.getElementById('print-container');
+    // Pages left over from a pipeline print cancelled in the preview are
+    // the real document — print those rather than replacing them here.
+    if (!container || container.firstChild) return;
+
+    const sheet = document.createElement('div');
+    sheet.className = 'print-page print-notice';
+    const heading = document.createElement('h1');
+    heading.textContent = 'This document cannot be printed from the browser menu';
+    const line = document.createElement('p');
+    line.textContent = 'Use the Print button in this viewer\u2019s toolbar, or press Ctrl+P, to print the whole document.';
+    sheet.appendChild(heading);
+    sheet.appendChild(line);
+    container.appendChild(sheet);
 });
 
 // Release the print canvases once the dialog closes; every print re-renders.

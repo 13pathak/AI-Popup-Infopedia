@@ -1486,7 +1486,8 @@ function definitionToEditString(node) {
 function handleEditClick(event) {
   const btn = event.currentTarget;
   const itemElement = btn.closest('.history-item');
-  const currentListId = itemElement.dataset.listId;
+  // Absent for unlisted items; legacy junk ("null") maps back to null.
+  const currentListId = normalizeListId(itemElement.dataset.listId);
 
   if (itemElement.classList.contains('history-item-editing')) {
     return;
@@ -1602,8 +1603,9 @@ function handleCancelClick(event) {
 function updateHistoryItem(itemKey, newWord, newDefinition, newListId) {
   chrome.storage.local.get(['history'], (result) => {
     let history = result.history || [];
-    // Persist legacy id migration through this write (see applyFilters).
+    // Persist legacy id/listId migration through this write (see applyFilters).
     ensureHistoryIds(history);
+    normalizeHistoryListIds(history);
 
     const newHistory = history.map(item => {
       if (histId(item) === itemKey) {
@@ -1611,7 +1613,7 @@ function updateHistoryItem(itemKey, newWord, newDefinition, newListId) {
           ...item,
           word: newWord,
           definition: newDefinition,
-          listId: newListId === "__unlisted__" ? null : newListId // Update the listId
+          listId: normalizeListId(newListId) // "__unlisted__" (and any junk) -> null
         };
       }
       return item;
@@ -1643,9 +1645,10 @@ function deleteHistoryItem(itemKey) {
 
   chrome.storage.local.get(['history'], (result) => {
     let history = result.history || [];
-    // Persist legacy id migration through this write (applyFilters
+    // Persist legacy id/listId migration through this write (applyFilters
     // deliberately doesn't persist its snapshot — see the race note there).
     ensureHistoryIds(history);
+    normalizeHistoryListIds(history);
     const newHistory = history.filter(item => histId(item) !== itemKey);
     chrome.storage.local.set({ history: newHistory }, () => {
       applyFilters(scrollTop);
@@ -1695,6 +1698,18 @@ function histId(item) {
   return item.id || item.timestamp;
 }
 
+// Canonical form of a listId. dataset values are strings, so a null
+// ("unlisted") listId rendered into data-list-id reads back as the truthy
+// string "null" (likewise "undefined"); older builds persisted that
+// coercion on edit. Real ids are `list_<timestamp>...` strings, so those
+// junk values unambiguously mean "no list".
+function normalizeListId(listId) {
+  if (!listId || listId === '__unlisted__' || listId === 'null' || listId === 'undefined') {
+    return null;
+  }
+  return listId;
+}
+
 // Assign ids to legacy items (pre-id storage or restored old backups).
 // Mutates in place; returns true when anything changed so the caller persists.
 function ensureHistoryIds(history) {
@@ -1706,6 +1721,16 @@ function ensureHistoryIds(history) {
     }
   });
   return changed;
+}
+
+// Repair listId corruption from older builds (see normalizeListId).
+// Mutates in place and, like ensureHistoryIds, persists only via the
+// history writers, which re-read storage before writing.
+function normalizeHistoryListIds(history) {
+  history.forEach(item => {
+    const listId = normalizeListId(item.listId);
+    if (item.listId !== listId) item.listId = listId;
+  });
 }
 
 
@@ -2044,8 +2069,10 @@ function mergeHistory(newItems, parseErrors) {
     const oldHistory = result.history || [];
 
     // Legacy items may lack ids; assign before keying the map by identity.
-    // (The ids persist via the merged-history write below.)
+    // (The ids persist via the merged-history write below.) Same write also
+    // repairs any corrupted listIds sitting in stored history.
     ensureHistoryIds(oldHistory);
+    normalizeHistoryListIds(oldHistory);
 
     const historyMap = new Map();
     oldHistory.forEach(item => historyMap.set(histId(item), item));
@@ -2621,6 +2648,13 @@ function restoreBackup() {
         restoredCount = 1;
       }
 
+      // Backups taken while the listId corruption was live carry the string
+      // "null"; repair before storage so the reconstruction below can't mint
+      // a phantom "Restored List null" from it.
+      if (Array.isArray(dataToSave.history)) {
+        normalizeHistoryListIds(dataToSave.history);
+      }
+
       // --- NEW: Map 'lists' to 'wordLists' if needed ---
       if (!dataToSave.wordLists && dataToSave.lists) {
         dataToSave.wordLists = dataToSave.lists;
@@ -3143,6 +3177,7 @@ function applyFilters(scrollTopToRestore = null) {
     // this full-array write resurrects the deleted item). The ids persist
     // through the history writers, which re-read storage before writing.
     ensureHistoryIds(history);
+    normalizeHistoryListIds(history);
 
     // Capture the pre-filter size for the empty-state distinction below.
     const totalHistoryCount = history.length;
@@ -3227,7 +3262,10 @@ function renderFilteredHistory(history, scrollTopToRestore = null, totalHistoryC
       const itemElement = document.createElement('div');
       itemElement.className = 'history-item';
       itemElement.dataset.timestamp = histId(item);
-      itemElement.dataset.listId = item.listId;
+      // Only real ids go in the DOM: dataset coerces null to the truthy
+      // string "null", which defeats the falsy checks downstream.
+      const itemElementListId = normalizeListId(item.listId);
+      if (itemElementListId) itemElement.dataset.listId = itemElementListId;
 
       let formattedDefinition = escapeHTML(item.definition)
         .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
