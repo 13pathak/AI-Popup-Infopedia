@@ -2591,6 +2591,42 @@ function createActionButtons(instance, word, definition, modelName, promptName, 
         }
       }
 
+      // Inside the custom PDF viewer this content script runs on the
+      // extension's own page, so location.href/document.title describe
+      // the viewer chrome — not the document. Record the original PDF
+      // instead; its URL arrives as the ?file= query parameter.
+      let sourceUrl = window.location.href;
+      let sourceTitle = document.title;
+      if (window.location.pathname.includes('custom-viewer.html')) {
+        const pdfUrl = new URLSearchParams(window.location.search).get('file');
+        if (pdfUrl) {
+          sourceUrl = pdfUrl;
+          try {
+            // Label the entry by the PDF's filename. Prefer a "*.pdf"
+            // segment (path first, then query values) so endpoint URLs
+            // like /getdoc?id=…&name=thesis.pdf still get a human label;
+            // otherwise the last path segment. Falls back on odd URLs.
+            // Each candidate is decoded exactly once — pathname segments
+            // need explicit decoding while searchParams values arrive
+            // already decoded, so a blanket second pass threw on names
+            // containing a literal '%' ("Report 50% Final") and collapsed
+            // the whole title to 'PDF document'.
+            const url = new URL(pdfUrl, window.location.href);
+            const safeDecode = (s) => {
+              try { return decodeURIComponent(s); } catch { return s; }
+            };
+            const label = url.pathname.split('/')
+              .map(safeDecode)
+              .filter(seg => /\.pdf$/i.test(seg)).pop()
+              || [...url.searchParams.values()].find(v => /\.pdf$/i.test(v))
+              || safeDecode(url.pathname.split('/').pop());
+            sourceTitle = label || 'PDF document';
+          } catch {
+            sourceTitle = 'PDF document';
+          }
+        }
+      }
+
       // Send message to background to save with listId
       chrome.runtime.sendMessage({
         type: "saveToHistory",
@@ -2599,8 +2635,8 @@ function createActionButtons(instance, word, definition, modelName, promptName, 
         listId: selectedListId,
         modelName: modelName,
         promptName: promptName,
-        sourceUrl: window.location.href,
-        sourceTitle: document.title,
+        sourceUrl: sourceUrl,
+        sourceTitle: sourceTitle,
         citations: citationsToSave
       }, (saveResponse) => {
         if (chrome.runtime.lastError || (saveResponse && saveResponse.status === 'error')) {
@@ -3173,6 +3209,11 @@ function saveConversationAsPdf(instance) {
     html += `<div class="message ${className}"><div class="role">${escapeHtmlText(roleName)}</div><div>${formattedContent}</div></div>`;
   });
 
+  // Auto-print lives INSIDE the payload because the two transports need
+  // different triggers: the legacy data:-URL fallback parses this as a
+  // real document, so this script is what makes it print; the modern
+  // session-storage path keeps the tag inert (print.js calls
+  // window.print() itself) — do not remove either side.
   html += `<script>window.onload = function() { setTimeout(function() { window.print(); }, 500); }</script></body></html>`;
 
   chrome.runtime.sendMessage({ type: "openPdfTab", htmlContent: html });
@@ -3295,37 +3336,11 @@ function appendVerificationBadge(container, verification) {
 }
 
 
-// NEW: Unselect PDF.js editors when clicking outside in NONE mode.
-// These editor fixes only apply inside the extension's bundled PDF viewer
-// (pdf/web/custom-viewer.html); on ordinary pages the selectors can never
-// match, so skip the listeners and CSS injection entirely.
-if (window.location.pathname.includes('custom-viewer.html')) {
-  document.addEventListener('mousedown', (e) => {
-    if (!e.target.closest('.highlightEditor') && !e.target.closest('.editToolbar')) {
-      document.querySelectorAll('.highlightEditor.selectedEditor').forEach(el => {
-        el.classList.remove('selectedEditor');
-        const toolbar = el.querySelector('.editToolbar');
-        if (toolbar) toolbar.classList.add('hidden');
-      });
-    }
-  }, true);
-
-  // INJECT CSS VIA JS TO AVOID CACHING ISSUES
-  const style = document.createElement('style');
-  style.textContent = `
-/* FIX FOR PDF.JS COLOR PICKER BUG (INJECTED) */
-.annotationEditorLayer .highlightEditor .editToolbar { display: flex !important; visibility: visible !important; opacity: 1 !important; pointer-events: auto !important; z-index: 99999 !important; }
-.annotationEditorLayer .highlightEditor .editToolbar > .dropdown { position:absolute !important; display:flex !important; justify-content:center !important; align-items:center !important; flex-direction:column !important; gap:11px !important; padding-block:8px !important; border-radius:6px !important; background-color:var(--editor-toolbar-bg-color, #f0f0f4) !important; border:1px solid var(--editor-toolbar-border-color, #ccc) !important; box-shadow:var(--editor-toolbar-shadow, 0 2px 6px rgba(0,0,0,0.2)) !important; inset-block-start:calc(100% + 4px) !important; width:calc(100% + 2 * var(--editor-toolbar-padding, 4px)) !important; z-index: 100000 !important; pointer-events: auto !important; }
-.annotationEditorLayer .highlightEditor .editToolbar > .dropdown.hidden { display: none !important; }
-.annotationEditorLayer .highlightEditor .editToolbar > .dropdown button { width:100% !important; height:auto !important; border:none !important; cursor:pointer !important; display:flex !important; justify-content:center !important; align-items:center !important; background:none !important; }
-.annotationEditorLayer .highlightEditor .editToolbar > .dropdown button:is(:active, :focus-visible) { outline:none !important; }
-.annotationEditorLayer .highlightEditor .editToolbar > .dropdown button > .swatch { outline-offset:2px !important; }
-.annotationEditorLayer .highlightEditor .editToolbar > .dropdown button[aria-selected='true'] > .swatch { outline:2px solid var(--selected-outline-color, #000) !important; }
-.annotationEditorLayer .highlightEditor .editToolbar > .dropdown button:is(:hover, :active, :focus-visible) > .swatch { outline:2px solid var(--hover-outline-color, #666) !important; }
-`;
-  // about:blank frames (match_about_blank) may lack <head>; never let this throw.
-  (document.head || document.documentElement).appendChild(style);
-}
+// NOTE: pdf.js annotation-EDITOR fixes (.highlightEditor/.editToolbar CSS
+// plus a deselect-on-outside-click handler) were removed as dead code —
+// this extension's bundled viewer renders pages manually and never
+// enables pdf.js's AnnotationEditorLayer UI, so those selectors could
+// never match anything.
 
 // --- Milestone-Based Feedback Prompt Helper Functions ---
 function checkAndShowFeedbackPrompt(instance) {
