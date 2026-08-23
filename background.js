@@ -49,22 +49,53 @@ chrome.commands.onCommand.addListener((command) => {
 // storage under a one-shot key and open the packaged pdf/print.html,
 // which writes the payload into the document and calls window.print().
 // Chrome too old for storage.session keeps the legacy data: fallback.
+// tabs.create wrapper that consumes lastError and routes failures to a
+// caller-supplied fallback instead of leaving them unread in the void.
+function createTabChecked(url, onFailure) {
+  chrome.tabs.create({ url }, () => {
+    if (chrome.runtime.lastError) {
+      const message = chrome.runtime.lastError.message || '';
+      void chrome.runtime.lastError;
+      if (onFailure) onFailure(message);
+    }
+  });
+}
+
 function openPrintTab(htmlContent) {
   if (typeof htmlContent !== 'string' || htmlContent.length === 0) return;
-  const openDataUrl = () => {
-    chrome.tabs.create({ url: "data:text/html;charset=utf-8," + encodeURIComponent(htmlContent) });
+  // Every transport below is checked: an unchecked tabs.create used to let
+  // oversized transcripts die with zero feedback (session-storage quota ->
+  // data: fallback -> ~2MB data: cap -> silent nothing). print.html renders
+  // a matching explanation for each ?error= reason code.
+  const showPrintFailure = (reason) => {
+    createTabChecked(chrome.runtime.getURL('pdf/print.html') + '?error=' + encodeURIComponent(reason));
   };
+
   if (!chrome.storage || !chrome.storage.session) {
-    openDataUrl();
+    // Legacy Chrome without storage.session: the data: hand-off is the only
+    // transport. Its top-level cap (~2MB after encoding) is now enforced by
+    // the failure callback instead of failing invisibly.
+    createTabChecked("data:text/html;charset=utf-8," + encodeURIComponent(htmlContent),
+      () => showPrintFailure('too-large'));
     return;
   }
   const key = 'pdfPrint_' + Date.now() + '_' + Math.random().toString(36).slice(2);
   chrome.storage.session.set({ [key]: htmlContent }, () => {
     if (chrome.runtime.lastError) {
-      openDataUrl();
+      void chrome.runtime.lastError;
+      // Quota refusal or similar. The data: escape hatch only fits payloads
+      // whose encoded form stays under its cap (worst case ~3x for non-
+      // ASCII-heavy text); larger ones go straight to the honest error tab.
+      if (htmlContent.length < 700000) {
+        createTabChecked("data:text/html;charset=utf-8," + encodeURIComponent(htmlContent),
+          () => showPrintFailure('storage'));
+      } else {
+        showPrintFailure('too-large');
+      }
       return;
     }
-    chrome.tabs.create({ url: chrome.runtime.getURL('pdf/print.html') + '?k=' + encodeURIComponent(key) });
+    createTabChecked(chrome.runtime.getURL('pdf/print.html') + '?k=' + encodeURIComponent(key),
+      () => showPrintFailure('tab'));
   });
 }
 
@@ -882,7 +913,12 @@ function triggerBackup(type = "Auto", customBackupInclude = null) {
 // browser closes), mirrored into a synchronous in-memory Map as the fast
 // path. Entries expire lazily by timestamp — no setTimeout to lose.
 const REDIRECT_TTL_MS = 10000; // forget the entry after 10s as a safety net
-const redirectedTabs = new Map(); // tabId -> { url, ts, bypass? }
+// Escape-hatch (native viewer) marks slide forward on every navigation
+// event so slow SSO chains survive, but they must not mute interception
+// forever just because the tab keeps loading pages — this caps their
+// total lifetime from birth.
+const BYPASS_HARD_CAP_MS = 120000;
+const redirectedTabs = new Map(); // tabId -> { url, ts, born?, bypass? }
 
 const sessionStore = (chrome.storage && chrome.storage.session) || null;
 
@@ -896,8 +932,18 @@ const redirectedTabsLoaded = (async () => {
     const now = Date.now();
     for (const key of Object.keys(stored)) {
       const entry = stored[key];
-      if (entry && typeof entry.url === 'string' && now - entry.ts < REDIRECT_TTL_MS) {
-        redirectedTabs.set(Number(key), { url: entry.url, ts: entry.ts, bypass: Boolean(entry.bypass) });
+      if (!entry || typeof entry.url !== 'string') continue;
+      // Bypasses live from birth to the hard cap (sliding renewal keeps
+      // their ts fresh, so ts alone must not expire them mid-chain);
+      // dedupe marks keep the plain TTL.
+      const maxAge = entry.bypass ? BYPASS_HARD_CAP_MS : REDIRECT_TTL_MS;
+      if (now - (typeof entry.born === 'number' ? entry.born : entry.ts) < maxAge) {
+        redirectedTabs.set(Number(key), {
+          url: entry.url,
+          ts: entry.ts,
+          born: typeof entry.born === 'number' ? entry.born : undefined,
+          bypass: Boolean(entry.bypass)
+        });
       }
     }
   } catch (e) {}
@@ -918,26 +964,47 @@ function persistRedirectedTabs() {
 function isAlreadyRedirected(tabId, url) {
   const entry = redirectedTabs.get(tabId);
   if (!entry) return false;
-  if (Date.now() - entry.ts >= REDIRECT_TTL_MS) {
-    redirectedTabs.delete(tabId); // lazy expiry replaces the lost timer
-    return false;
-  }
+  const now = Date.now();
   // Bypass marks are tab-scoped, not URL-scoped: after the user escapes to
   // Chrome's native viewer, intermediate hops of a redirect chain (e.g.
   // http -> https) carry different URLs and must not be re-intercepted.
-  if (entry.bypass) return true;
+  if (entry.bypass) {
+    // Hard lifetime cap from birth: sliding renewal below keeps slow SSO
+    // chains alive across their hops, but ordinary browsing in that tab
+    // must never mute interception indefinitely.
+    const born = typeof entry.born === 'number' ? entry.born : entry.ts;
+    if (now - born >= BYPASS_HARD_CAP_MS) {
+      redirectedTabs.delete(tabId);
+      persistRedirectedTabs();
+      return false;
+    }
+    // Sliding window: every honored navigation event keeps the bypass
+    // alive for another TTL, so multi-hop navigations aren't re-caught
+    // mid-flight by a fixed clock.
+    entry.ts = now;
+    persistRedirectedTabs();
+    return true;
+  }
+  if (now - entry.ts >= REDIRECT_TTL_MS) {
+    redirectedTabs.delete(tabId); // lazy expiry replaces the lost timer
+    return false;
+  }
   return entry.url === url;
 }
 
 function markRedirected(tabId, originalUrl, isBypass) {
   const now = Date.now();
   // Sweep expired entries while we're here so neither the Map nor
-  // storage.session accumulates dead tabs between navigations.
-  for (const [id, entry] of redirectedTabs) {
-    if (now - entry.ts >= REDIRECT_TTL_MS) redirectedTabs.delete(id);
+  // storage.session accumulates dead tabs between navigations. Bypasses
+  // expire against their birth-based hard cap, dedupe marks against ts.
+  for (const [id, e] of redirectedTabs) {
+    if (!e) continue;
+    const maxAge = e.bypass ? BYPASS_HARD_CAP_MS : REDIRECT_TTL_MS;
+    const originTs = typeof e.born === 'number' ? e.born : e.ts;
+    if (now - originTs >= maxAge) redirectedTabs.delete(id);
   }
   redirectedTabs.set(tabId, isBypass
-    ? { url: originalUrl, ts: now, bypass: true }
+    ? { url: originalUrl, ts: now, born: now, bypass: true }
     : { url: originalUrl, ts: now });
   persistRedirectedTabs();
 }
@@ -988,6 +1055,16 @@ async function handleOpenNativeViewer(request, sender, sendResponse) {
     markRedirected(tabId, request.url, true);
     chrome.tabs.update(tabId, { url: request.url }, () => {
       const err = chrome.runtime.lastError;
+      if (err) {
+        // Native handover never started; drop the bypass so interception
+        // resumes immediately instead of staying muted for the TTL.
+        // Guarded: only remove our own fresh bypass.
+        const entry = redirectedTabs.get(tabId);
+        if (entry && entry.bypass && entry.url === request.url) {
+          redirectedTabs.delete(tabId);
+          persistRedirectedTabs();
+        }
+      }
       sendResponse({ ok: !err });
     });
   } catch (e) {
@@ -999,14 +1076,41 @@ async function handleOpenNativeViewer(request, sender, sendResponse) {
 // session warm-up so a freshly restarted cold SW still sees marks made by its
 // predecessor; the check-then-mark sequence after the await is synchronous,
 // so near-simultaneous events cannot interleave between check and mark.
+//
+// Why observe-and-tabs.update instead of a blocking webRequest redirect:
+// MV3 removes blocking webRequest from non-policy-installed extensions, so
+// onHeadersReceived cannot return {redirectUrl} or {cancel:true} here —
+// adding "blocking" would silently kill interception in production builds
+// while appearing to work under enterprise/unpacked testing. The cost is
+// inherent to the platform: for content-type-detected PDFs served at
+// extension-less URLs, Chrome briefly engages its own handling before
+// tabs.update takes over (flicker; attachment-disposition responses can
+// still complete as downloads). declarativeNetRequest can't substitute —
+// its rules can't match response Content-Type for redirects and its
+// substitution can't safely encode ?file= query values. The .pdf-extension
+// path never pays this cost: webNavigation.onBeforeNavigate fires before
+// commit, so those navigations are replaced pre-response. The Promise.all
+// below just keeps the takeover window as short as the platform allows.
 async function redirectToPdfViewer(tabId, originalUrl) {
-  await redirectedTabsLoaded;
-  await pdfViewerEnabledLoaded;
+  await Promise.all([redirectedTabsLoaded, pdfViewerEnabledLoaded]);
   if (!pdfViewerEnabled) return;
   if (isAlreadyRedirected(tabId, originalUrl)) return; // dedupe across listeners
   markRedirected(tabId, originalUrl);
   const viewerUrl = chrome.runtime.getURL('pdf/web/custom-viewer.html?file=' + encodeURIComponent(originalUrl));
-  chrome.tabs.update(tabId, { url: viewerUrl });
+  chrome.tabs.update(tabId, { url: viewerUrl }, () => {
+    const err = chrome.runtime.lastError;
+    if (err) {
+      // The takeover never happened (tab closed/discarded mid-race). Drop
+      // the mark so retrying the link isn't suppressed for the rest of the
+      // TTL. The guard keeps us from clobbering a newer entry raced in by
+      // another flow (e.g., a native-viewer bypass set meanwhile).
+      const entry = redirectedTabs.get(tabId);
+      if (entry && !entry.bypass && entry.url === originalUrl) {
+        redirectedTabs.delete(tabId);
+        persistRedirectedTabs();
+      }
+    }
+  });
 }
 
 chrome.webNavigation.onBeforeNavigate.addListener((details) => {
@@ -1015,10 +1119,14 @@ chrome.webNavigation.onBeforeNavigate.addListener((details) => {
   if (url.includes(chrome.runtime.id) && url.includes('/pdf/web/custom-viewer.html')) return;
   try {
     const urlObj = new URL(url);
-    const isPdfExt = urlObj.pathname.toLowerCase().endsWith('.pdf');
+    const pathLower = urlObj.pathname.toLowerCase();
+    const isPdfExt = pathLower.endsWith('.pdf');
     // Match arxiv.org and its subdomains (e.g. www.arxiv.org, export.arxiv.org).
+    // Case-insensitive like isPdfExt above. Accepts the bare "/pdf" form
+    // (no trailing slash, optionally followed by a query string — the
+    // pathname ignores those) alongside every "/pdf/<id>" shape.
     const isArxivPdf = (urlObj.hostname === 'arxiv.org' || urlObj.hostname.endsWith('.arxiv.org')) &&
-                       (urlObj.pathname === '/pdf/' || urlObj.pathname.startsWith('/pdf/'));
+                       (pathLower === '/pdf' || pathLower.startsWith('/pdf/'));
 
     if (isPdfExt || isArxivPdf) {
       redirectToPdfViewer(details.tabId, url);
@@ -1027,6 +1135,35 @@ chrome.webNavigation.onBeforeNavigate.addListener((details) => {
 });
 
 // --- NEW: Intercept any URL that returns a PDF Content-Type ---
+// Legacy servers and CMS download endpoints often serve genuine PDFs with
+// a generic binary content type; those used to skip interception entirely
+// and land in the Downloads folder instead of this viewer. A bare
+// octet-stream alone proves nothing — it is exactly what every exe/zip/
+// docx download uses — so such responses are claimed only when an
+// unambiguous .pdf name signal corroborates them:
+//   * the URL path ends in .pdf, or a query parameter value does
+//   * the Content-Disposition filename ends in .pdf (RFC 5987
+//     filename*= handled; quoted and bare forms both parsed)
+// Anything without one of those signals keeps native handling, so real
+// software/document downloads are never yanked into a "not a valid PDF"
+// error page.
+function headersSuggestPdf(url, responseHeaders) {
+  try {
+    const u = new URL(url);
+    if (/\.pdf$/i.test(u.pathname)) return true;
+    for (const value of u.searchParams.values()) {
+      if (/\.pdf$/i.test(value)) return true;
+    }
+    const cdHeader = responseHeaders.find(h => h.name.toLowerCase() === 'content-disposition');
+    if (cdHeader) {
+      const m = /filename\*?\s*=\s*(?:"([^"]*)"|([^;\s]+))/i.exec(cdHeader.value);
+      const name = m ? (m[1] !== undefined ? m[1] : m[2]).replace(/^UTF-8''/i, '').trim() : '';
+      if (/\.pdf$/i.test(name)) return true;
+    }
+  } catch (e) {}
+  return false;
+}
+
 chrome.webRequest.onHeadersReceived.addListener(
   (details) => {
     // ONLY intercept main frame navigations. Ignore xmlhttprequest/fetch from pdf.js
@@ -1037,7 +1174,14 @@ chrome.webRequest.onHeadersReceived.addListener(
     if (isAlreadyRedirected(details.tabId, url)) return; // dedupe with webNavigation listener
 
     const contentTypeHeader = details.responseHeaders.find(h => h.name.toLowerCase() === 'content-type');
-    if (contentTypeHeader && contentTypeHeader.value.toLowerCase().includes('application/pdf')) {
+    const contentType = contentTypeHeader ? contentTypeHeader.value.toLowerCase() : '';
+    if (contentType.includes('application/pdf')) {
+      redirectToPdfViewer(details.tabId, url);
+      return;
+    }
+    // Generic-binary PDFs (see headersSuggestPdf): intercepted only with a
+    // corroborating .pdf name signal; everything else keeps native handling.
+    if (contentType.includes('octet-stream') && headersSuggestPdf(url, details.responseHeaders)) {
       redirectToPdfViewer(details.tabId, url);
     }
   },
