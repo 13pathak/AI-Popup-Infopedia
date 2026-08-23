@@ -1068,6 +1068,20 @@ body.dark-mode .page {
     border: 1px solid #333;
 }
 
+/* Zoom transition: while a page redraws at a new scale, its previous
+   render stays on screen stretched to the resized box (same aspect
+   ratio), and mis-sized overlays stay hidden until the fresh frame and
+   its highlights are swapped in atomically. Prevents the blank-page
+   flash on every zoom step. */
+.page.zoom-transition > *:not(canvas) {
+    visibility: hidden;
+}
+
+.page.zoom-transition > canvas {
+    width: 100% !important;
+    height: 100% !important;
+}
+
 /* Reduced motion: show modal and outline chevron at rest, no slide/spin */
 @media (prefers-reduced-motion: reduce) {
     .viewer-modal {
