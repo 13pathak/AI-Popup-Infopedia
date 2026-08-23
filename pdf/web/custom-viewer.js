@@ -45,6 +45,29 @@ function uiThemePrefersDark(uiTheme) {
   return true;
 }
 
+// --- First-paint theme mirrors ---
+// chrome.storage reads are async, so the page used to paint with the CSS
+// light defaults before loadStorageData() resolved and flipped the class.
+// theme-bootstrap.js (parser-blocking, top of <body>) applies the class
+// from these localStorage mirrors before first paint. They are written at
+// every point below where the theme is applied or changed; chrome.storage
+// stays the source of truth and re-corrects any stale mirror on load.
+// All writes are best-effort: a missing mirror only costs the old flash,
+// never correctness.
+function mirrorPerDocTheme(darkModeKey, isDark) {
+  try { localStorage.setItem(darkModeKey, isDark ? '1' : '0'); } catch (e) {}
+}
+
+function clearPerDocThemeMirror(darkModeKey) {
+  try { localStorage.removeItem(darkModeKey); } catch (e) {}
+}
+
+// Same key options.js mirrors its global uiTheme into; both pages share
+// this origin, so one entry serves both.
+function rememberUiThemeMirror(theme) {
+  try { localStorage.setItem('uiTheme', theme); } catch (e) {}
+}
+
 // Icon + title + hint for empty sidebar tabs (static strings, no user data).
 function sidebarEmptyHtml(iconName, title, hint) {
   return `<div class="sidebar-empty-msg">${viewerIconSvg(iconName, 26)}<div>${title}</div><div class="sidebar-empty-hint">${hint}</div></div>`;
@@ -64,6 +87,8 @@ function buildViewerModal({ title, message = '', placeholder = '', initialValue 
 
     const box = document.createElement('div');
     box.className = 'viewer-modal';
+    box.setAttribute('role', 'dialog');
+    box.setAttribute('aria-modal', 'true');
     box.addEventListener('mousedown', (e) => e.stopPropagation());
 
     const heading = document.createElement('h3');
@@ -112,10 +137,29 @@ function buildViewerModal({ title, message = '', placeholder = '', initialValue 
     }
 
     // Escape closes the dialog but must not also close AI popups behind it.
+    // Tab is trapped inside the card: without this, keyboard focus escapes
+    // the overlay into the toolbar and page content behind the backdrop.
     function onKey(e) {
       if (e.key === 'Escape') {
         e.stopPropagation();
         done(null);
+        return;
+      }
+      if (e.key === 'Tab') {
+        const focusables = box.querySelectorAll('button, input');
+        if (!focusables.length) { e.preventDefault(); return; }
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        if (!box.contains(document.activeElement)) {
+          e.preventDefault();
+          first.focus();
+        } else if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
       }
     }
     document.addEventListener('keydown', onKey, true);
@@ -184,8 +228,12 @@ let autoSavedLastPage = 1;
 const urlParams = new URLSearchParams(window.location.search);
 let fileUrl = urlParams.get('file');
 
-if (!fileUrl) {
-    // Fallback for testing
+// Plain-browser test contexts (no chrome.storage) keep the historical
+// default document. Extension pages are always opened with ?file= by the
+// background interception; a manual open without one used to chase this
+// path, which is not in the package, and died in the load-error card.
+// Those now get an explanatory state instead — see loadPDF.
+if (!fileUrl && !hasChromeStorage()) {
     fileUrl = '../../test_highlight.pdf';
 }
 
@@ -193,16 +241,35 @@ function hasChromeStorage() {
     return typeof chrome !== 'undefined' && Boolean(chrome && chrome.storage && chrome.storage.local);
 }
 
+// Storage-key namespace for this document. Declared ahead of every
+// function that closes over it (loadStorageData, the save* helpers, the
+// onChanged listener) so a future top-level call cannot hit the temporal
+// dead zone; the values need fileUrl, resolved just above.
+const SYNC_KEYS = {
+    highlights: 'pdf_highlights_' + fileUrl,
+    bookmarks: 'pdf_bookmarks_' + fileUrl,
+    lastPage: 'pdf_lastpage_' + fileUrl
+};
+
+// Whether this document has its own dark-mode override, once known.
+// Tri-state so storage.onChanged events arriving while loadStorageData
+// is still in flight can be ignored safely: the loader reads fresh values
+// anyway, and acting early would race its resolution order. The per-doc
+// override outranks the global uiTheme exactly as at load time; without
+// this gate a live global-theme change would restyle an open document
+// that explicitly opted out.
+let perDocThemeActive = null;
+
 async function loadStorageData() {
     return new Promise((resolve) => {
         if (!hasChromeStorage()) {
             resolve(); // Not running in extension context
             return;
         }
-        
-        const highlightsKey = 'pdf_highlights_' + fileUrl;
-        const bookmarksKey = 'pdf_bookmarks_' + fileUrl;
-        const lastPageKey = 'pdf_lastpage_' + fileUrl;
+
+        const highlightsKey = SYNC_KEYS.highlights;
+        const bookmarksKey = SYNC_KEYS.bookmarks;
+        const lastPageKey = SYNC_KEYS.lastPage;
         // Per-document toggle override; when unset, the viewer defaults to
         // the extension-wide uiTheme (supersedes the old global
         // 'pdf_dark_mode' key, which is no longer read).
@@ -210,20 +277,28 @@ async function loadStorageData() {
 
         chrome.storage.local.get([highlightsKey, bookmarksKey, lastPageKey, darkModeKey], (result) => {
             if (result[darkModeKey] !== undefined) {
+                perDocThemeActive = true;
+                mirrorPerDocTheme(darkModeKey, result[darkModeKey] === true);
                 applyViewerDarkMode(result[darkModeKey] === true);
             } else if (chrome.storage && chrome.storage.sync) {
                 chrome.storage.sync.get({ uiTheme: 'dark' }, (syncData) => {
-                    applyViewerDarkMode(uiThemePrefersDark(syncData && syncData.uiTheme));
+                    perDocThemeActive = false;
+                    const theme = (syncData && syncData.uiTheme) || 'dark';
+                    rememberUiThemeMirror(theme);
+                    // No per-doc override anymore: drop any stale mirror
+                    // entry so the bootstrap falls through to uiTheme.
+                    clearPerDocThemeMirror(darkModeKey);
+                    applyViewerDarkMode(uiThemePrefersDark(theme));
                 });
             }
             if (result[highlightsKey]) {
-                highlights = result[highlightsKey];
+                highlights = sanitizeStoredHighlights(result[highlightsKey]);
                 if (highlights.length > 0) {
                     highlightCounter = highlights.reduce((max, h) => Math.max(max, (h && h.id) || 0), 0);
                 }
             }
             if (result[bookmarksKey]) {
-                bookmarks = result[bookmarksKey];
+                bookmarks = sanitizeStoredBookmarks(result[bookmarksKey]);
                 if (bookmarks.length > 0) {
                     bookmarkCounter = bookmarks.reduce((max, b) => Math.max(max, (b && b.id) || 0), 0);
                 }
@@ -240,22 +315,309 @@ async function loadStorageData() {
 
 function saveHighlights() {
     if (!hasChromeStorage()) return;
-    const storageKey = 'pdf_highlights_' + fileUrl;
+    const storageKey = SYNC_KEYS.highlights;
+    rememberOwnWrite(storageKey, highlights);
     chrome.storage.local.set({ [storageKey]: highlights });
     if (typeof renderSidebar === 'function') renderSidebar();
 }
 
 function saveBookmarks() {
     if (!hasChromeStorage()) return;
-    const storageKey = 'pdf_bookmarks_' + fileUrl;
+    const storageKey = SYNC_KEYS.bookmarks;
+    rememberOwnWrite(storageKey, bookmarks);
     chrome.storage.local.set({ [storageKey]: bookmarks });
     if (typeof renderBookmarks === 'function') renderBookmarks();
 }
 
 function saveLastPage(pageNum) {
     if (!hasChromeStorage()) return;
-    const storageKey = 'pdf_lastpage_' + fileUrl;
+    const storageKey = SYNC_KEYS.lastPage;
+    rememberOwnWrite(storageKey, pageNum);
     chrome.storage.local.set({ [storageKey]: pageNum });
+}
+
+// --- Cross-tab consistency ---
+// Every tab of the same document holds its own copy of these arrays and
+// writes them wholesale, so without storage monitoring two tabs clobber
+// each other: each save pushes that tab's stale snapshot over whatever
+// the other tab just wrote (lost update). chrome.storage.onChanged
+// closes the loop — external writes are adopted into this tab's state
+// and DOM before the next local save can revert them.
+//
+// Adoption is wholesale rather than id-merged because every local
+// mutation persists immediately: at listener time the only unwritten
+// local state is this tab's own in-flight write(s), tracked as an
+// ordered FIFO of serialized snapshots per key. Events are delivered in
+// storage-commit order, so an event equal to the FRONT entry is this
+// tab's own echo confirming that write; anything else arriving while
+// entries are outstanding committed BEFORE them, meaning the newest
+// pending write ends up as the final storage value. Such interim values
+// must be ignored, not adopted: adopting one repaints superseded data
+// and lets an edit typed inside that window commit on top of it,
+// clobbering the newer payload with stale content. Entries expire so a
+// write that never confirms (a failed set emits no echo) cannot
+// suppress genuine external updates forever.
+const PENDING_WRITE_CONFIRM_MS = 15000;
+const PENDING_WRITE_HISTORY = 8;
+const pendingOwnWrites = new Map();
+
+function rememberOwnWrite(key, value) {
+    let queue = pendingOwnWrites.get(key);
+    if (!queue) {
+        queue = [];
+        pendingOwnWrites.set(key, queue);
+    }
+    queue.push({ value: JSON.stringify(value), at: Date.now() });
+    // Drop the oldest past the cap.
+    while (queue.length > PENDING_WRITE_HISTORY) queue.shift();
+}
+
+// Expire entries whose confirmation never arrived, returning the live
+// queue (or null once empty) so classification never sees stale fronts.
+function livePendingWrites(key) {
+    const queue = pendingOwnWrites.get(key);
+    if (!queue) return null;
+    const now = Date.now();
+    while (queue.length && now - queue[0].at > PENDING_WRITE_CONFIRM_MS) {
+        queue.shift();
+    }
+    if (!queue.length) pendingOwnWrites.delete(key);
+    return pendingOwnWrites.get(key) || null;
+}
+
+// --- Stored-record validation ---
+// chrome.storage contents are untrusted: an interrupted write or an
+// older/buggier writer can leave malformed records in the highlights/
+// bookmarks arrays. Before this guard, one malformed entry threw inside
+// drawHighlight during renderPageContent, whose catch marks the whole
+// page data-loaded="error" — a single bad record blanked a page. Every
+// consumer (canvas overlays, click hit-testing, sidebar, exports) assumes
+// the canonical shape, so validate once at the two ingestion points
+// (initial load + cross-tab adoption) rather than defending each
+// consumer. Storage is not rewritten on load; the cleaned array is
+// persisted organically by the next saveHighlights()/saveBookmarks().
+//
+// Kept records pass through untouched (forward-compatible with unknown
+// extra fields); only structurally impossible geometry is dropped, and a
+// record that is merely missing a usable id gets one assigned instead of
+// being lost. A non-numeric id must never reach the counter reduces —
+// Math.max(max, {}) yields NaN and would poison every subsequently
+// created id. One exception to "untouched": known-but-corrupt optional
+// fields are stripped rather than trusted — see hasValidCornerQuad.
+function isValidStoredRect(r) {
+    return !!r && typeof r === 'object' &&
+        Number.isFinite(r.pdfX) && Number.isFinite(r.pdfY) &&
+        Number.isFinite(r.pdfWidth) && Number.isFinite(r.pdfHeight);
+}
+
+// Corner quads (cTL..cBL) carry the exact rotated-page geometry the PDF
+// export prefers over the legacy axis-aligned fields, gating on their
+// presence. They are optional with a documented fallback, so a corrupt or
+// partial quad must be stripped wholesale — sending the export down the
+// legacy derivation from the already-validated fields — instead of
+// feeding NaN/null/non-array values into /Rect and /QuadPoints, where
+// they serialize as broken annotation geometry. Absent corners are the
+// normal pre-corner-storage shape and simply mean "use the fallback".
+function hasValidCornerQuad(r) {
+    return ['cTL', 'cTR', 'cBR', 'cBL'].every(k => {
+        const c = r[k];
+        return Array.isArray(c) && c.length >= 2 &&
+            Number.isFinite(c[0]) && Number.isFinite(c[1]);
+    });
+}
+
+// Largest usable id already present, so repairs cannot collide.
+function maxStoredId(list) {
+    let max = 0;
+    if (Array.isArray(list)) {
+        for (const item of list) {
+            if (item && typeof item === 'object' &&
+                Number.isInteger(item.id) && item.id > max) {
+                max = item.id;
+            }
+        }
+    }
+    return max;
+}
+
+function sanitizeStoredHighlights(list) {
+    const cleaned = [];
+    if (!Array.isArray(list)) return cleaned;
+    let idPool = maxStoredId(list);
+    for (const hl of list) {
+        if (!hl || typeof hl !== 'object') continue;
+        if (!Number.isInteger(hl.pageNumber) || hl.pageNumber < 1) continue;
+        if (!Array.isArray(hl.rects)) continue;
+        const rects = hl.rects.filter(isValidStoredRect);
+        // An empty rect list draws nothing and leaves a note without its
+        // anchor (drawHighlight reads rects[0] for the indicator), so it
+        // is as unusable as a missing list.
+        if (rects.length === 0) continue;
+        if (!Number.isInteger(hl.id) || hl.id < 1) hl.id = ++idPool;
+        hl.rects = rects;
+        // Strip corrupt corner quads so the export falls back to the
+        // validated legacy geometry instead of emitting NaN/null
+        // coordinates. The record itself stays usable — corners are an
+        // optimization, not a requirement.
+        for (const r of rects) {
+            if (!hasValidCornerQuad(r)) {
+                delete r.cTL;
+                delete r.cTR;
+                delete r.cBR;
+                delete r.cBL;
+            }
+        }
+        cleaned.push(hl);
+    }
+    return cleaned;
+}
+
+function sanitizeStoredBookmarks(list) {
+    const cleaned = [];
+    if (!Array.isArray(list)) return cleaned;
+    let idPool = maxStoredId(list);
+    for (const bk of list) {
+        if (!bk || typeof bk !== 'object') continue;
+        if (!Number.isInteger(bk.pageNumber) || bk.pageNumber < 1) continue;
+        if (!Number.isInteger(bk.id) || bk.id < 1) bk.id = ++idPool;
+        cleaned.push(bk);
+    }
+    return cleaned;
+}
+
+if (hasChromeStorage()) {
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+        if (areaName === 'sync') { adoptRemoteGlobalTheme(changes); return; }
+        if (areaName !== 'local') return;
+        for (const [key, change] of Object.entries(changes)) {
+            // Per-document theme overrides. Only this document's key may
+            // restyle us — other documents' tabs write their own
+            // pdf_dark_mode_<url> keys — but every removal under the
+            // prefix drops its localStorage mirror: the mirrors live in
+            // origin-shared storage that outlives individual tabs, and a
+            // mirror whose setting is gone would give the document's
+            // next open a stale-themed first paint before loadStorageData
+            // corrects it.
+            if (key.startsWith('pdf_dark_mode_')) {
+                if (change.newValue === undefined) clearPerDocThemeMirror(key);
+                if (key === 'pdf_dark_mode_' + fileUrl) {
+                    adoptRemoteViewerTheme(key, change.newValue);
+                }
+                continue;
+            }
+            const which = key === SYNC_KEYS.highlights ? 'highlights'
+                : key === SYNC_KEYS.bookmarks ? 'bookmarks'
+                : key === SYNC_KEYS.lastPage ? 'lastPage' : null;
+            if (!which) continue; // e.g. pdf_dark_mode_*, other features
+
+            const incoming = change.newValue;
+            const serialized = incoming === undefined ? null : JSON.stringify(incoming);
+            const queue = livePendingWrites(key);
+
+            if (serialized !== null && queue && queue[0].value === serialized) {
+                // In-order echo of this tab's own write: storage now holds
+                // exactly what we sent. No DOM work is needed — local state
+                // already reflects this write or a newer local one whose
+                // own echo follows. Confirming must not re-render, or every
+                // save would flicker.
+                queue.shift();
+                if (!queue.length) pendingOwnWrites.delete(key);
+                continue;
+            }
+            if (queue && queue.length) {
+                // Unrecognized value while our writes are still unconfirmed:
+                // it committed before them, so it is transient. Ignoring it
+                // keeps this tab on the payload that wins storage — adopting
+                // instead would flash superseded data, could spuriously
+                // close popups anchored to ids only present in the newer
+                // payload, and opened a clobber window for edits typed in
+                // between.
+                continue;
+            }
+
+            if (which === 'highlights') {
+                adoptRemoteHighlights(Array.isArray(incoming) ? incoming : []);
+            } else if (which === 'bookmarks') {
+                adoptRemoteBookmarks(Array.isArray(incoming) ? incoming : []);
+            } else {
+                // Resume position: adopt silently so this tab's next
+                // debounced save doesn't restore a stale page — but do
+                // not yank this tab's scroll to the other tab's spot.
+                const num = parseInt(incoming, 10);
+                if (num >= 1) autoSavedLastPage = num;
+            }
+        }
+    });
+}
+
+// Another surface (the options page) changed the extension-wide uiTheme
+// in sync storage. Restyle this open viewer live — previously the sync
+// area was ignored entirely and the change only landed on next open.
+// A document with its own override keeps it: precedence matches
+// loadStorageData. Removal (Reset Everything / import without uiTheme)
+// falls back to the dark default exactly as a fresh read would, and the
+// bootstrap mirror is refreshed so the next open paints consistently.
+function adoptRemoteGlobalTheme(changes) {
+    const change = changes['uiTheme'];
+    if (!change || perDocThemeActive !== false) return;
+    const theme = typeof change.newValue === 'string' && change.newValue ? change.newValue : 'dark';
+    rememberUiThemeMirror(theme);
+    applyViewerDarkMode(uiThemePrefersDark(theme));
+}
+
+// Another tab of this document wrote a per-document theme override (or
+// one was removed). Adopt it live so open tabs agree, and refresh the
+// bootstrap mirror so the next open paints correctly on the first try.
+// Own-toggle echoes land here too but are idempotent: the class already
+// matches, so only the mirror is refreshed.
+function adoptRemoteViewerTheme(key, value) {
+    if (typeof value === 'boolean') {
+        if (document.body.classList.contains('dark-mode') !== value) {
+            applyViewerDarkMode(value);
+        }
+        mirrorPerDocTheme(key, value);
+    } else if (value === undefined) {
+        clearPerDocThemeMirror(key);
+        if (chrome.storage.sync) {
+            chrome.storage.sync.get({ uiTheme: 'dark' }, (syncData) => {
+                const theme = (syncData && syncData.uiTheme) || 'dark';
+                rememberUiThemeMirror(theme);
+                applyViewerDarkMode(uiThemePrefersDark(theme));
+            });
+        }
+    }
+}
+
+function adoptRemoteHighlights(remote) {
+    highlights = sanitizeStoredHighlights(remote);
+    // Keep id allocation above everything now known, or this tab's next
+    // created highlight could collide with one from the other tab.
+    highlightCounter = highlights.reduce((max, h) => Math.max(max, (h && h.id) || 0), highlightCounter);
+    // Popups anchored to a highlight the other tab deleted would dangle.
+    if (activeHighlightId !== null && !highlights.some(h => h.id === activeHighlightId)) {
+        hidePopups();
+    }
+    redrawRenderedHighlights();
+    renderSidebar();
+}
+
+function adoptRemoteBookmarks(remote) {
+    bookmarks = sanitizeStoredBookmarks(remote);
+    bookmarkCounter = bookmarks.reduce((max, b) => Math.max(max, (b && b.id) || 0), bookmarkCounter);
+    renderBookmarks();
+}
+
+// Rebuild the annotation overlays of every currently rendered page from
+// the adopted arrays. In-flight page renders draw from the same arrays
+// when they finish, so nothing else is needed. drawHighlight restores
+// the .active class for activeHighlightId on its own.
+function redrawRenderedHighlights() {
+    document.querySelectorAll('.page[data-loaded="true"]').forEach(pageDiv => {
+        pageDiv.querySelectorAll('.custom-highlight, .note-indicator').forEach(el => el.remove());
+        if (pageDiv._viewport) {
+            drawHighlightsForPage(parseInt(pageDiv.dataset.pageNumber, 10), pageDiv, pageDiv._viewport);
+        }
+    });
 }
 
 async function setupPage(num) {
@@ -275,15 +637,26 @@ async function setupPage(num) {
 
 async function renderPageContent(pageDiv) {
     if (pageDiv.dataset.loaded === "true" || pageDiv.dataset.loaded === "rendering") return;
+    // Rescale transition: a zoom marked this page while its previous
+    // render was still on screen. Draw the fresh frame on top of the
+    // stretched stale one and swap only once fully painted, so zooming
+    // never shows a blank page.
+    const isRescale = pageDiv.dataset.rescale === "true";
+    delete pageDiv.dataset.rescale;
     pageDiv.dataset.loaded = "rendering";
 
     try {
-        // Clean up any leftover DOM nodes from a previous failed attempt
-        pageDiv.innerHTML = '';
-
         const page = pageDiv._pdfPage;
         const viewport = pageDiv._viewport;
-        let outputScale = Math.max(window.devicePixelRatio || 1, 2);
+        // Match the backing store to the display's real pixel density.
+        // The old unconditional floor of 2 quadrupled every page's canvas
+        // memory (scale² in both dimensions) even on 1x monitors, where
+        // the compositor just discards the extra resolution, and
+        // oversampled fractional OS scaling (125%/150%) too. HiDPI
+        // displays are covered by devicePixelRatio itself; `|| 1` guards
+        // environments that report 0 or undefined. Same convention as
+        // pdf.js's own viewer. The caps below still bound extreme pages.
+        let outputScale = Math.max(window.devicePixelRatio || 1, 1);
         // Cap the backing store below browser canvas limits (Chrome:
         // 65535 px per side, 2^28 total pixels) — exceeding them makes
         // the page render blank. Lowering outputScale only softens the
@@ -302,20 +675,61 @@ async function renderPageContent(pageDiv) {
         canvas.height = Math.floor(viewport.height * outputScale);
         canvas.style.width = viewport.width + "px";
         canvas.style.height = viewport.height + "px";
-        pageDiv.appendChild(canvas);
+
+        const transform = outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : null;
+        const renderTask = page.render({ canvasContext: ctx, transform, viewport }).promise;
+        const textContent = await page.getTextContent();
 
         const textLayerDiv = document.createElement('div');
         textLayerDiv.className = 'textLayer';
         textLayerDiv.style.width = `${viewport.width}px`;
         textLayerDiv.style.height = `${viewport.height}px`;
         textLayerDiv.style.setProperty('--scale-factor', viewport.scale);
+
+        if (isRescale) {
+            // The fresh canvas goes on top of the stretched stale one: it
+            // starts transparent (old frame keeps showing through), turns
+            // opaque as the crisp render paints over it. .zoom-transition
+            // keeps text/overlays hidden until the swap below.
+            pageDiv.appendChild(canvas);
+            pageDiv.appendChild(textLayerDiv);
+            const textLayer = new pdfjsLib.TextLayer({
+                textContentSource: textContent,
+                container: textLayerDiv,
+                viewport: viewport,
+                textDivs: []
+            });
+
+            await Promise.all([renderTask, textLayer.render()]);
+
+            // A zoom landing mid-draw swapped _viewport again: carry this
+            // finished frame forward as the next transition backdrop
+            // instead of dropping into a blank page.
+            if (pageDiv._viewport !== viewport) {
+                pageDiv.dataset.rescale = 'true';
+                pageDiv.classList.add('zoom-transition');
+                pageDiv.dataset.loaded = 'false';
+                renderPageContent(pageDiv);
+                return;
+            }
+
+            // Atomic swap inside one synchronous block: no intermediate
+            // blank frame ever paints.
+            pageDiv.innerHTML = '';
+            pageDiv.appendChild(canvas);
+            pageDiv.appendChild(textLayerDiv);
+            drawHighlightsForPage(parseInt(pageDiv.dataset.pageNumber), pageDiv, viewport);
+            drawSearchHighlightsForPage(parseInt(pageDiv.dataset.pageNumber), pageDiv, viewport);
+            renderLinkAnnotations(page, pageDiv, viewport);
+            pageDiv.classList.remove('zoom-transition');
+            pageDiv.dataset.loaded = 'true';
+            return;
+        }
+
+        // Clean up any leftover DOM nodes from a previous failed attempt
+        pageDiv.innerHTML = '';
+        pageDiv.appendChild(canvas);
         pageDiv.appendChild(textLayerDiv);
-
-        const transform = outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : null;
-        const renderContext = { canvasContext: ctx, transform, viewport };
-
-        const renderTask = page.render(renderContext).promise;
-        const textContent = await page.getTextContent();
         const textLayer = new pdfjsLib.TextLayer({
             textContentSource: textContent,
             container: textLayerDiv,
@@ -326,9 +740,8 @@ async function renderPageContent(pageDiv) {
         await Promise.all([renderTask, textLayer.render()]);
 
         // A zoom/fit during the awaits above swapped pageDiv._viewport and
-        // resized the div, but everything so far used the stale viewport.
-        // The zoom path skips "rendering" pages (unload no-ops, re-render
-        // early-returns), so redo the render at the current scale here.
+        // resized the div, but everything so far used the stale viewport,
+        // so redo the render at the current scale here.
         if (pageDiv._viewport !== viewport) {
             pageDiv.dataset.loaded = "false";
             renderPageContent(pageDiv);
@@ -343,6 +756,7 @@ async function renderPageContent(pageDiv) {
     } catch (err) {
         console.error(`Error rendering page ${pageDiv.dataset.pageNumber}:`, err);
         pageDiv.innerHTML = '';
+        pageDiv.classList.remove('zoom-transition');
         pageDiv.dataset.loaded = "error";
     }
 }
@@ -378,19 +792,41 @@ const pageObserver = new IntersectionObserver((entries) => {
 // URLs" or not. XMLHttpRequest still honours that toggle, so local files
 // take a detour: read the bytes here and hand PDF.js a buffer instead of
 // a URL (giving up range requests, which local reads don't need anyway).
-function readLocalFileViaXhr(url) {
+//
+// `signal` optionally wires the caller's AbortController into this XHR:
+// XMLHttpRequest predates AbortSignal, so without the bridge a hung
+// file:// transfer would never settle the returned promise and a caller
+// like the Save-PDF watchdog could not time it out.
+function readLocalFileViaXhr(url, signal) {
     return new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
+        const rejectAborted = () => {
+            // Same shape fetch's abort rejection takes, so callers can
+            // treat both transports identically via err.name.
+            const err = new Error('Local file read timed out.');
+            err.name = 'AbortError';
+            reject(err);
+        };
+        if (signal) {
+            if (signal.aborted) {
+                rejectAborted();
+                return;
+            }
+            // once: the listener's whole job is this one xhr.abort();
+            // afterwards the signal outliving the request is harmless.
+            signal.addEventListener('abort', () => xhr.abort(), { once: true });
+        }
         xhr.open('GET', url);
         xhr.responseType = 'arraybuffer';
         xhr.onload = () => {
-            if (xhr.response) {
-                resolve(new Uint8Array(xhr.response));
-            } else {
-                const err = new Error('Local file read returned no data.');
-                err.name = 'LocalFileException';
-                reject(err);
-            }
+            // A completed load means the transfer itself succeeded. A
+            // zero-byte file legitimately arrives as an empty buffer
+            // (falsy in some engines) — resolving it here lets PDF.js
+            // raise its own "not a valid PDF" error instead of the
+            // misleading file-permission guidance below. Genuine access
+            // failures surface via onerror, which is where the toggle
+            // hint belongs.
+            resolve(new Uint8Array(xhr.response || 0));
         };
         xhr.onerror = () => {
             // Near-always the "Allow access to file URLs" toggle being off.
@@ -398,6 +834,10 @@ function readLocalFileViaXhr(url) {
             err.name = 'LocalFileException';
             reject(err);
         };
+        // Fires for our own signal-driven abort() (and would fire for any
+        // other); rejecting here is the single settle point so a racing
+        // onload/onerror stays harmless — later settles are ignored.
+        xhr.onabort = rejectAborted;
         xhr.send();
     });
 }
@@ -409,6 +849,13 @@ async function loadPDF() {
     let passwordCancelled = false;
     try {
         await loadStorageData();
+        // Extension-page open without ?file= (manual navigation): nothing
+        // to fetch, and pretending otherwise surfaced "Could not load PDF"
+        // for a URL nobody requested. Say what actually happened instead.
+        if (!fileUrl) {
+            showNoDocumentState();
+            return;
+        }
         // CJK PDFs need CMap data and some PDFs rely on non-embedded
         // standard fonts; without these URLs glyphs render garbled and text
         // extraction (selection/search/highlights) fails on those documents.
@@ -418,6 +865,12 @@ async function loadPDF() {
             cMapUrl: './cmaps/',
             cMapPacked: true,
             standardFontDataUrl: './standard_fonts/',
+            // Defense-in-depth for font parsing: disables pdf.js's compiled
+            // glyph path (eval-based) optimization, closing the class of
+            // FontMatrix injection vulnerabilities (CVE-2024-4367 et al.)
+            // independent of the bundled version. Negligible cost — only
+            // affects an optional rendering fast path.
+            isEvalSupported: false,
             // This page's origin is chrome-extension://, so PDF.js's
             // default credentials:"same-origin" never matches the PDF's
             // site and session cookies are dropped — yet the intercepted
@@ -575,6 +1028,31 @@ function promptForPassword(isRetry) {
     });
 }
 
+// Direct open of custom-viewer.html without ?file=: no document, and
+// nothing failed. Reuses the load-error card styling so typography,
+// spacing, and dark-mode tokens all apply without new CSS; the copy makes
+// clear this is an explanation rather than a failure.
+function showNoDocumentState() {
+    const box = document.createElement('div');
+    box.className = 'pdf-load-error';
+
+    const icon = document.createElement('div');
+    icon.className = 'pdf-load-error-icon';
+    icon.innerHTML = viewerIconSvg('messageSquare', 36);
+    const title = document.createElement('h2');
+    title.textContent = 'No document specified';
+    const detail = document.createElement('p');
+    detail.textContent = 'Open or click any PDF link while AI Popup Infopedia is enabled and it will load here automatically.';
+    const hint = document.createElement('p');
+    hint.textContent = 'To open one manually, add ?file= followed by the encoded PDF address to this page\u2019s URL.';
+
+    box.appendChild(icon);
+    box.appendChild(title);
+    box.appendChild(detail);
+    box.appendChild(hint);
+    document.getElementById('viewer').appendChild(box);
+}
+
 // Visible failure state: without this a fetch/render error leaves the
 // user staring at an empty gray viewer.
 function showLoadError(err) {
@@ -643,9 +1121,24 @@ let printJobCancelled = false;
 // True only while printPDF()'s own window.print() call is running, so the
 // beforeprint handler can tell a pipeline print from a menu-initiated one.
 let printFromPipeline = false;
+// The guidance sheet, while one is mounted in #print-container. Tracked
+// so a pipeline that starts after a menu print left it there can detach
+// it again — otherwise it would ship as page 1 of the real preview.
+let printNoticeSheet = null;
+
+// True while one of the lightweight dialogs (viewerAlert /
+// viewerPromptDialog) holds the screen. Keyboard shortcuts that launch
+// heavyweight flows are suppressed meanwhile: the print progress overlay
+// stacks below the dialog, so a Ctrl+P mid-question used to run an
+// invisible pipeline behind it — and a prep failure would then replace
+// the unanswered dialog outright. Pointer paths need no gate; the modal
+// backdrop already blocks clicks to the toolbar.
+function viewerModalOpen() {
+    return !!document.getElementById('viewer-modal-overlay');
+}
 
 async function printPDF() {
-    if (!pdfDoc || printInProgress) return;
+    if (!pdfDoc || printInProgress || viewerModalOpen()) return;
     const overlay = document.getElementById('print-overlay');
     const progress = document.getElementById('print-progress');
     const container = document.getElementById('print-container');
@@ -655,6 +1148,8 @@ async function printPDF() {
     printJobCancelled = false;
     overlay.classList.remove('hidden');
     container.innerHTML = '';
+    // Whatever sheet this wipe just detached is gone for good.
+    printNoticeSheet = null;
     let printScale = 3;
 
     try {
@@ -703,6 +1198,13 @@ async function printPDF() {
 
             await page.render({ canvasContext: ctx, viewport }).promise;
 
+            // A menu print that fired while page 1 was still rendering
+            // may have left the guidance sheet in the (then empty)
+            // container; it must not end up bound into the real preview.
+            if (printNoticeSheet) {
+                printNoticeSheet.remove();
+                printNoticeSheet = null;
+            }
             pageWrap.appendChild(canvas);
             container.appendChild(pageWrap);
         }
@@ -723,6 +1225,10 @@ async function printPDF() {
     } finally {
         overlay.classList.add('hidden');
         if (printJobCancelled) container.innerHTML = '';
+        // The cancel branch above already wiped the whole container; on
+        // every other exit the sheet is either detached or was never
+        // added, so dropping the reference here is always safe.
+        printNoticeSheet = null;
         printInProgress = false;
     }
 }
@@ -748,8 +1254,16 @@ window.addEventListener('keydown', (e) => {
 // cancelled either. So instead of the silently blank paper an empty
 // #print-container produces, swap in one sheet telling the user how to
 // print the document. The afterprint handler below removes it.
+//
+// Only printPDF()'s own window.print() window is guarded — during that
+// the container holds the real pages. Preparation, however, must fall
+// through: an early return there snapshots a still-empty container and
+// prints blank paper, the exact failure this handler exists to prevent.
+// With some pages already rendered the snapshot prints those (the same
+// partial-document semantics as cancelled-pipeline leftovers); with none,
+// the guidance sheet below is the snapshot's only content.
 window.addEventListener('beforeprint', () => {
-    if (printInProgress || printFromPipeline) return; // printPDF is driving
+    if (printFromPipeline) return; // pipeline's own preview: pages are in place
     if (!pdfDoc) return; // load-error screen; nothing useful to print
     const container = document.getElementById('print-container');
     // Pages left over from a pipeline print cancelled in the preview are
@@ -765,6 +1279,8 @@ window.addEventListener('beforeprint', () => {
     sheet.appendChild(heading);
     sheet.appendChild(line);
     container.appendChild(sheet);
+    // Tracked so printPDF can detach it before appending real pages.
+    printNoticeSheet = sheet;
 });
 
 // Release the print canvases once the dialog closes; every print re-renders.
@@ -772,18 +1288,79 @@ window.addEventListener('afterprint', () => {
     document.getElementById('print-container').innerHTML = '';
 });
 
-async function renderAllPages() {
+// Only one Case-2 build may run at a time. pdfDoc is assigned before the
+// initial build finishes, so a zoom/fit/pinch landing inside the
+// Promise.all(setupPage) window below used to start a second build, and
+// both completions appended their fragments — doubling every .page div
+// and its observer until the next full rebuild. While a build is in
+// flight, further requests only set rebuildQueued; once the build lands,
+// the last request is replayed through the Case-1 fast path at the
+// newest scale.
+let pageBuildActive = false;
+let rebuildQueued = false;
+// Focal point carried by the request queued behind an active build. A
+// gated call loses its arguments entirely, so without this a pinch that
+// lands mid-build replayed center-anchored instead of on the gesture
+// origin. Nulls mean "no focal preference" — button/fit zooms anchor at
+// the view center by design. Every gated call overwrites both values so
+// the newest request wins wholesale, matching the last-request-wins
+// replay rule above.
+let queuedFocalX = null;
+let queuedFocalY = null;
+
+async function renderAllPages(focalClientX = null, focalClientY = null) {
     if (!pdfDoc) return;
+    if (pageBuildActive) {
+        rebuildQueued = true;
+        queuedFocalX = focalClientX;
+        queuedFocalY = focalClientY;
+        return;
+    }
 
     const scrollContainer = document.getElementById('viewerContainer');
     const scrollRatio = scrollContainer.scrollHeight > 0 ? (scrollContainer.scrollTop / scrollContainer.scrollHeight) : 0;
 
-    zoomLevelSpan.textContent = Math.round(scale * 100) + "%";
+    updateZoomLabel();
     const existingPageDivs = viewerContainer.querySelectorAll('.page');
 
     // Case 1: Zoom / scale change on an already-built document ->
     // fast in-place resize, no DOM destruction, no flash.
     if (existingPageDivs.length === pdfDoc.numPages) {
+        // Anchor whatever content point sits at the focal position of the
+        // view (pinch origin when provided, else the vertical center),
+        // measured in screen space before any resize. Restoring the old
+        // scrollTop/scrollHeight ratio instead let the view drift a little
+        // on every step: fixed page gaps and mixed page sizes don't scale
+        // with the zoom factor. Fractions within the anchor page are
+        // scale-invariant, so re-projecting them through the resized rect
+        // returns the exact same content point to the exact same position
+        // — including the horizontal axis once pages overflow the width.
+        const containerRectBefore = scrollContainer.getBoundingClientRect();
+        const focalX = focalClientX !== null &&
+                focalClientX >= containerRectBefore.left && focalClientX <= containerRectBefore.right
+            ? focalClientX
+            : containerRectBefore.left + scrollContainer.clientWidth / 2;
+        const anchorScreenY = focalClientY !== null &&
+                focalClientY >= containerRectBefore.top && focalClientY <= containerRectBefore.bottom
+            ? focalClientY
+            : containerRectBefore.top + scrollContainer.clientHeight / 2;
+        let anchorPageNum = null;
+        let anchorFracX = 0;
+        let anchorFracY = 0;
+        for (const pageDiv of existingPageDivs) {
+            const rect = pageDiv.getBoundingClientRect();
+            if (anchorScreenY < rect.top) break; // pages are stacked in order
+            anchorPageNum = parseInt(pageDiv.dataset.pageNumber, 10);
+            if (rect.height > 0 && anchorScreenY <= rect.bottom) {
+                anchorFracY = (anchorScreenY - rect.top) / rect.height;
+            } else {
+                anchorFracY = 1; // anchor fell into the gap below this page
+            }
+            const w = Math.max(rect.width, 1);
+            anchorFracX = Math.min(1, Math.max(0, (focalX - rect.left) / w));
+        }
+        const hasAnchor = anchorPageNum !== null;
+
         existingPageDivs.forEach(pageDiv => {
             if (pageDiv._pdfPage) {
                 const newViewport = pageDiv._pdfPage.getViewport({ scale: scale });
@@ -791,7 +1368,19 @@ async function renderAllPages() {
                 pageDiv.style.width = `${newViewport.width}px`;
                 pageDiv.style.height = `${newViewport.height}px`;
             }
-            unloadPageContent(pageDiv);
+            if (pageDiv.dataset.loaded === 'true') {
+                // Zoom transition: keep the previous paint on screen,
+                // stretched to the new box (.zoom-transition in the CSS),
+                // instead of blanking every page; renderPageContent swaps
+                // the crisp redraw in atomically when it finishes.
+                // Clearing `loaded` is what makes that redraw eligible —
+                // renderPageContent early-returns while it reads "true",
+                // and a stuck flag would leave this class on forever,
+                // hiding the text layer and killing selection.
+                pageDiv.dataset.rescale = 'true';
+                pageDiv.classList.add('zoom-transition');
+                pageDiv.dataset.loaded = 'false';
+            }
 
             // Resizing alone doesn't cross an IntersectionObserver threshold
             // for pages that were already visible, so it won't re-fire the
@@ -801,38 +1390,112 @@ async function renderAllPages() {
             pageObserver.observe(pageDiv);
         });
 
-        scrollContainer.scrollTop = scrollContainer.scrollHeight * scrollRatio;
+        // Re-project the anchor through its page's new geometry: the
+        // fractions within that page are scale-invariant, so this returns
+        // the exact same content point to the exact same screen position
+        // on both axes.
+        if (hasAnchor) {
+            const anchorDiv = viewerContainer.querySelector(`.page[data-page-number="${anchorPageNum}"]`);
+            if (anchorDiv) {
+                const rectAfter = anchorDiv.getBoundingClientRect();
+                // Both rectAfter.* and the focal coords are viewport-relative,
+                // so each delta is exactly how far the anchored point moved
+                // on screen during relayout; scrolling by it cancels the move.
+                scrollContainer.scrollTop += (rectAfter.top + anchorFracY * rectAfter.height) - anchorScreenY;
+                const widthAfter = Math.max(rectAfter.width, 1);
+                scrollContainer.scrollLeft += (rectAfter.left + anchorFracX * widthAfter) - focalX;
+            } else {
+                scrollContainer.scrollTop = scrollContainer.scrollHeight * scrollRatio;
+            }
+        } else {
+            // Anchor was in the top padding region; nothing meaningful to
+            // hold, keep the legacy ratio restore.
+            scrollContainer.scrollTop = scrollContainer.scrollHeight * scrollRatio;
+        }
         updatePageNumber();
         return;
     }
 
     // Case 2: Initial load -> fetch all pages in parallel, build off-DOM,
     // insert in a single mutation.
-    viewerContainer.innerHTML = '';
-    pageObserver.disconnect();
+    pageBuildActive = true;
+    try {
+        viewerContainer.innerHTML = '';
+        pageObserver.disconnect();
 
-    const pagePromises = [];
-    for (let i = 1; i <= pdfDoc.numPages; i++) {
-        pagePromises.push(setupPage(i));
+        const pagePromises = [];
+        for (let i = 1; i <= pdfDoc.numPages; i++) {
+            pagePromises.push(setupPage(i));
+        }
+        const pageElements = await Promise.all(pagePromises);
+
+        const fragment = document.createDocumentFragment();
+        pageElements.forEach(pageDiv => fragment.appendChild(pageDiv));
+        viewerContainer.appendChild(fragment);
+
+        pageElements.forEach(pageDiv => pageObserver.observe(pageDiv));
+    } catch (e) {
+        // A dead build's queued request is stale: leaving it set would
+        // attach a phantom replay to whichever unrelated build succeeds
+        // next. Nothing user-visible is lost by dropping it — scale and
+        // other mutations happen synchronously before queuing, so the
+        // next real interaction rebuilds at current values anyway.
+        // Rethrow unchanged: loadPDF relies on this rejection to surface
+        // its load-error card instead of a broken half-built viewer.
+        rebuildQueued = false;
+        queuedFocalX = null;
+        queuedFocalY = null;
+        throw e;
+    } finally {
+        pageBuildActive = false;
     }
-    const pageElements = await Promise.all(pagePromises);
-
-    const fragment = document.createDocumentFragment();
-    pageElements.forEach(pageDiv => fragment.appendChild(pageDiv));
-    viewerContainer.appendChild(fragment);
-
-    pageElements.forEach(pageDiv => pageObserver.observe(pageDiv));
 
     scrollContainer.scrollTop = scrollContainer.scrollHeight * scrollRatio;
     updatePageNumber();
+
+    // A request arrived mid-build (scale changed under us). The appended
+    // divs may mix scales — setupPage reads the global at getPage time —
+    // so replay once: this now takes the Case-1 fast path and settles
+    // every page at the current scale. Synchronous, so loadPDF's await
+    // above still resumes against the finished DOM. The queued request's
+    // focal point rides along — a pinch that landed mid-build must
+    // re-anchor on its gesture origin, not snap to the view center.
+    if (rebuildQueued) {
+        rebuildQueued = false;
+        const fx = queuedFocalX;
+        const fy = queuedFocalY;
+        queuedFocalX = null;
+        queuedFocalY = null;
+        renderAllPages(fx, fy);
+    }
 }
 
 // Intentionally replaced during above chunk
+
+// theme-bootstrap.js may have applied dark-mode from the mirror before
+// this module ran; align the toggle button's icon/label with that state
+// now instead of waiting for the async storage read.
+const bootstrappedToggle = document.getElementById('dark_mode_toggle');
+if (bootstrappedToggle) {
+    bootstrappedToggle.innerHTML = darkModeButtonHtml(document.body.classList.contains('dark-mode'));
+}
 
 loadPDF();
 
 // Zoom logic
 let currentZoomMode = 'custom';
+
+// Single writer for the toolbar zoom % so every path — buttons, fit
+// modes, pinch ticks, queued rebuild replays — formats identically from
+// the one authoritative `scale`.
+function updateZoomLabel() {
+    zoomLevelSpan.textContent = Math.round(scale * 100) + "%";
+}
+
+// The static HTML placeholder reads 100% while the viewer actually starts
+// at the adjusted default above; sync immediately so the label matches
+// even before the first build lands (and permanently if loading fails).
+updateZoomLabel();
 
 async function calculateScaleAndRender() {
     if (currentZoomMode === 'custom') {
@@ -841,8 +1504,13 @@ async function calculateScaleAndRender() {
     }
     
     if (!pdfDoc) return;
-    
-    const page = await pdfDoc.getPage(1);
+
+    // Fit the page the user is actually looking at: measuring page 1
+    // misfit every differently-sized page in mixed-size documents.
+    let targetNum = parseInt(document.getElementById('page_num').value, 10);
+    if (!Number.isInteger(targetNum) || targetNum < 1) targetNum = 1;
+    if (targetNum > pdfDoc.numPages) targetNum = pdfDoc.numPages;
+    const page = await pdfDoc.getPage(targetNum);
     const unscaledViewport = page.getViewport({ scale: 1.0 });
     const container = document.getElementById('viewerContainer');
     const containerWidth = container.clientWidth;
@@ -969,6 +1637,27 @@ pageNumInput.addEventListener('change', () => {
     }
 });
 
+// Concatenates the characters of the range within one text layer.
+// Returns null when the range captures no characters at all — both when
+// it touches no text node (e.g. a selection over page chrome) and when
+// it merely grazes node boundaries without covering any character:
+// intersectsNode is boundary-inclusive, so a range starting at one
+// node's end offset or ending at the next node's start flags a hit
+// whose slice is empty. Returning null there lets the caller discard
+// such phantom groups instead of storing/exporting text:'' annotations.
+function extractSelectedText(range, textLayer) {
+    const walker = document.createTreeWalker(textLayer, NodeFilter.SHOW_TEXT);
+    let text = '';
+    while (walker.nextNode()) {
+        const node = walker.currentNode;
+        if (!range.intersectsNode(node)) continue;
+        const s = node === range.startContainer ? range.startOffset : 0;
+        const e = node === range.endContainer ? range.endOffset : node.data.length;
+        if (e > s) text += node.data.slice(s, e);
+    }
+    return text !== '' ? text : null;
+}
+
 // Handle text selection
 document.addEventListener('mouseup', (e) => {
     // Ignore clicks on popups or their shadow roots
@@ -985,83 +1674,138 @@ document.addEventListener('mouseup', (e) => {
         return;
     }
 
-    // Ensure selection is inside a textLayer
+    // A selection spanning a page break has a common ancestor above both
+    // text layers (typically #viewer), so requiring the ancestor itself
+    // to sit inside ONE .textLayer made cross-page selections silently
+    // do nothing. Instead, collect every rendered page the range touches
+    // and split the selection into one group per page; each group then
+    // flows through the ordinary single-page highlight pipeline.
     const range = selection.getRangeAt(0);
-    const containerNode = range.commonAncestorContainer;
-    const textLayerDiv = containerNode.nodeType === 3 
-        ? containerNode.parentElement.closest('.textLayer') 
-        : (containerNode.closest ? containerNode.closest('.textLayer') : null);
-    
-    if (!textLayerDiv) {
-        hidePopups();
+
+    // Only rendered pages can hold selected text — unloaded ones have no
+    // textLayer. Page rects are read in this same synchronous block:
+    // getPage() below resolves asynchronously, and a zoom or scroll
+    // landing in that gap would mix stale coordinates.
+    const loadedPages = Array.from(viewerContainer.querySelectorAll('.page[data-loaded="true"]'))
+        .filter(pageDiv => pageDiv.querySelector('.textLayer'))
+        .map(pageDiv => ({ pageDiv, rect: pageDiv.getBoundingClientRect() }));
+
+    const clientRects = Array.from(range.getClientRects())
+        .filter(r => r.width > 0 && r.height > 0);
+    if (!pdfDoc || clientRects.length === 0 || loadedPages.length === 0) {
         return;
     }
 
-    const pageDiv = textLayerDiv.closest('.page');
-    if (!pageDiv || !pageDiv.dataset.pageNumber || !pdfDoc) {
-        return;
+    // Assign each line box to the page whose vertical band contains its
+    // center, preserving reading order (Map keeps insertion order).
+    const rectsByPage = new Map();
+    for (const r of clientRects) {
+        const centerY = r.top + r.height / 2;
+        let entry = loadedPages.find(p => centerY >= p.rect.top && centerY < p.rect.bottom);
+        if (!entry) {
+            // Fractional gaps between page boxes: nearest band wins.
+            entry = loadedPages.reduce((best, p) =>
+                Math.abs(centerY - (p.rect.top + p.rect.height / 2)) <
+                Math.abs(centerY - (best.rect.top + best.rect.height / 2)) ? p : best);
+        }
+        const list = rectsByPage.get(entry) || [];
+        list.push(r);
+        rectsByPage.set(entry, list);
     }
-    const pageNumber = parseInt(pageDiv.dataset.pageNumber);
+
     const selectedText = selection.toString();
-    const clientRects = Array.from(range.getClientRects());
+    const lastRawRect = clientRects[clientRects.length - 1];
 
-    if (clientRects.length === 0) {
-        return;
-    }
+    const assemblies = [...rectsByPage.entries()].map(([entry, rects]) => ({
+        entry,
+        rects,
+        text: extractSelectedText(range, entry.pageDiv.querySelector('.textLayer'))
+    })).filter(a => a.text !== null);
 
-    // Read the page rect in the same instant as clientRects: getPage()
-    // resolves asynchronously, and a zoom or scroll landing in that gap
-    // would mix old-scale selection rects with a new-scale page rect.
-    const pageRect = pageDiv.getBoundingClientRect();
+    // Get viewports to convert coordinates
+    Promise.all(assemblies.map(a => pdfDoc.getPage(parseInt(a.entry.pageDiv.dataset.pageNumber, 10)))).then(pages => {
+        const groups = assemblies.map((a, i) => {
+            const viewport = pages[i].getViewport({ scale: scale });
+            const relativeRects = a.rects.map(r => {
+                // CSS pixels relative to page container
+                const left = r.left - a.entry.rect.left;
+                const top = r.top - a.entry.rect.top;
 
-    // Get viewport to convert coordinates
-    pdfDoc.getPage(pageNumber).then(page => {
-        const viewport = page.getViewport({ scale: scale });
+                // Convert to PDF points. All four corners are stored:
+                // convertToPdfPoint includes the page's /Rotate transform,
+                // so on rotated pages a screen-aligned box is NOT
+                // axis-aligned in PDF space, and width/height deltas alone
+                // lose that orientation (the export used to skew such
+                // highlights). The legacy fields stay for on-screen
+                // drawing and click-detection, which round-trip exactly.
+                const ptTL = viewport.convertToPdfPoint(left, top);
+                const ptBR = viewport.convertToPdfPoint(left + r.width, top + r.height);
+                const ptTR = viewport.convertToPdfPoint(left + r.width, top);
+                const ptBL = viewport.convertToPdfPoint(left, top + r.height);
 
-        const relativeRects = clientRects.map(r => {
-            // CSS pixels relative to page container
-            const left = r.left - pageRect.left;
-            const top = r.top - pageRect.top;
-            
-            // Convert to PDF points
-            const pt1 = viewport.convertToPdfPoint(left, top);
-            const pt2 = viewport.convertToPdfPoint(left + r.width, top + r.height);
-            
+                return {
+                    cssLeft: left,
+                    cssTop: top,
+                    cssWidth: r.width,
+                    cssHeight: r.height,
+                    pdfX: ptTL[0],
+                    pdfY: ptTL[1],
+                    pdfWidth: ptBR[0] - ptTL[0],
+                    pdfHeight: ptTL[1] - ptBR[1], // PDF origin is bottom-left
+                    cTL: ptTL,
+                    cTR: ptTR,
+                    cBR: ptBR,
+                    cBL: ptBL
+                };
+            });
             return {
-                cssLeft: left,
-                cssTop: top,
-                cssWidth: r.width,
-                cssHeight: r.height,
-                pdfX: pt1[0],
-                pdfY: pt1[1],
-                pdfWidth: pt2[0] - pt1[0],
-                pdfHeight: pt1[1] - pt2[1] // PDF origin is bottom-left
+                pageNumber: parseInt(a.entry.pageDiv.dataset.pageNumber, 10),
+                pageDiv: a.entry.pageDiv,
+                viewport,
+                rects: relativeRects,
+                text: a.text
             };
-        });
+        }).filter(g => g.rects.length > 0);
+
+        if (groups.length === 0) {
+            hidePopups();
+            return;
+        }
 
         currentSelection = {
-            pageNumber,
-            pageDiv,
-            viewport,
             text: selectedText,
-            rects: relativeRects
+            groups
         };
 
-        // Show popups near the last rect
-        const lastRect = clientRects[clientRects.length - 1];
-        if (lastRect) {
-            showColorPicker(lastRect.left + window.scrollX, lastRect.bottom + window.scrollY);
-        }
+        // Show popups near the last rect of the selection (end of the
+        // last page group).
+        showColorPicker(lastRawRect.left + window.scrollX, lastRawRect.bottom + window.scrollY);
     }).catch(err => {
         console.error("Error obtaining page for selection:", err);
     });
 });
+
+// Keep an absolutely-positioned popup entirely on screen. Coordinates are
+// viewport-space (the page chrome never scrolls), so clamping against
+// innerWidth/innerHeight is exact. Call AFTER the popup becomes measurable.
+function clampPopupToViewport(popup, margin = 8) {
+    const width = popup.offsetWidth;
+    const height = popup.offsetHeight;
+    if (!width || !height) return;
+    let left = parseFloat(popup.style.left) || 0;
+    let top = parseFloat(popup.style.top) || 0;
+    const maxLeft = Math.max(margin, window.innerWidth - width - margin);
+    const maxTop = Math.max(margin, window.innerHeight - height - margin);
+    popup.style.left = `${Math.min(Math.max(left, margin), maxLeft)}px`;
+    popup.style.top = `${Math.min(Math.max(top, margin), maxTop)}px`;
+}
 
 function showColorPicker(x, y) {
     const popup = document.getElementById('color-picker-popup');
     popup.style.left = `${x}px`;
     popup.style.top = `${y + 10}px`;
     popup.classList.remove('hidden');
+    clampPopupToViewport(popup);
 }
 
 function hidePopups() {
@@ -1111,23 +1855,29 @@ document.querySelectorAll('.color-btn').forEach(btn => {
         }
 
         if (!currentSelection) return;
-        
-        const hl = {
-            id: ++highlightCounter,
-            pageNumber: currentSelection.pageNumber,
-            rects: currentSelection.rects,
-            color: color,
-            text: currentSelection.text,
-            markupType: currentMarkupType
-        };
-        
-        highlights.push(hl);
+
+        // One highlight per page: a selection spanning a page break was
+        // split at mouseup, and each group stores as an ordinary
+        // single-page highlight — storage, export, and click-detection
+        // all assume one page per highlight.
+        currentSelection.groups.forEach(group => {
+            const hl = {
+                id: ++highlightCounter,
+                pageNumber: group.pageNumber,
+                rects: group.rects,
+                color: color,
+                text: group.text,
+                markupType: currentMarkupType
+            };
+
+            highlights.push(hl);
+            // Resolve the viewport at draw time, not mouseup time: the user
+            // may zoom while the picker is open, and the stored PDF-space
+            // rects only land correctly through the page's live _viewport.
+            drawHighlight(hl, group.pageDiv, group.pageDiv._viewport || group.viewport);
+        });
         saveHighlights();
-        // Resolve the viewport at draw time, not mouseup time: the user
-        // may zoom while the picker is open, and the stored PDF-space
-        // rects only land correctly through the page's live _viewport.
-        drawHighlight(hl, currentSelection.pageDiv, currentSelection.pageDiv._viewport || currentSelection.viewport);
-        
+
         // Clear browser selection
         window.getSelection().removeAllRanges();
         hidePopups();
@@ -1192,6 +1942,13 @@ function drawHighlight(hl, pageDiv, viewport) {
         indicator.style.left = `${cssLeft}px`;
         indicator.style.top = `${cssTop}px`;
         pageDiv.appendChild(indicator);
+        // translate(-100%,-50%) renders the box to the LEFT of and above
+        // the anchor; highlights starting at a page's top/left edge would
+        // clip it. Measure post-insert and nudge it fully inside.
+        const iw = indicator.offsetWidth || 18;
+        const ih = indicator.offsetHeight || 16;
+        if (cssLeft - iw < 2) indicator.style.left = `${iw + 2}px`;
+        if (cssTop - ih / 2 < 2) indicator.style.top = `${ih / 2 + 2}px`;
     }
 }
 
@@ -1235,10 +1992,16 @@ document.addEventListener('click', (e) => {
         clickedIdx = highlights.findIndex(hl => {
             if (hl.pageNumber !== pageNumber) return false;
             return hl.rects.some(r => {
-                const minX = r.pdfX;
-                const maxX = r.pdfX + r.pdfWidth;
-                const minY = r.pdfY - r.pdfHeight;
-                const maxY = r.pdfY;
+                // Extents can be negative on /Rotate pages: every rotation
+                // transform is an axis swap/flip, so the stored box keeps
+                // its axis-aligned region but one of pdfWidth/pdfHeight
+                // flips sign. Normalize both axes like drawHighlight's
+                // min/max reconstruction, or the containment interval
+                // inverts and every interior click misses.
+                const minX = Math.min(r.pdfX, r.pdfX + r.pdfWidth);
+                const maxX = Math.max(r.pdfX, r.pdfX + r.pdfWidth);
+                const minY = Math.min(r.pdfY - r.pdfHeight, r.pdfY);
+                const maxY = Math.max(r.pdfY - r.pdfHeight, r.pdfY);
                 // Add a small 2-point padding for easier clicking
                 return pdfX >= minX - 2 && pdfX <= maxX + 2 && pdfY >= minY - 2 && pdfY <= maxY + 2;
             });
@@ -1269,6 +2032,7 @@ document.addEventListener('click', (e) => {
         popup.style.visibility = 'visible';
         popup.style.zIndex = '2147483647'; // Max z-index
         popup.classList.remove('hidden');
+        clampPopupToViewport(popup);
     } else {
         hidePopups();
     }
@@ -1313,10 +2077,13 @@ document.getElementById('edit-btn-ai').addEventListener('click', () => {
 
 document.getElementById('ai-btn-new').addEventListener('click', () => {
     if (!currentSelection) return;
-    
-    const rects = currentSelection.rects;
+
+    // Anchor the popup at the end of the selection (last rect of the
+    // last page group); the prompt text is the full cross-page string.
+    const lastGroup = currentSelection.groups[currentSelection.groups.length - 1];
+    const rects = lastGroup.rects;
     const lastRect = rects[rects.length - 1];
-    const pageRect = currentSelection.pageDiv.getBoundingClientRect();
+    const pageRect = lastGroup.pageDiv.getBoundingClientRect();
     
     const globalRect = {
         left: pageRect.left + lastRect.cssLeft,
@@ -1339,6 +2106,7 @@ document.getElementById('dark_mode_toggle').addEventListener('click', () => {
     applyViewerDarkMode(isDark);
     if (hasChromeStorage()) {
         chrome.storage.local.set({ ['pdf_dark_mode_' + fileUrl]: isDark });
+        mirrorPerDocTheme('pdf_dark_mode_' + fileUrl, isDark);
     }
 });
 
@@ -1380,7 +2148,10 @@ document.getElementById('summarize_page').addEventListener('click', async () => 
     if (pageNum < 1 || pageNum > pdfDoc.numPages) return;
     const page = await pdfDoc.getPage(pageNum);
     const textContent = await page.getTextContent();
-    const pageText = textContent.items.map(i => i.str).join(' ');
+    // Same EOL-aware builder the search feature uses: a naive
+    // join-with-spaces shredded intra-line run fragments into "Hel lo"
+    // soup and padded around empty positioning items.
+    const pageText = buildPageText(textContent).text;
 
     if (!pageText.trim()) {
         viewerAlert('Nothing to summarize', 'No text found on this page to summarize.');
@@ -1419,6 +2190,9 @@ document.getElementById('edit-btn-note').addEventListener('click', () => {
     
     editPopup.classList.add('hidden');
     notePopup.classList.remove('hidden');
+    // The note editor is taller than the edit popup it inherits its
+    // position from; clamp with its own real dimensions.
+    clampPopupToViewport(notePopup);
     document.getElementById('note-textarea').focus();
 });
 
@@ -1456,7 +2230,13 @@ document.getElementById('edit-btn-color').addEventListener('click', () => {
     colorPicker.style.left = editPopup.style.left;
     colorPicker.style.top = editPopup.style.top;
     editPopup.classList.add('hidden');
+    // Measurable only once .hidden (display:none) is lifted — same
+    // ordering as every other popup shower.
     colorPicker.classList.remove('hidden');
+    // The picker stacks its tools vertically, so it is taller than the
+    // edit popup whose clamped box it inherited; re-clamp with its own
+    // real dimensions or its bottom overflows the viewport.
+    clampPopupToViewport(colorPicker);
 });
 
 document.getElementById('edit-btn-trash').addEventListener('click', () => {
@@ -1488,6 +2268,32 @@ function hexToRgb(hex) {
         g: parseInt(result[2], 16) / 255,
         b: parseInt(result[3], 16) / 255
     } : defaultColor;
+}
+
+// Base filename (extension stripped) of the open document, for naming
+// exports after it instead of a generic fixed name. Resolves the
+// relative test fallback, decodes percent-encoding, and degrades to
+// "document" for odd URLs; Chrome sanitizes filesystem-illegal
+// characters in download names on its own.
+function documentBaseName() {
+    try {
+        const name = decodeURIComponent(new URL(fileUrl, window.location.href).pathname.split('/').pop() || '');
+        return (/\.pdf$/i.test(name) ? name.slice(0, -4) : name) || 'document';
+    } catch {
+        return 'document';
+    }
+}
+
+// Deferred object-URL release for anchor downloads. Revoking in the same
+// synchronous block as click() works in current Chrome only because the
+// browser happens to dereference the blob during click dispatch; engines
+// and past Chrome versions that fetched the blob from a later task saw
+// revoked-before-fetch URLs fail the download outright. The generous
+// delay outlasts any realistic commit stall without meaningfully pinning
+// one export-sized blob.
+const REVOKE_OBJECT_URL_DELAY_MS = 30000;
+function revokeObjectUrlLater(url) {
+    setTimeout(() => URL.revokeObjectURL(url), REVOKE_OBJECT_URL_DELAY_MS);
 }
 
 document.getElementById('export_md').addEventListener('click', () => {
@@ -1531,16 +2337,33 @@ document.getElementById('export_md').addEventListener('click', () => {
     const blob = new Blob([mdContent], { type: 'text/markdown' });
     const url = URL.createObjectURL(blob);
     
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'Annotations.md';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = documentBaseName() + '-annotations.md';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        revokeObjectUrlLater(url);
 });
 
+// One export at a time: every click used to launch a full
+// fetch→parse→serialize pipeline in parallel (duplicate downloads), and
+// a stalled server hung the fetch indefinitely with no feedback and no
+// way to retry cleanly.
+const SAVE_FETCH_TIMEOUT_MS = 60000;
+let savePdfInProgress = false;
+
 document.getElementById('save_pdf').addEventListener('click', async () => {
+    if (savePdfInProgress) return;
+    const saveBtn = document.getElementById('save_pdf');
+    // Bound the transfer wait so a stalled connection or a hung local
+    // file read can't hang the export forever; 60s stays generous for
+    // large files on slow links. Both transports take this signal: fetch
+    // natively, the file:// XHR via its AbortSignal bridge.
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), SAVE_FETCH_TIMEOUT_MS);
+    savePdfInProgress = true;
+    saveBtn.disabled = true;
     try {
         if (!fileUrl) {
             throw new Error("No PDF file URL specified.");
@@ -1551,15 +2374,36 @@ document.getElementById('save_pdf').addEventListener('click', async () => {
         // reason as there: Chromium's fetch has no file:// support.
         let existingPdfBytes;
         if (/^file:/i.test(fileUrl)) {
-            existingPdfBytes = await readLocalFileViaXhr(fileUrl);
+            existingPdfBytes = await readLocalFileViaXhr(fileUrl, controller.signal);
         } else {
-            const res = await fetch(fileUrl, { credentials: 'include' });
+            // cache:'reload' — the export must run against the server's
+            // CURRENT bytes, not a stale HTTP-cache copy that can differ
+            // from both the file on screen and the origin. A query-param
+            // cache-buster would break signed/authenticated URLs; reload
+            // keeps the URL intact. This is also what makes the
+            // page-count drift / skipped-page warnings below honest.
+            const res = await fetch(fileUrl, { credentials: 'include', signal: controller.signal, cache: 'reload' });
             if (!res.ok) {
                 throw new Error(`HTTP ${res.status}: ${res.statusText || 'Failed to fetch PDF file'}`);
             }
             existingPdfBytes = await res.arrayBuffer();
         }
-        const pdfDoc = await PDFLib.PDFDocument.load(existingPdfBytes);
+        // Highlight coordinates were captured against the viewer's copy;
+        // the fresh bytes below may have changed since it was opened.
+        // Snapshot the viewer's page count before the parse await so the
+        // drift comparison below pairs one coherent viewer-side reading
+        // with the freshly loaded file — robust even if module-level
+        // pdfDoc ever gains a second assignment site.
+        const viewerPageCount = pdfDoc ? pdfDoc.numPages : null;
+        // Distinct name on purpose: this is pdf-lib's document, not the
+        // pdf.js one above, and it shadows nothing.
+        const pdfLibDoc = await PDFLib.PDFDocument.load(existingPdfBytes);
+        // Page-count drift proves the remote file changed. Same-count
+        // content changes can't be detected cheaply and degrade to
+        // alignment risk, flagged after the download below.
+        const pageCount = pdfLibDoc.getPageCount();
+        const staleDocument = viewerPageCount !== null && pageCount !== viewerPageCount;
+        let skippedStale = 0;
 
         // Custom Author Name from the options page, stored in local
         // chrome.storage. Callback style + hasChromeStorage() guard to
@@ -1576,7 +2420,14 @@ document.getElementById('save_pdf').addEventListener('click', async () => {
 
         // Add highlights
         highlights.forEach(hl => {
-            const page = pdfDoc.getPage(hl.pageNumber - 1);
+            // Skip annotations whose target page no longer exists (or was
+            // never valid) instead of letting getPage throw and abort the
+            // whole export; the user is told below.
+            if (!Number.isInteger(hl.pageNumber) || hl.pageNumber < 1 || hl.pageNumber > pageCount) {
+                skippedStale++;
+                return;
+            }
+            const page = pdfLibDoc.getPage(hl.pageNumber - 1);
             const colorRgb = hexToRgb(hl.color);
             
             // Calculate bounding box for the entire highlight
@@ -1584,22 +2435,38 @@ document.getElementById('save_pdf').addEventListener('click', async () => {
             const quadPoints = [];
 
             hl.rects.forEach(r => {
-                const x1 = r.pdfX;
-                const y1 = r.pdfY - r.pdfHeight; // Bottom edge
-                const x2 = r.pdfX + r.pdfWidth;
-                const y2 = r.pdfY;               // Top edge
-                
-                minX = Math.min(minX, x1);
-                minY = Math.min(minY, y1);
-                maxX = Math.max(maxX, x2);
-                maxY = Math.max(maxY, y2);
+                // Prefer the stored corners: on rotated pages the box is
+                // not axis-aligned in PDF space, and rebuilding it from
+                // width/height deltas would skew the exported quad.
+                // Highlights saved before corner storage fall back to the
+                // legacy axis-aligned derivation (correct for unrotated
+                // pages, which is all they could have been made on).
+                // Validated, not merely truthy: this also covers records
+                // created this session (they bypass the storage
+                // sanitizer), so garbage corners can never reach QuadPoints.
+                let tl, tr, bl, br;
+                if (hasValidCornerQuad(r)) {
+                    tl = r.cTL; tr = r.cTR; br = r.cBR; bl = r.cBL;
+                } else {
+                    const x1 = r.pdfX;
+                    const y1 = r.pdfY - r.pdfHeight; // Bottom edge
+                    const x2 = r.pdfX + r.pdfWidth;
+                    const y2 = r.pdfY;               // Top edge
+                    tl = [x1, y2]; tr = [x2, y2]; br = [x2, y1]; bl = [x1, y1];
+                }
 
-                // Add 8 coordinates for this rectangle's quad points
+                minX = Math.min(minX, tl[0], tr[0], bl[0], br[0]);
+                minY = Math.min(minY, tl[1], tr[1], bl[1], br[1]);
+                maxX = Math.max(maxX, tl[0], tr[0], bl[0], br[0]);
+                maxY = Math.max(maxY, tl[1], tr[1], bl[1], br[1]);
+
+                // Add 8 coordinates for this rectangle's quad points —
+                // same vertex order the legacy path used (TL, TR, BL, BR).
                 quadPoints.push(
-                    x1, y2, // Top-Left
-                    x2, y2, // Top-Right
-                    x1, y1, // Bottom-Left
-                    x2, y1  // Bottom-Right
+                    tl[0], tl[1], // Top-Left
+                    tr[0], tr[1], // Top-Right
+                    bl[0], bl[1], // Bottom-Left
+                    br[0], br[1]  // Bottom-Right
                 );
             });
             
@@ -1625,24 +2492,40 @@ document.getElementById('save_pdf').addEventListener('click', async () => {
                 annotObj.T = PDFLib.PDFString.of(authorName);
             }
 
-            const annot = pdfDoc.context.obj(annotObj);
+            const annot = pdfLibDoc.context.obj(annotObj);
             
             let annots = page.node.Annots();
             if (!annots) {
-                annots = pdfDoc.context.obj([]);
+                annots = pdfLibDoc.context.obj([]);
                 page.node.set(PDFLib.PDFName.of('Annots'), annots);
             }
-            annots.push(pdfDoc.context.register(annot));
+            annots.push(pdfLibDoc.context.register(annot));
         });
 
-        const pdfBytes = await pdfDoc.save();
+        const pdfBytes = await pdfLibDoc.save();
         
         // Trigger download
         const blob = new Blob([pdfBytes], { type: "application/pdf" });
+        const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        link.download = "highlighted_document.pdf";
+        link.href = url;
+        link.download = documentBaseName() + "-highlighted.pdf";
         link.click();
+        // Deferred release (see revokeObjectUrlLater): same timing as
+        // export_md, and safe regardless of when the browser fetches the
+        // blob for the download.
+        revokeObjectUrlLater(url);
+
+        // Honest feedback when the source moved under us: the download
+        // above is still delivered, but its fidelity must not be silent.
+        if (skippedStale > 0) {
+            viewerAlert(
+                'Export incomplete',
+                `The file appears to have changed since you opened it — ${skippedStale} annotation(s) referenced pages missing from the current file and were left out of this export.`
+            );
+        } else if (staleDocument) {
+            viewerAlert('Document changed', 'The file now has a different page count than the document you annotated. The export succeeded, but placed marks may not align with the new content.');
+        }
         
     } catch (e) {
         console.error("Failed to save PDF", e);
@@ -1656,11 +2539,22 @@ document.getElementById('save_pdf').addEventListener('click', async () => {
         // Error), so instances pass neither instanceof EncryptedPDFError
         // nor a .name check. Export MD and Print both work off the
         // decrypted in-memory document, so point the user there.
-        if (/is encrypted/i.test(String(e && e.message))) {
+        if (e && e.name === 'AbortError') {
+            viewerAlert('Save timed out', 'Fetching the PDF took too long and was cancelled. Check your connection and try again.');
+        } else if (/is encrypted/i.test(String(e && e.message))) {
             viewerAlert('Cannot save highlights', "Saving highlights isn't supported for password-protected PDFs — use Export MD or Print instead.");
         } else {
             viewerAlert('Error saving PDF', 'Error saving PDF. Check the console for details.');
         }
+    } finally {
+        // Whatever the outcome, release the one-at-a-time gate and the
+        // button — without this the first export disabled Save for the
+        // rest of the tab's lifetime. Also disarm the watchdog so a
+        // completed export doesn't leave a timer firing into an
+        // already-settled controller for the next 60 seconds.
+        clearTimeout(timeoutId);
+        savePdfInProgress = false;
+        saveBtn.disabled = false;
     }
 });
 
@@ -1690,13 +2584,43 @@ if (findInput) {
     });
 }
 
+// Reconstructs a page's text from a pdf.js text-content payload, shared
+// by search matching and the summarize feature so the two can never
+// drift apart again (summarize used to join every item with a space,
+// which shredded kerned intra-line runs and padded around empty ones).
+// Runs are concatenated directly — pdf.js splits a line into items at
+// arbitrary chunk boundaries — and a single space is added only at
+// hasEOL boundaries, where inter-word spacing is genuinely implied.
+// Zero-length zero-width items are positioning artifacts, not text.
+// Returns { text, items } where each item carries its startIndex/endIndex
+// within text so callers can map match offsets back to runs.
+function buildPageText(textContent) {
+    let text = '';
+    const items = [];
+    for (const item of textContent.items) {
+        if (!item.str && item.width === 0) continue;
+
+        items.push({
+            ...item,
+            startIndex: text.length,
+            endIndex: text.length + item.str.length
+        });
+        text += item.str;
+
+        if (item.hasEOL) {
+            text += ' ';
+        }
+    }
+    return { text, items };
+}
+
 async function performSearch(query) {
     if (!pdfDoc) return;
     if (!query) {
         clearSearch();
         return;
     }
-    
+
     // Start a new generation so any search still in flight aborts at
     // its next check instead of clobbering this one's state or scrolling.
     const gen = ++searchGeneration;
@@ -1712,23 +2636,9 @@ async function performSearch(query) {
         const textContent = await page.getTextContent();
         if (gen !== searchGeneration) return; // superseded or cleared
 
-        let pageText = '';
-        const textItems = [];
-        
-        for (const item of textContent.items) {
-            if (!item.str && item.width === 0) continue;
-            
-            textItems.push({
-                ...item,
-                startIndex: pageText.length,
-                endIndex: pageText.length + item.str.length
-            });
-            pageText += item.str;
-            
-            if (item.hasEOL) {
-                pageText += ' ';
-            }
-        }
+        const built = buildPageText(textContent);
+        const pageText = built.text;
+        const textItems = built.items;
         
         const lowerPageText = pageText.toLowerCase();
         
@@ -1743,20 +2653,47 @@ async function performSearch(query) {
             );
             
             if (matchItems.length > 0) {
-                const rects = matchItems.map(item => {
-                    const height = Math.abs(item.transform[3]);
-                    return {
-                        pdfX: item.transform[4],
-                        pdfY: item.transform[5] + height, // top edge
-                        pdfWidth: item.width,
+                const rects = [];
+                for (const item of matchItems) {
+                    // Clip the item to the part actually covered by the
+                    // match and scale proportionally by character count.
+                    // Highlighting the whole overlapping item used to paint
+                    // entire runs for a partial query hit.
+                    const s = Math.max(matchStart, item.startIndex);
+                    const e = Math.min(matchEnd, item.endIndex);
+                    const chars = item.str.length || 1;
+                    const unitW = item.width / chars;
+                    const spanChars = e - s;
+                    if (spanChars <= 0 || unitW <= 0) continue;
+                    const t = item.transform;
+                    // Vertical extent via hypot(c,d): equals |d| (the old
+                    // baseline+height value) for upright text, but stays
+                    // correct when the run is rotated/skewed and |d| alone
+                    // collapses to 0.
+                    const height = Math.hypot(t[2], t[3]);
+                    const rect = {
+                        pdfX: t[4] + (s - item.startIndex) * unitW,
+                        pdfY: t[5] + height,
+                        pdfWidth: spanChars * unitW,
                         pdfHeight: height
                     };
-                });
-                
-                searchResults.push({
-                    pageNumber: i,
-                    rects: rects
-                });
+                    if (t[1] !== 0 || t[2] !== 0) {
+                        // Non-upright runs carry their full matrix so the
+                        // draw step can place a rotated quad; upright text
+                        // keeps the axis-aligned fast path untouched.
+                        rect.matrix = t.slice();
+                        rect.dirWidth = rect.pdfWidth;
+                        rect.dirHeight = height;
+                    }
+                    rects.push(rect);
+                }
+
+                if (rects.length > 0) {
+                    searchResults.push({
+                        pageNumber: i,
+                        rects: rects
+                    });
+                }
             }
             startIndex = index + 1;
         }
@@ -1800,6 +2737,56 @@ function updateSearchUI() {
     findResultsSpan.textContent = `${activeMatchIndex + 1} / ${searchResults.length}`;
 }
 
+// Page jumps can arrive before any .page div exists: pdfDoc resolves
+// ahead of renderAllPages' batched DOM append, and zoom rebuilds blank
+// #viewer for a moment. scrollHeight is degenerate in exactly those
+// windows (~viewport height, no children), so the old proportional
+// fallback assumed uniform page heights AND landed near the top on every
+// document shape. Instead, hold the request briefly and perform the exact
+// scroll once the target div exists — div heights come from each page's
+// real viewport, so mixed-size documents land correctly too. The
+// proportional formula remains only as the capped last resort.
+const DEFERRED_SCROLL_MAX_FRAMES = 300; // ~5s at 60fps
+let deferredScrollPage = null;
+let deferredScrollOnlyIfOutside = false;
+let deferredScrollFrames = 0;
+let deferredScrollRaf = 0;
+
+function requestDeferredScroll(pageNumber, onlyIfOutside) {
+    deferredScrollPage = pageNumber;
+    deferredScrollOnlyIfOutside = onlyIfOutside;
+    if (deferredScrollRaf) return; // loop already running; latest target wins
+    deferredScrollFrames = 0;
+    const tick = () => {
+        deferredScrollRaf = 0;
+        const container = document.getElementById('viewerContainer');
+        if (!container || !pdfDoc || deferredScrollPage === null) {
+            deferredScrollPage = null;
+            return;
+        }
+        const pageNumber = deferredScrollPage;
+        const pageDiv = document.querySelector(`.page[data-page-number="${pageNumber}"]`);
+        if (!pageDiv && ++deferredScrollFrames < DEFERRED_SCROLL_MAX_FRAMES) {
+            deferredScrollRaf = requestAnimationFrame(tick);
+            return;
+        }
+        deferredScrollPage = null;
+        if (!pageDiv) {
+            // Layout never materialized (load failed mid-build): legacy
+            // proportional floor so the jump still does something.
+            container.scrollTop = ((pageNumber - 1) / pdfDoc.numPages) * container.scrollHeight;
+            return;
+        }
+        const containerRect = container.getBoundingClientRect();
+        const pageRect = pageDiv.getBoundingClientRect();
+        if (!deferredScrollOnlyIfOutside ||
+            pageRect.top < containerRect.top || pageRect.bottom > containerRect.bottom) {
+            container.scrollTop = container.scrollTop + (pageRect.top - containerRect.top) - 20;
+        }
+    };
+    deferredScrollRaf = requestAnimationFrame(tick);
+}
+
 function scrollToActiveMatch() {
     if (activeMatchIndex === -1) return;
     const match = searchResults[activeMatchIndex];
@@ -1814,12 +2801,9 @@ function scrollToActiveMatch() {
             container.scrollTop = container.scrollTop + (pageRect.top - containerRect.top) - 20;
         }
     } else {
-        // Find approximate position if page not rendered yet
-        const container = document.getElementById('viewerContainer');
-        const scrollHeight = container.scrollHeight;
-        if (pdfDoc && pdfDoc.numPages) {
-            container.scrollTop = ((match.pageNumber - 1) / pdfDoc.numPages) * scrollHeight;
-        }
+        // Layout not built yet (initial load / rebuild window): hold the
+        // jump until the page skeleton exists, then scroll exactly.
+        requestDeferredScroll(match.pageNumber, true);
     }
 }
 
@@ -1833,19 +2817,41 @@ function drawSearchHighlightsForPage(pageNumber, pageDiv, viewport) {
                 const div = document.createElement('div');
                 div.className = 'search-highlight';
                 if (index === activeMatchIndex) div.classList.add('active');
-                
-                const pt1 = viewport.convertToViewportPoint(r.pdfX, r.pdfY);
-                const pt2 = viewport.convertToViewportPoint(r.pdfX + r.pdfWidth, r.pdfY - r.pdfHeight);
-                
-                const cssLeft = Math.min(pt1[0], pt2[0]);
-                const cssTop = Math.min(pt1[1], pt2[1]);
-                const cssWidth = Math.abs(pt2[0] - pt1[0]);
-                const cssHeight = Math.abs(pt2[1] - pt1[1]);
 
-                div.style.left = `${cssLeft}px`;
-                div.style.top = `${cssTop}px`;
-                div.style.width = `${cssWidth}px`;
-                div.style.height = `${cssHeight}px`;
+                if (r.matrix) {
+                    // Rotated/skewed run: map the run's origin, top-left,
+                    // and end corners through the viewport, then place the
+                    // highlight as a div rotated into the text direction.
+                    const [a, b, c, d, e, f] = r.matrix;
+                    const m = Math.hypot(a, b);
+                    const ux = a / m, uy = b / m;   // advance direction
+                    const nx = -b / m, ny = a / m;  // run "up" normal
+                    const pO = viewport.convertToViewportPoint(e, f);
+                    const pT = viewport.convertToViewportPoint(e + nx * r.dirHeight, f + ny * r.dirHeight);
+                    const pE = viewport.convertToViewportPoint(
+                        e + nx * r.dirHeight + ux * r.dirWidth,
+                        f + ny * r.dirHeight + uy * r.dirWidth
+                    );
+                    div.style.left = `${pT.x}px`;
+                    div.style.top = `${pT.y}px`;
+                    div.style.width = `${Math.hypot(pE.x - pT.x, pE.y - pT.y)}px`;
+                    div.style.height = `${Math.hypot(pT.x - pO.x, pT.y - pO.y)}px`;
+                    div.style.transformOrigin = '0 0';
+                    div.style.transform = `rotate(${Math.atan2(pE.y - pT.y, pE.x - pT.x)}rad)`;
+                } else {
+                    const pt1 = viewport.convertToViewportPoint(r.pdfX, r.pdfY);
+                    const pt2 = viewport.convertToViewportPoint(r.pdfX + r.pdfWidth, r.pdfY - r.pdfHeight);
+
+                    const cssLeft = Math.min(pt1[0], pt2[0]);
+                    const cssTop = Math.min(pt1[1], pt2[1]);
+                    const cssWidth = Math.abs(pt2[0] - pt1[0]);
+                    const cssHeight = Math.abs(pt2[1] - pt1[1]);
+
+                    div.style.left = `${cssLeft}px`;
+                    div.style.top = `${cssTop}px`;
+                    div.style.width = `${cssWidth}px`;
+                    div.style.height = `${cssHeight}px`;
+                }
                 pageDiv.appendChild(div);
             });
         }
@@ -1868,7 +2874,18 @@ document.addEventListener('keydown', (e) => {
     const isInput = document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA');
     
     if (e.key === 'Escape') {
+        // Progressive dismissal, closest overlay first: an open annotation
+        // popup consumes this press; only when none is showing does Esc
+        // dismiss search results — previously those had no keyboard way
+        // out (focus the input, empty it, press Enter). Gating on the
+        // query rather than the result count also cancels an in-flight
+        // search: clearSearch bumps searchGeneration, which performSearch
+        // checks between pages. Modal dialogs never reach this handler at
+        // all — their capture-phase Escape guard stops propagation above.
+        const popupWasOpen = ['color-picker-popup', 'edit-highlight-popup', 'note-editor-popup']
+            .some(id => { const p = document.getElementById(id); return !!p && !p.classList.contains('hidden'); });
         hidePopups();
+        if (!popupWasOpen && currentSearchQuery !== '') clearSearch();
         if (isInput) document.activeElement.blur();
         return;
     }
@@ -1896,6 +2913,19 @@ document.addEventListener('keydown', (e) => {
         return;
     }
     
+    // Actual-size reset (Ctrl+0 / Cmd+0, numpad included). The wheel
+    // handler above intercepts ctrl+wheel, so browser zoom never engages
+    // on this page and this chord is the only quick way back to 100%.
+    if ((e.ctrlKey || e.metaKey) && e.key === '0') {
+        e.preventDefault();
+        if (!pdfDoc) return;
+        currentZoomMode = 'custom';
+        if (scale === 1) return; // already actual size, nothing to re-render
+        scale = 1;
+        renderAllPages();
+        return;
+    }
+    
     // Arrow-key page navigation needs a loaded document (pdfDoc is null
     // until loadPDF() resolves; the zoom buttons guard the same way).
     if (!isInput && pdfDoc) {
@@ -1917,6 +2947,25 @@ document.addEventListener('keydown', (e) => {
 });
 
 // ==================== Interactive Links ====================
+// External targets harvested from untrusted documents (link annotations,
+// outline entries) reach window.open here, so this sink validates the
+// scheme itself instead of trusting whichever upstream layer built the
+// string. The set mirrors pdf.js's createValidAbsoluteUrl whitelist
+// (_isValidProtocol), which already filters annot.url/item.url today —
+// keeping it in sync means no reachable URL changes behavior, while
+// javascript:/data:/unknown schemes stay blocked even if that upstream
+// filter ever slips. Same defense-in-depth as the popup's markdown
+// renderer, which whitelists protocols before emitting links.
+const SAFE_EXTERNAL_PROTOCOLS = new Set(['http:', 'https:', 'ftp:', 'mailto:', 'tel:']);
+
+function isSafeExternalUrl(url) {
+    try {
+        return SAFE_EXTERNAL_PROTOCOLS.has(new URL(url).protocol);
+    } catch {
+        return false;
+    }
+}
+
 async function renderLinkAnnotations(page, pageDiv, viewport) {
     try {
         const annots = await page.getAnnotations();
@@ -1950,7 +2999,7 @@ async function renderLinkAnnotations(page, pageDiv, viewport) {
             
             linkEl.addEventListener('click', async (e) => {
                 e.stopPropagation();
-                if (annot.url) {
+                if (annot.url && isSafeExternalUrl(annot.url)) {
                     window.open(annot.url, '_blank', 'noopener,noreferrer');
                 } else if (annot.dest) {
                     try {
@@ -1988,9 +3037,9 @@ function scrollToPage(pageNumber) {
         const pageRect = pageDiv.getBoundingClientRect();
         container.scrollTop = container.scrollTop + (pageRect.top - containerRect.top) - 20;
     } else {
-        // Approximate position if page not loaded yet
-        const scrollHeight = container.scrollHeight;
-        container.scrollTop = ((pageNumber - 1) / pdfDoc.numPages) * scrollHeight;
+        // Layout not built yet: defer for an exact scroll (see
+        // requestDeferredScroll) instead of guessing proportionally.
+        requestDeferredScroll(pageNumber, false);
     }
 }
 
@@ -2290,7 +3339,12 @@ function renderOutline(outline) {
             const titleLink = document.createElement('a');
             titleLink.textContent = item.title;
             titleLink.title = item.title;
-            titleLink.href = 'javascript:void(0)';
+            // Deliberately no href: navigation is owned by the titleRow
+            // click handler below. A placeholder like javascript:void(0)
+            // violates extension-page CSP on every click and turns
+            // middle-/ctrl-click into dead or phantom tabs, while an <a>
+            // without href has no default action to suppress at all.
+            // Styling (.outline-item-title a) keys off the tag name.
             
             if (item.bold) titleLink.style.fontWeight = 'bold';
             if (item.italic) titleLink.style.fontStyle = 'italic';
@@ -2317,7 +3371,7 @@ function renderOutline(outline) {
             titleRow.addEventListener('click', async (e) => {
                 if (e.target === toggle) return; // ignore toggle clicks
                 
-                if (item.url) {
+                if (item.url && isSafeExternalUrl(item.url)) {
                     window.open(item.url, '_blank', 'noopener,noreferrer');
                 } else if (item.dest) {
                     try {
@@ -2342,15 +3396,21 @@ function renderOutline(outline) {
     renderItems(outline, contentOutline);
 }
 
-// --- NEW: Trackpad Pinch-to-Zoom Support ---
+// --- Trackpad Pinch-to-Zoom Support ---
 let pinchZoomTimeout = null;
 let currentPinchScale = 1.0;
 let initialScaleBeforePinch = 1.0;
 let isPinching = false;
+let pinchOriginClientX = 0;
+let pinchOriginClientY = 0;
 
 document.getElementById('viewerContainer').addEventListener('wheel', (e) => {
     if (e.ctrlKey) {
         e.preventDefault(); // Prevent default browser zoom
+        // No document yet (load-error / password screen): nothing to
+        // zoom, and mutating scale here would silently change the zoom
+        // level the next successful load starts from.
+        if (!pdfDoc) return;
         isPinching = true;
         // A manual zoom overrides fit-width/fit-page; otherwise the next
         // window resize would snap back to the fitted scale.
@@ -2358,23 +3418,24 @@ document.getElementById('viewerContainer').addEventListener('wheel', (e) => {
 
         if (pinchZoomTimeout === null) {
              initialScaleBeforePinch = scale;
+             // Where the gesture is anchored, in viewport coordinates —
+             // the snap-back below keeps this point fixed on screen.
+             pinchOriginClientX = e.clientX;
+             pinchOriginClientY = e.clientY;
         }
 
         // Adjust scale smoothly based on delta
         const delta = -e.deltaY * 0.01;
         let newScale = scale * Math.exp(delta);
-        
+
         if (newScale < MIN_SCALE) newScale = MIN_SCALE;
         if (newScale > MAX_SCALE) newScale = MAX_SCALE;
-        
+
         scale = newScale;
-        
+
         // Update UI
-        const zoomSpan = document.getElementById('zoom_level');
-        if(zoomSpan) {
-            zoomSpan.textContent = Math.round(scale * 100) + "%";
-        }
-        
+        updateZoomLabel();
+
         // Visual feedback using CSS transform for smoothness
         currentPinchScale = scale / initialScaleBeforePinch;
         const viewer = document.getElementById('viewer');
@@ -2383,24 +3444,29 @@ document.getElementById('viewerContainer').addEventListener('wheel', (e) => {
             const rect = viewer.getBoundingClientRect();
             const originX = e.clientX - rect.left;
             const originY = e.clientY - rect.top;
-            
+
             // Only set origin once at start of pinch to prevent jitter
             if (!viewer.style.transformOrigin || pinchZoomTimeout === null) {
                 viewer.style.transformOrigin = `${originX}px ${originY}px`;
             }
-            
+
             viewer.style.transform = `scale(${currentPinchScale})`;
         }
 
         clearTimeout(pinchZoomTimeout);
         pinchZoomTimeout = setTimeout(() => {
             isPinching = false;
-            if (viewer) {
-                viewer.style.transform = 'none';
-                viewer.style.transformOrigin = ''; // reset
+            const viewerEl = document.getElementById('viewer');
+            if (viewerEl) {
+                viewerEl.style.transform = 'none';
+                viewerEl.style.transformOrigin = ''; // reset
             }
             pinchZoomTimeout = null;
-            renderAllPages(); // Re-render at new crisp resolution
+            // Re-render anchored on the gesture origin: renderAllPages'
+            // focal-point math keeps the content under the finger exactly
+            // where it was, so no separate compensation is needed here
+            // (stacking one used to double-correct and drift the view).
+            renderAllPages(pinchOriginClientX, pinchOriginClientY);
         }, 200);
     } else if (isPinching) {
         // Prevent accidental scrolling while the user is actively pinching
