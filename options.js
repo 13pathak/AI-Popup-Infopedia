@@ -347,21 +347,45 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // --- NEW: PDF File Access Check ---
-  // MV3 removed chrome.extension (and with it isAllowedFileSchemeAccess);
-  // the granted-state check goes through the generic chrome.permissions
-  // API instead. The file:///* origin counts as granted only while the
-  // per-extension "Allow access to file URLs" toggle is enabled.
-  if (chrome.permissions && chrome.permissions.contains) {
-    chrome.permissions.contains({ origins: ['file:///*'] }, (isAllowed) => {
-      if (isAllowed) {
-        document.getElementById('file-access-success').style.display = 'block';
-        document.getElementById('file-access-warning').style.display = 'none';
-      } else {
-        document.getElementById('file-access-success').style.display = 'none';
-        document.getElementById('file-access-warning').style.display = 'block';
+  // MV3 removed chrome.extension (and with it isAllowedFileSchemeAccess),
+  // and the common workaround — chrome.permissions.contains({origins:
+  // ['file:///*']}) — merely MIRRORS the chrome://extensions toggle via an
+  // undocumented reflection that has shipped false results in both
+  // directions. The verdict here therefore comes from a real file:// read,
+  // the exact mechanism the PDF viewer uses for local documents: if the
+  // probe succeeds, local PDFs will genuinely load; if it fails, they
+  // won't, whatever any API claims. Toggling "Allow access to file URLs"
+  // reloads the extension, so a fresh probe per page load stays accurate.
+  function setFileAccessUi(isAllowed) {
+    document.getElementById('file-access-success').style.display = isAllowed ? 'block' : 'none';
+    document.getElementById('file-access-warning').style.display = isAllowed ? 'none' : 'block';
+  }
+
+  function probeLocalFileAccess() {
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (ok) => { if (!settled) { settled = true; resolve(ok); } };
+      try {
+        const xhr = new XMLHttpRequest();
+        // The filesystem root always exists, and its generated listing is
+        // tiny — probing it exercises the permission gate without touching
+        // any user file or depending on a specific path existing.
+        xhr.open('GET', 'file:///', true);
+        xhr.timeout = 4000;
+        xhr.onload = () => finish(true);
+        xhr.onerror = () => finish(false);
+        xhr.ontimeout = () => finish(false);
+        xhr.send(null);
+        // Belt-and-braces: some engines may invoke no callback at all.
+        setTimeout(() => finish(false), 5000);
+      } catch (e) {
+        finish(false);
       }
     });
   }
+
+  probeLocalFileAccess().then(setFileAccessUi);
+
   safeAddListener('open-extensions-page-btn', 'click', () => {
     chrome.tabs.create({ url: 'chrome://extensions/?id=' + chrome.runtime.id });
   });
@@ -702,6 +726,25 @@ function applyThemeToDocument(theme) {
   }
 }
 
+// Theme bootstrap mirrors live in this origin's shared localStorage,
+// which chrome.storage.clear() cannot reach. Leftovers make the next
+// viewer open paint a stale theme before its async correction lands,
+// and per-document mirrors would otherwise outlive the settings they
+// cache (backups never include pdf_dark_mode_* keys). includeGlobal
+// wipes the uiTheme mirror too — safe wherever callers immediately
+// re-derive the theme from sync storage or reload.
+function wipeThemeMirrors({ includeGlobal }) {
+  try {
+    const doomed = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k) continue;
+      if (k.startsWith('pdf_dark_mode_') || (includeGlobal && k === 'uiTheme')) doomed.push(k);
+    }
+    doomed.forEach(k => localStorage.removeItem(k));
+  } catch (e) {}
+}
+
 function loadThemeSetting() {
   chrome.storage.sync.get({ uiTheme: 'dark' }, (data) => {
     const theme = data.uiTheme || 'dark';
@@ -940,6 +983,11 @@ function importAllSettings(event) {
 
         // Import new data into sync storage
         await storageSet(settings.syncData);
+
+        // Backups never carry per-document theme keys, so any mirrors on
+        // disk now describe settings that no longer exist; the global
+        // mirror is re-derived from the imported uiTheme on reload.
+        wipeThemeMirrors({ includeGlobal: true });
       } catch (writeErr) {
         // Storage was already cleared (or the import was rejected) — put the
         // previous contents back before reporting the failure.
@@ -4207,6 +4255,10 @@ function resetAllSettings() {
     new Promise(resolve => chrome.storage.sync.clear(() => resolve())),
     new Promise(resolve => chrome.storage.local.clear(() => resolve()))
   ]).then(() => {
+    // Fresh install means fresh theme mirrors too: otherwise the next
+    // viewer open first-paints from a pre-reset localStorage mirror
+    // before its async correction lands.
+    wipeThemeMirrors({ includeGlobal: true });
     // Fresh state: reload so every loader re-runs against empty storage
     location.reload();
   });
