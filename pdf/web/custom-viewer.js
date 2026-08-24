@@ -316,24 +316,24 @@ async function loadStorageData() {
 function saveHighlights() {
     if (!hasChromeStorage()) return;
     const storageKey = SYNC_KEYS.highlights;
-    rememberOwnWrite(storageKey, highlights);
-    chrome.storage.local.set({ [storageKey]: highlights });
+    const entry = rememberOwnWrite(storageKey, highlights);
+    chrome.storage.local.set({ [storageKey]: highlights }, () => settlePendingWrite(entry));
     if (typeof renderSidebar === 'function') renderSidebar();
 }
 
 function saveBookmarks() {
     if (!hasChromeStorage()) return;
     const storageKey = SYNC_KEYS.bookmarks;
-    rememberOwnWrite(storageKey, bookmarks);
-    chrome.storage.local.set({ [storageKey]: bookmarks });
+    const entry = rememberOwnWrite(storageKey, bookmarks);
+    chrome.storage.local.set({ [storageKey]: bookmarks }, () => settlePendingWrite(entry));
     if (typeof renderBookmarks === 'function') renderBookmarks();
 }
 
 function saveLastPage(pageNum) {
     if (!hasChromeStorage()) return;
     const storageKey = SYNC_KEYS.lastPage;
-    rememberOwnWrite(storageKey, pageNum);
-    chrome.storage.local.set({ [storageKey]: pageNum });
+    const entry = rememberOwnWrite(storageKey, pageNum);
+    chrome.storage.local.set({ [storageKey]: pageNum }, () => settlePendingWrite(entry));
 }
 
 // --- Cross-tab consistency ---
@@ -354,10 +354,19 @@ function saveLastPage(pageNum) {
 // pending write ends up as the final storage value. Such interim values
 // must be ignored, not adopted: adopting one repaints superseded data
 // and lets an edit typed inside that window commit on top of it,
-// clobbering the newer payload with stale content. Entries expire so a
-// write that never confirms (a failed set emits no echo) cannot
-// suppress genuine external updates forever.
-const PENDING_WRITE_CONFIRM_MS = 15000;
+// clobbering the newer payload with stale content.
+//
+// Suppression is only lossless while every pending entry corresponds to
+// a write that actually lands. The set() completion callback provides
+// that signal precisely: success keeps the entry (its echo is still
+// needed to classify the upcoming notification), failure splices it out
+// immediately — without that splice, a failed write would suppress
+// external adoptions for the whole TTL and leave this tab silently
+// stale, its next wholesale save clobbering the other tab's newer
+// annotations. The short TTL remains purely as a backstop for the
+// lost-callback pathology (tab torn down mid-set); echoes land within
+// milliseconds, so it never binds in normal operation.
+const PENDING_WRITE_CONFIRM_MS = 2000;
 const PENDING_WRITE_HISTORY = 8;
 const pendingOwnWrites = new Map();
 
@@ -367,9 +376,26 @@ function rememberOwnWrite(key, value) {
         queue = [];
         pendingOwnWrites.set(key, queue);
     }
-    queue.push({ value: JSON.stringify(value), at: Date.now() });
+    const entry = { value: JSON.stringify(value), at: Date.now() };
+    queue.push(entry);
     // Drop the oldest past the cap.
     while (queue.length > PENDING_WRITE_HISTORY) queue.shift();
+    return entry;
+}
+
+// Precise settle for one write's set() callback: on failure the entry
+// leaves the queue at once (see rationale above); on success nothing
+// happens here and the entry drains via its own echo as usual.
+function settlePendingWrite(entry) {
+    if (!entry) return;
+    if (!chrome.runtime.lastError) return;
+    for (const [key, queue] of pendingOwnWrites) {
+        const i = queue.indexOf(entry);
+        if (i !== -1) {
+            queue.splice(i, 1);
+            if (!queue.length) pendingOwnWrites.delete(key);
+        }
+    }
 }
 
 // Expire entries whose confirmation never arrived, returning the live
@@ -569,14 +595,19 @@ function adoptRemoteGlobalTheme(changes) {
 // one was removed). Adopt it live so open tabs agree, and refresh the
 // bootstrap mirror so the next open paints correctly on the first try.
 // Own-toggle echoes land here too but are idempotent: the class already
-// matches, so only the mirror is refreshed.
+// matches, so only the mirror is refreshed. Both branches keep the
+// perDocThemeActive tri-state in step with what storage now holds — a
+// boolean means an override exists (ours or another tab's), removal
+// means this document follows the global theme again.
 function adoptRemoteViewerTheme(key, value) {
     if (typeof value === 'boolean') {
+        perDocThemeActive = true;
         if (document.body.classList.contains('dark-mode') !== value) {
             applyViewerDarkMode(value);
         }
         mirrorPerDocTheme(key, value);
     } else if (value === undefined) {
+        perDocThemeActive = false;
         clearPerDocThemeMirror(key);
         if (chrome.storage.sync) {
             chrome.storage.sync.get({ uiTheme: 'dark' }, (syncData) => {
@@ -2105,6 +2136,11 @@ document.getElementById('dark_mode_toggle').addEventListener('click', () => {
     const isDark = !document.body.classList.contains('dark-mode');
     applyViewerDarkMode(isDark);
     if (hasChromeStorage()) {
+        // Writing the override must move the tri-state too, or
+        // adoptRemoteGlobalTheme would keep treating this document as
+        // global-themed and let a later options-page change clobber the
+        // explicit choice just made.
+        perDocThemeActive = true;
         chrome.storage.local.set({ ['pdf_dark_mode_' + fileUrl]: isDark });
         mirrorPerDocTheme('pdf_dark_mode_' + fileUrl, isDark);
     }
