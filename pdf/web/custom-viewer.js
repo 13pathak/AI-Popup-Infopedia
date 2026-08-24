@@ -1206,6 +1206,49 @@ function viewerModalOpen() {
     return !!document.getElementById('viewer-modal-overlay');
 }
 
+// Paint this document's annotations onto a freshly rendered print page.
+// The on-screen marks are overlay divs inside .page containers, which
+// don't exist in #print-container — without this pass, printed paper
+// silently omitted every highlight/underline/strikethrough. Fills use
+// multiply blending, the print analogue of the translucent screen
+// overlay: paper shows through and underlying text stays legible.
+// Note indicators are intentionally not drawn — they are interactive UI
+// chrome, not document content.
+function drawPrintHighlights(ctx, viewport, pageNum) {
+    for (const h of highlights) {
+        if (h.pageNumber !== pageNum || !Array.isArray(h.rects)) continue;
+        const type = h.markupType || 'Highlight';
+        for (const r of h.rects) {
+            const pt1 = viewport.convertToViewportPoint(r.pdfX, r.pdfY);
+            const pt2 = viewport.convertToViewportPoint(r.pdfX + r.pdfWidth, r.pdfY - r.pdfHeight);
+            // Extents can be negative on /Rotate pages; normalize both axes
+            // like the on-screen drawer does.
+            const left = Math.min(pt1[0], pt2[0]);
+            const right = Math.max(pt1[0], pt2[0]);
+            const top = Math.min(pt1[1], pt2[1]);
+            const bottom = Math.max(pt1[1], pt2[1]);
+            ctx.save();
+            try {
+                if (type === 'Underline' || type === 'StrikeOut') {
+                    ctx.globalCompositeOperation = 'source-over';
+                    ctx.strokeStyle = h.color;
+                    ctx.lineWidth = Math.max(1, viewport.scale * 1.5);
+                    ctx.beginPath();
+                    ctx.moveTo(left, type === 'Underline' ? bottom : (top + bottom) / 2);
+                    ctx.lineTo(right, type === 'Underline' ? bottom : (top + bottom) / 2);
+                    ctx.stroke();
+                } else {
+                    ctx.globalCompositeOperation = 'multiply';
+                    ctx.fillStyle = h.color;
+                    ctx.fillRect(left, top, right - left, bottom - top);
+                }
+            } finally {
+                ctx.restore(); // also reverts any ignored invalid style set
+            }
+        }
+    }
+}
+
 async function printPDF() {
     if (!pdfDoc || printInProgress || viewerModalOpen()) return;
     const overlay = document.getElementById('print-overlay');
@@ -1266,6 +1309,9 @@ async function printPDF() {
             canvas.height = Math.floor(viewport.height);
 
             await page.render({ canvasContext: ctx, viewport }).promise;
+
+            // Composite this page's annotations onto the printed raster.
+            drawPrintHighlights(ctx, viewport, pageNum);
 
             // A menu print that fired while page 1 was still rendering
             // may have left the guidance sheet in the (then empty)
