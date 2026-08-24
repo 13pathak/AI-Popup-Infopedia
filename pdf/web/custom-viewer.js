@@ -3165,9 +3165,21 @@ async function renderLinkAnnotations(page, pageDiv, viewport) {
     try {
         const annots = await page.getAnnotations();
         const linkAnnots = annots.filter(a => a.subtype === 'Link');
-        
+
         if (linkAnnots.length === 0) return;
-        
+
+        // The await above can straddle a zoom: a rescale swaps
+        // pageDiv._viewport and re-renders the page, and that fresh render
+        // appends its own annotation layer. Appending this call's layer —
+        // positioned for the old scale — on top of it would duplicate the
+        // link boxes and their click handlers. Same staleness bail the
+        // render path itself applies after its awaits.
+        if (pageDiv._viewport !== viewport) return;
+
+        // A retry after an error re-renders at the *same* viewport while an
+        // earlier call may still be in flight; only one layer may exist.
+        pageDiv.querySelectorAll('.annotationLayer').forEach(el => el.remove());
+
         const annotationLayerDiv = document.createElement('div');
         annotationLayerDiv.className = 'annotationLayer';
         pageDiv.appendChild(annotationLayerDiv);
@@ -3204,7 +3216,15 @@ async function renderLinkAnnotations(page, pageDiv, viewport) {
                         }
                         
                         if (dest && dest[0]) {
-                            const pageIndex = await pdfDoc.getPageIndex(dest[0]);
+                            // dest[0] is normally a page Ref ({num, gen}),
+                            // but some producers emit explicit destinations
+                            // whose first entry is already a zero-based
+                            // page index; getPageIndex accepts only a Ref
+                            // and throws on anything else — pdf.js's own
+                            // viewer branches the same way.
+                            const pageIndex = Number.isInteger(dest[0]) && dest[0] >= 0
+                                ? dest[0]
+                                : await pdfDoc.getPageIndex(dest[0]);
                             const targetPageNumber = pageIndex + 1;
                             scrollToPage(targetPageNumber);
                         }
@@ -3584,7 +3604,11 @@ function renderOutline(outline) {
                             dest = await pdfDoc.getDestination(dest);
                         }
                         if (dest && dest[0]) {
-                            const pageIndex = await pdfDoc.getPageIndex(dest[0]);
+                            // Same dest[0] duality as the link-annotation
+                            // path above: Ref or already-resolved page index.
+                            const pageIndex = Number.isInteger(dest[0]) && dest[0] >= 0
+                                ? dest[0]
+                                : await pdfDoc.getPageIndex(dest[0]);
                             scrollToPage(pageIndex + 1);
                         }
                     } catch (err) {
