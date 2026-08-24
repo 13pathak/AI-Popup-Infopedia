@@ -707,7 +707,8 @@ const popupStyles = `
     opacity: 0.7;
     cursor: default;
   }
-  #ai-open-button-popup:hover {
+  #ai-open-button-popup:hover,
+  #ai-clip-button-popup:hover:not(:disabled) {
     background-color: var(--popup-accent-btn-hover);
   }
 
@@ -1502,7 +1503,8 @@ function showOpenButtonPopup(rect, selectedText, implicitContext) {
       type: 'saveClip',
       text: selectedText,
       sourceUrl: sourceUrl,
-      sourceTitle: sourceTitle
+      sourceTitle: sourceTitle,
+      context: implicitContext || null
     }, (response) => {
       if (chrome.runtime.lastError) {
         clipBtn.innerHTML = iconSvg('xCircle', 15);

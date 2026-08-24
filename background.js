@@ -693,13 +693,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return;
       }
 
+      let cleanContext = null;
+      if (request.context && typeof request.context === 'object') {
+        const sentence = typeof request.context.sentence === 'string' ? request.context.sentence.trim().slice(0, 400) : '';
+        const pageTitle = typeof request.context.pageTitle === 'string' ? request.context.pageTitle.trim().slice(0, 200) : '';
+        if (sentence || pageTitle) {
+          cleanContext = {};
+          if (sentence) cleanContext.sentence = sentence;
+          if (pageTitle) cleanContext.pageTitle = pageTitle;
+        }
+      }
+
       saveToHistory(clipText, '', listId, 'clip', 'Clip', request.sourceUrl, request.sourceTitle, [], (err) => {
         if (err) {
           sendResponse({ status: 'error', error: err.message });
         } else {
           sendResponse({ status: 'saved' });
         }
-      });
+      }, cleanContext);
     });
     return true;
   }
@@ -863,8 +874,8 @@ function generateHistoryItemId() {
   return 'h_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
 }
 
-// --- UPDATED to accept source URL and title ---
-function saveToHistory(word, definition, listId, modelName, promptName, sourceUrl, sourceTitle, citations, callback) {
+// --- UPDATED to accept source URL, title, and optional context ---
+function saveToHistory(word, definition, listId, modelName, promptName, sourceUrl, sourceTitle, citations, callback, context = null) {
   historySavePromise = historySavePromise.then(() => {
     return new Promise((resolve) => {
       chrome.storage.local.get(['history'], (result) => {
@@ -892,6 +903,9 @@ function saveToHistory(word, definition, listId, modelName, promptName, sourceUr
           sourceTitle: sourceTitle || '',
           citations: Array.isArray(citations) ? citations.slice(0, 5) : []
         };
+        if (context && typeof context === 'object') {
+          newItem.context = context;
+        }
 
         // Add new item to the beginning of the array
         history.unshift(newItem);

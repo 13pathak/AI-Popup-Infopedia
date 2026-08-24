@@ -1825,12 +1825,16 @@ function updateHistoryItem(itemKey, newWord, newDefinition, newListId) {
 
     const newHistory = history.map(item => {
       if (histId(item) === itemKey) {
-        return {
+        const updated = {
           ...item,
           word: newWord,
           definition: newDefinition,
           listId: normalizeListId(newListId) // "__unlisted__" (and any junk) -> null
         };
+        if (newDefinition && newDefinition.trim()) {
+          delete updated.context;
+        }
+        return updated;
       }
       return item;
     });
@@ -2651,7 +2655,7 @@ async function handleSendToAnkiClick(event) {
     const fields = {};
     fields[settings.wordField] = item.word;
     // Format definition: replace <br> with newlines for Anki
-    const ankiDefinition = item.definition
+    const ankiDefinition = (item.definition || '')
       .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') // Keep bold
       .replace(/\n/g, '<br>'); // Convert markdown newlines to HTML <br>
 
@@ -3615,9 +3619,10 @@ function handleToggleFavoriteClick(event) {
 
 // --- Deferred clip lookup: explain an unexplained clip in place ---
 // Fires the normal getAiDefinition pipeline (default model, fallback chain,
-// grounding) with the clip's full text and writes the answer back into the
-// history item. The item keeps its "Clip" prompt name for lineage, but the
-// model credit switches to whoever actually answered.
+// grounding) with the clip's full text and original sentence context, then
+// writes the answer back into the history item. The item keeps its "Clip"
+// prompt name for lineage, but the model credit switches to whoever answered,
+// and the temporary sentence context is cleaned up.
 function handleExplainClipClick(event) {
   const itemKey = event.currentTarget.dataset.timestamp;
 
@@ -3634,7 +3639,12 @@ function handleExplainClipClick(event) {
       liveBtn.innerHTML = optIcon('spinner', 1.1);
     }
 
-    chrome.runtime.sendMessage({ type: 'getAiDefinition', word: clipItem.word }, (response) => {
+    const payload = { type: 'getAiDefinition', word: clipItem.word };
+    if (clipItem.context && typeof clipItem.context === 'object') {
+      payload.context = clipItem.context;
+    }
+
+    chrome.runtime.sendMessage(payload, (response) => {
       if (chrome.runtime.lastError) response = { error: chrome.runtime.lastError.message };
       if (!response || response.error) {
         updateStatus(`Clip explanation failed: ${(response && response.error) || 'unknown error'}`, 'error');
@@ -3642,15 +3652,33 @@ function handleExplainClipClick(event) {
         return;
       }
       if (response.definition) {
-        history[index] = {
-          ...history[index],
-          definition: response.definition,
-          modelName: response.usedModelName || history[index].modelName,
-          citations: Array.isArray(response.citations) ? response.citations : []
-        };
-        chrome.storage.local.set({ history }, () => {
-          updateStatus('Clip explained.', 'success');
-          applyFilters();
+        // Re-read storage freshly to prevent clobbering concurrent changes
+        chrome.storage.local.get(['history'], (freshResult) => {
+          let freshHistory = freshResult.history || [];
+          ensureHistoryIds(freshHistory);
+          normalizeHistoryListIds(freshHistory);
+
+          const freshIndex = freshHistory.findIndex(i => histId(i) === itemKey);
+          if (freshIndex === -1) {
+            // Item was deleted while request was in-flight
+            applyFilters();
+            return;
+          }
+
+          const updatedItem = {
+            ...freshHistory[freshIndex],
+            definition: response.definition,
+            modelName: response.usedModelName || freshHistory[freshIndex].modelName,
+            citations: Array.isArray(response.citations) ? response.citations : []
+          };
+          // Remove temporary sentence context now that definition exists
+          delete updatedItem.context;
+
+          freshHistory[freshIndex] = updatedItem;
+          chrome.storage.local.set({ history: freshHistory }, () => {
+            updateStatus('Clip explained.', 'success');
+            applyFilters();
+          });
         });
       } else {
         updateStatus('The model returned an empty answer. Try again or edit the clip manually.', 'error');
@@ -3810,7 +3838,7 @@ async function bulkExportToAnki() {
     try {
       const fields = {};
       fields[settings.wordField] = item.word;
-      const ankiDefinition = item.definition
+      const ankiDefinition = (item.definition || '')
         .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
         .replace(/\n/g, '<br>');
       fields[settings.definitionField] = ankiDefinition;
@@ -4053,7 +4081,10 @@ function loadStats() {
     const favorites = history.filter(item => item.favorite === true).length;
 
     const now = Date.now();
-    const dueCards = history.filter(item => (item.nextReview || 0) <= now).length;
+    const dueCards = history.filter(item => {
+      if (item.modelName === 'clip' && !item.definition) return false;
+      return (item.nextReview || 0) <= now;
+    }).length;
 
     // Estimate total reviews (if we don't have exact counts, we can estimate based on intervals)
     // For now, let's just count how many items have an interval set (meaning they've been reviewed at least once)
