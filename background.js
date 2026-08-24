@@ -21,6 +21,139 @@ async function fetchWithTimeout(url, options, timeoutMs = 30000) {
   }
 }
 
+// Streaming twin of fetchWithTimeout for OpenAI-compatible chat endpoints.
+// The 30s cap in fetchWithTimeout is a total budget, which would cut off long
+// streamed answers mid-token; here the timer is re-armed on every chunk, so
+// the limit only fires when the stream genuinely stalls. Consumes the SSE
+// body and returns the SAME `data` shape as the non-streaming JSON response
+// (choices[0].message with reconstructed tool_calls), so the orchestrator
+// loop needs no branching. Falls back transparently when a provider ignores
+// stream:true and answers with plain JSON.
+async function streamChatWithTimeout(url, options, timeoutMs = 30000, onDelta) {
+  const controller = new AbortController();
+  let timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const rearm = () => {
+    clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  };
+
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    if (!response.ok) {
+      // Not consumed here: the caller's existing error branches read the
+      // error body (JSON or text) themselves.
+      return { ok: false, response: response };
+    }
+
+    const contentType = response.headers.get('content-type') || '';
+    if (!response.body || !contentType.includes('text/event-stream')) {
+      // Provider answered without SSE despite stream:true. Buffer the whole
+      // body and decide what it is: plain JSON, or an SSE document we can
+      // still parse after the fact (no incremental deltas, but correct).
+      const rawText = await response.text();
+      rearm();
+      let data = null;
+      try {
+        data = JSON.parse(rawText);
+      } catch (e) {
+        data = parseSseChatText(rawText, onDelta);
+      }
+      if (data && !Array.isArray(data) && typeof data === 'object' && data.choices) {
+        const content = data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+        if (typeof content === 'string' && content && onDelta) onDelta(content);
+        return { ok: true, data: data };
+      }
+      throw new Error('Provider returned an unexpected response format.');
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    const acc = { content: '', toolCalls: [], finishReason: null };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      rearm();
+      buffer += decoder.decode(value, { stream: true });
+      let newlineIndex;
+      while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
+        const line = buffer.slice(0, newlineIndex).replace(/\r$/, '');
+        buffer = buffer.slice(newlineIndex + 1);
+        consumeSseLine(line, acc, onDelta);
+      }
+    }
+    // Flush any trailing line not terminated by a newline.
+    if (buffer) consumeSseLine(buffer.replace(/\r$/, ''), acc, onDelta);
+
+    const message = { role: 'assistant', content: acc.content };
+    if (acc.toolCalls.length > 0) message.tool_calls = acc.toolCalls;
+    return {
+      ok: true,
+      data: { choices: [{ message: message, finish_reason: acc.finishReason || 'stop' }] }
+    };
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error(`Request timed out after ${Math.round(timeoutMs / 1000)} seconds. Please try again.`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+// Applies one SSE line to the accumulator, invoking onDelta for content
+// fragments. Ignores comments, keep-alives, and unparseable payloads so a
+// quirky provider cannot crash the stream loop.
+function consumeSseLine(line, acc, onDelta) {
+  if (!line.startsWith('data:')) return;
+  const payload = line.slice(5).trim();
+  if (!payload || payload === '[DONE]') return;
+
+  let chunk;
+  try {
+    chunk = JSON.parse(payload);
+  } catch (e) {
+    return;
+  }
+
+  const choice = chunk.choices && chunk.choices[0];
+  if (!choice) return;
+  const delta = choice.delta || choice.message || {};
+  if (choice.finish_reason) acc.finishReason = choice.finish_reason;
+
+  if (typeof delta.content === 'string' && delta.content) {
+    acc.content += delta.content;
+    if (onDelta) onDelta(delta.content);
+  }
+
+  if (Array.isArray(delta.tool_calls)) {
+    for (const tc of delta.tool_calls) {
+      const idx = typeof tc.index === 'number' ? tc.index : 0;
+      while (acc.toolCalls.length <= idx) {
+        acc.toolCalls.push({ id: '', type: 'function', function: { name: '', arguments: '' } });
+      }
+      const slot = acc.toolCalls[idx];
+      if (tc.id) slot.id = tc.id;
+      if (tc.function) {
+        if (typeof tc.function.name === 'string' && tc.function.name) slot.function.name = tc.function.name;
+        if (typeof tc.function.arguments === 'string') slot.function.arguments += tc.function.arguments;
+      }
+    }
+  }
+}
+
+// Parses a fully-buffered SSE document (the non-event-stream fallback above).
+function parseSseChatText(rawText, onDelta) {
+  const acc = { content: '', toolCalls: [], finishReason: null };
+  for (const line of String(rawText).split('\n')) {
+    consumeSseLine(line.replace(/\r$/, ''), acc, onDelta);
+  }
+  const message = { role: 'assistant', content: acc.content };
+  if (acc.toolCalls.length > 0) message.tool_calls = acc.toolCalls;
+  return { choices: [{ message: message, finish_reason: acc.finishReason || 'stop' }] };
+}
+
 // --- NEW: Listen for keyboard shortcuts (commands) ---
 chrome.commands.onCommand.addListener((command) => {
   if (command === "trigger-popup") {
@@ -124,6 +257,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
       const { endpointUrl, modelName, apiKey } = modelToUse;
 
+      // --- Streaming plumbing ---
+      // sendResponse is one-shot, so live deltas travel on a separate
+      // tab-targeted message channel keyed by a requestId the popup chose.
+      // The final sendResponse below is unchanged, which keeps the popup's
+      // completed-state logic (save, verify, retry) byte-identical to the
+      // non-streaming era. Callers without a tab/requestId (none today)
+      // simply get no incremental updates.
+      const streamRequestId = typeof request.requestId === 'string' ? request.requestId : null;
+      const streamTabId = sender && sender.tab && typeof sender.tab.id === 'number' ? sender.tab.id : null;
+      let streamResetPending = false;
+      const emitStreamDelta = (delta) => {
+        if (!streamRequestId || !streamTabId || typeof delta !== 'string' || !delta) return;
+        const message = { type: 'aiDefinitionDelta', requestId: streamRequestId, delta: delta };
+        if (streamResetPending) {
+          message.reset = true;
+          streamResetPending = false;
+        }
+        chrome.tabs.sendMessage(streamTabId, message, () => { void chrome.runtime.lastError; });
+      };
+
       // --- REVISED: Simplified prompt logic ---
       const { word } = request;
 
@@ -166,7 +319,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       const payload = {
         "model": modelName,
         "messages": safeMessagesText,
-        "stream": false
+        "stream": true
       };
 
       if (modelToUse.enableSearchGrounding) {
@@ -199,13 +352,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
         // --- END OPTIONAL FIX ---
 
-        const response = await fetchWithTimeout(endpointUrl, {
+        streamResetPending = true;
+        const result = await streamChatWithTimeout(endpointUrl, {
           method: 'POST',
           headers: headers, // Use the new headers object
           body: JSON.stringify(payload)
-        });
+        }, 30000, emitStreamDelta);
 
-        if (!response.ok) {
+        if (!result.ok) {
+          const response = result.response;
           // --- NEW: ROBUST ERROR HANDLING ---
           // Handle errors that might be plain text OR json
           let errorMsg = response.statusText || `HTTP error ${response.status}`;
@@ -224,7 +379,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           // --- END ROBUST ERROR HANDLING ---
         }
 
-        let data = await response.json();
+        let data = result.data;
         let aiText = "";
         let loopCount = 0;
         let usedWebSearch = false;
@@ -328,13 +483,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               }
               
               // Re-fetch with the updated payload
-              const nextResponse = await fetchWithTimeout(endpointUrl, {
+              streamResetPending = true;
+              const nextResult = await streamChatWithTimeout(endpointUrl, {
                 method: 'POST',
                 headers: headers,
                 body: JSON.stringify(payload)
-              });
-              
-               if (!nextResponse.ok) {
+              }, 30000, emitStreamDelta);
+
+               const nextResponse = nextResult.ok ? null : nextResult.response;
+               if (!nextResult.ok) {
                    let errDetails = "";
                    try {
                      const errJson = await nextResponse.json();
@@ -350,14 +507,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                    if (nextResponse.status === 400 && errDetails.includes("failed_generation")) {
                      delete payload.tools;
                      payload.tool_choice = "none";
+                     streamResetPending = true;
 
-                     const fallbackResponse = await fetchWithTimeout(endpointUrl, {
+                     const fallbackResult = await streamChatWithTimeout(endpointUrl, {
                        method: 'POST',
                        headers: headers,
                        body: JSON.stringify(payload)
-                     });
+                     }, 30000, emitStreamDelta);
 
-                     if (!fallbackResponse.ok) {
+                     if (!fallbackResult.ok) {
+                       const fallbackResponse = fallbackResult.response;
                        let fallbackError = fallbackResponse.statusText || `HTTP error ${fallbackResponse.status}`;
                        try {
                          const fallbackJson = await fallbackResponse.json();
@@ -368,12 +527,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                        throw new Error(`HTTP error on search fallback: ${fallbackResponse.status} - ${fallbackError}`);
                      }
 
-                     data = await fallbackResponse.json();
+                     data = fallbackResult.data;
                    } else {
                      throw new Error(`HTTP error on search pass: ${nextResponse.status} - ${errDetails}`);
                    }
                } else {
-                 data = await nextResponse.json();
+                 data = nextResult.data;
                }
                loopCount++;
                usedWebSearch = true;
