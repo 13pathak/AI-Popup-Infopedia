@@ -77,10 +77,18 @@ function sidebarEmptyHtml(iconName, title, hint) {
 // Titles/messages/initial values are set via textContent/value, so nothing
 // is parsed as HTML. Resolves: alert -> undefined; prompt -> string, or
 // null when cancelled (Escape / backdrop / Cancel), matching window.prompt.
+// Dismissal hook for whichever modal currently holds the screen. Opening
+// a replacement must settle the outgoing dialog — resolving its awaiter
+// as cancelled and detaching its capture-phase keydown guard — because
+// removing the overlay node alone leaves both dangling: the ghost
+// listener's Escape would close the new modal too, and the old promise
+// would hang any awaiting caller forever.
+let activeViewerModalDismiss = null;
+
 function buildViewerModal({ title, message = '', placeholder = '', initialValue = '', confirmText = 'OK', cancelText = null, wantInput = false }) {
   return new Promise((resolve) => {
     // One modal at a time.
-    document.getElementById('viewer-modal-overlay')?.remove();
+    if (activeViewerModalDismiss) activeViewerModalDismiss(null);
 
     const overlay = document.createElement('div');
     overlay.id = 'viewer-modal-overlay';
@@ -129,12 +137,17 @@ function buildViewerModal({ title, message = '', placeholder = '', initialValue 
     box.appendChild(actions);
     overlay.appendChild(box);
 
+    let settled = false;
     function done(result) {
-      // Capture-phase Escape guard is removed with the dialog itself.
+      if (settled) return;
+      settled = true;
       document.removeEventListener('keydown', onKey, true);
       overlay.remove();
+      if (activeViewerModalDismiss === dismiss) activeViewerModalDismiss = null;
       resolve(result);
     }
+    // Stable registry reference; done() is closed over per-invocation.
+    function dismiss() { done(null); }
 
     // Escape closes the dialog but must not also close AI popups behind it.
     // Tab is trapped inside the card: without this, keyboard focus escapes
@@ -170,6 +183,7 @@ function buildViewerModal({ title, message = '', placeholder = '', initialValue 
     });
 
     document.body.appendChild(overlay);
+    activeViewerModalDismiss = dismiss;
 
     if (input) {
       input.focus();
