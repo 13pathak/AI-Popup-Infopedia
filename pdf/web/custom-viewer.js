@@ -1687,7 +1687,27 @@ window.addEventListener('resize', () => {
 // Update page number based on scroll
 const container = document.getElementById('viewerContainer');
 let pageNumberRafId = null;
+
+// The highlight popups are position:fixed with static px coordinates set
+// at click time, so a document scroll would leave them floating detached
+// over unrelated text. Shift them by the scroll delta instead of
+// dismissing them: the note editor can hold unsaved typed text, and
+// hidePopups() would silently discard it.
+let popupAnchorScrollTop = container.scrollTop;
+function shiftPopupsWithScroll() {
+    const delta = container.scrollTop - popupAnchorScrollTop;
+    popupAnchorScrollTop = container.scrollTop;
+    if (delta === 0) return;
+    ['color-picker-popup', 'edit-highlight-popup', 'note-editor-popup'].forEach(id => {
+        const popup = document.getElementById(id);
+        if (!popup || popup.classList.contains('hidden')) return;
+        const top = parseFloat(popup.style.top);
+        if (!Number.isNaN(top)) popup.style.top = `${top - delta}px`;
+    });
+}
+
 container.addEventListener('scroll', () => {
+    shiftPopupsWithScroll();
     // Coalesce scroll bursts into at most one update per rendered
     // frame; offsetTop/clientHeight reads only force a reflow when
     // styles are dirty, but they still shouldn't run per scroll event.
