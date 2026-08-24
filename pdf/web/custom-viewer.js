@@ -232,6 +232,12 @@ let highlights = [];
 let highlightCounter = 0;
 let currentSelection = null; // Store temp selection
 let activeHighlightId = null;
+// Sidebar-click flash for a highlight whose page may not be rendered yet
+// (virtualized pages draw their overlays only after the scroll, via
+// drawHighlight). The expiry keeps a flash that was never consumed — user
+// clicked but never actually reached the page — from firing much later.
+let pendingFlashHighlightId = null;
+let pendingFlashHighlightUntil = 0;
 
 // Store bookmarks in memory: { id: 1, pageNum: 5, title: 'Chapter 1' }
 let bookmarks = [];
@@ -2067,6 +2073,12 @@ function drawHighlight(hl, pageDiv, viewport) {
         if (hl.id === activeHighlightId) {
             div.classList.add('active');
         }
+        // Consume the sidebar-click flash when this page's overlays were
+        // drawn only after scrollToHighlight's scroll landed here.
+        if (hl.id === pendingFlashHighlightId && Date.now() <= pendingFlashHighlightUntil) {
+            div.classList.add('active');
+            setTimeout(() => div.classList.remove('active'), 2000);
+        }
         div.dataset.hlId = hl.id;
         
         // Recalculate CSS pixels from PDF coordinates for the current zoom scale
@@ -3460,25 +3472,34 @@ function updateHighlightIndicatorsOnPage(hl) {
 
 function scrollToHighlight(hl) {
     if (!hl || !hl.rects || hl.rects.length === 0) return;
-    
+
+    // Arm the flash first: on a virtualized (unrendered) page the overlay
+    // divs below don't exist yet, and they're only created by drawHighlight
+    // once the scroll brings the page into the IntersectionObserver's range.
+    // The 5s acceptance window tolerates slow renders without letting a
+    // stale flash fire long after the click.
+    pendingFlashHighlightId = hl.id;
+    pendingFlashHighlightUntil = Date.now() + 5000;
+
     const pageDiv = document.querySelector(`.page[data-page-number="${hl.pageNumber}"]`);
     const container = document.getElementById('viewerContainer');
-    
+
     if (pageDiv && pageDiv._viewport) {
         // Target specific Y position within the page
         const firstRect = hl.rects[0];
         const pt = pageDiv._viewport.convertToViewportPoint(firstRect.pdfX, firstRect.pdfY);
         const yPosInPage = pt[1];
-        
+
         container.scrollTop = pageDiv.offsetTop + yPosInPage - (container.clientHeight / 2);
-        
-        // Briefly flash active highlight
+
+        // Briefly flash active highlight. A no-op on an unloaded page —
+        // the armed pending flash covers it when the render completes.
         document.querySelectorAll('.custom-highlight.active').forEach(el => el.classList.remove('active'));
         pageDiv.querySelectorAll(`.custom-highlight[data-hl-id="${hl.id}"]`).forEach(el => {
             el.classList.add('active');
             setTimeout(() => el.classList.remove('active'), 2000);
         });
-        
+
     } else {
         // Page not loaded yet, just scroll to page
         scrollToPage(hl.pageNumber);
