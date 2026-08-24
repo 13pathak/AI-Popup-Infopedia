@@ -240,22 +240,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.type === "getAiDefinition") {
 
     // Get all saved models and the ID of the default one
-    chrome.storage.sync.get(['models', 'defaultModelId', 'customPrompts', 'defaultPromptId', 'tavilyApiKey'], async (data) => {
-      const { models, defaultModelId, customPrompts, defaultPromptId, tavilyApiKey, enableImplicitContext } = data;
+    chrome.storage.sync.get({ 'models': [], 'defaultModelId': null, 'customPrompts': [], 'defaultPromptId': null, 'tavilyApiKey': '', 'enableModelFallback': true, 'enableImplicitContext': true }, async (data) => {
+      const { models, defaultModelId, customPrompts, defaultPromptId, tavilyApiKey, enableModelFallback, enableImplicitContext } = data;
 
       if (!models || models.length === 0 || !defaultModelId) {
         sendResponse({ error: "No default AI model configured. Please set one in the options page.", models: [], defaultModelId: null });
         return;
       }
 
-      const modelToUse = request.modelId ? models.find(m => m.id === request.modelId) : models.find(m => m.id === defaultModelId);
+      const primaryModel = request.modelId ? models.find(m => m.id === request.modelId) : models.find(m => m.id === defaultModelId);
 
-      if (!modelToUse) {
+      if (!primaryModel) {
         sendResponse({ error: "Model not found. Please check your settings.", models: models, defaultModelId: defaultModelId });
         return;
       }
-
-      const { endpointUrl, modelName, apiKey } = modelToUse;
 
       // --- Streaming plumbing ---
       // sendResponse is one-shot, so live deltas travel on a separate
@@ -275,6 +273,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           streamResetPending = false;
         }
         chrome.tabs.sendMessage(streamTabId, message, () => { void chrome.runtime.lastError; });
+      };
+
+      // Tells the popup a chain model just died so it can swap the (possibly
+      // partial) streamed answer back into a "trying next model…" indicator
+      // instead of showing a dead model's truncated text while we retry.
+      const emitStreamStandby = (failedName) => {
+        if (!streamRequestId || !streamTabId) return;
+        chrome.tabs.sendMessage(streamTabId, {
+          type: 'aiDefinitionDelta',
+          requestId: streamRequestId,
+          standby: true,
+          failedName: typeof failedName === 'string' ? failedName : ''
+        }, () => { void chrome.runtime.lastError; });
       };
 
       // --- REVISED: Simplified prompt logic ---
@@ -315,13 +326,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
          safeMessagesText = [{ role: "user", content: prompt }];
       }
 
-      // Create the OpenAI-style payload
-      const payload = {
-        "model": modelName,
-        "messages": safeMessagesText,
-        "stream": true
-      };
-
+      // --- Implicit lookup context ---
       // The popup sends the sentence around the selection plus the page
       // title. It rides in a system message with strict instructions: the
       // context ONLY disambiguates which sense of the term to explain; the
@@ -345,7 +350,29 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
       }
 
-      if (modelToUse.enableSearchGrounding) {
+      // --- Model fallback chain ---
+      // The primary model goes first; on any failure (HTTP error, timeout,
+      // network) the next configured model in saved list order is tried.
+      // One chain attempt runs the full web-search orchestrator below, and
+      // everything it mutates (payload, citations, streamed partials) is
+      // rebuilt per attempt so models cannot leak state into each other.
+      const modelChain = enableModelFallback === false
+        ? [primaryModel]
+        : [primaryModel, ...models.filter(m => m.id !== primaryModel.id)];
+
+      async function requestDefinitionFromModel(modelConfig) {
+        const { endpointUrl, modelName, apiKey } = modelConfig;
+
+        // Create the OpenAI-style payload. messages start from a copy of
+        // the pristine conversation: the orchestrator pushes tool traffic
+        // into payload.messages, and a retried model must not inherit it.
+        const payload = {
+          "model": modelName,
+          "messages": safeMessagesText.slice(),
+          "stream": true
+        };
+
+        if (modelConfig.enableSearchGrounding) {
         payload.tools = [{
           "type": "function",
           "function": {
@@ -362,7 +389,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }];
       }
 
-      try {
         // --- THIS IS THE OPTIONAL FIX (HEADERS) ---
         // Create headers object
         const headers = {
@@ -485,20 +511,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 searchResultsText += "No results found. Server returned: " + JSON.stringify(tavilyData);
               }
 
-              // 3. Append to history and make next API call
-              safeMessagesText.push({
+              // 3. Append to history and make next API call. Tool traffic is
+              // attempt-local: pushing into payload.messages (not the shared
+              // conversation) keeps a fallback retry's context pristine.
+              payload.messages.push({
                 role: "assistant",
                 content: message.content || "",
                 tool_calls: message.tool_calls
               }); // Safely add the AI's tool request
-              safeMessagesText.push({
+              payload.messages.push({
                 role: "tool",
                 tool_call_id: toolCall.id,
                 name: "web_search",
                 content: searchResultsText
               });
-
-              payload.messages = safeMessagesText;
               
               // If we are about to hit max loops, force the AI to answer by removing tools
               if (loopCount === maxLoops - 1) {
@@ -578,13 +604,48 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           aiText = fallbackContent || "The AI reached maximum search depth or returned an empty response.";
         }
 
-        sendResponse({ definition: aiText, usedWebSearch: usedWebSearch, citations: citations, usedPrompt: prompt, models: models, defaultModelId: defaultModelId, customPrompts: customPrompts || [], defaultPromptId: defaultPromptId, promptName: promptName });
-
-      } catch (error) {
-        console.error("AI API call failed:", error);
-        // The error message is now cleaner
-        sendResponse({ error: `Failed to fetch definition: ${error.message}`, models: models, defaultModelId: defaultModelId, customPrompts: customPrompts || [], defaultPromptId: defaultPromptId });
+        return { definition: aiText, usedWebSearch: usedWebSearch, citations: citations };
       }
+
+      const failures = [];
+      let answer = null;
+      let usedModel = null;
+      for (let i = 0; i < modelChain.length; i++) {
+        try {
+          answer = await requestDefinitionFromModel(modelChain[i]);
+          usedModel = modelChain[i];
+          break;
+        } catch (error) {
+          const failedName = modelChain[i].name || modelChain[i].modelName;
+          console.error(`AI API call failed (${failedName}):`, error);
+          failures.push({ name: failedName, message: error.message });
+          if (i < modelChain.length - 1) {
+            emitStreamStandby(failedName);
+          }
+        }
+      }
+
+      if (!answer) {
+        // With a single-model chain keep the historical one-error wording.
+        const detail = failures.length === 1
+          ? `Failed to fetch definition: ${failures[0].message}`
+          : `Failed to fetch definition: all ${failures.length} models in the fallback chain failed — ${failures.map(f => `${f.name}: ${f.message}`).join(' | ')}`;
+        sendResponse({ error: detail, models: models, defaultModelId: defaultModelId, customPrompts: customPrompts || [], defaultPromptId: defaultPromptId });
+        return;
+      }
+
+      sendResponse({
+        definition: answer.definition,
+        usedWebSearch: answer.usedWebSearch,
+        citations: answer.citations,
+        // Which model actually answered (differs from the requested one when
+        // the chain had to fall back) and who failed along the way, so the
+        // popup can label saves and notify instead of crediting a dead model.
+        usedModelId: usedModel.id,
+        usedModelName: usedModel.name || usedModel.modelName,
+        fallbackFailedModels: failures.map(f => f.name),
+        usedPrompt: prompt, models: models, defaultModelId: defaultModelId, customPrompts: customPrompts || [], defaultPromptId: defaultPromptId, promptName: promptName
+      });
     });
 
     // Return true to indicate that we will send a response asynchronously
@@ -980,6 +1041,7 @@ function triggerBackup(type = "Auto", customBackupInclude = null) {
         if (syncData.defaultModelId !== undefined) backupData.defaultModelId = syncData.defaultModelId;
         if (syncData.verificationModelId !== undefined) backupData.verificationModelId = syncData.verificationModelId;
         if (syncData.enableHallucinationGuard !== undefined) backupData.enableHallucinationGuard = syncData.enableHallucinationGuard;
+        if (syncData.enableModelFallback !== undefined) backupData.enableModelFallback = syncData.enableModelFallback;
         if (syncData.enableImplicitContext !== undefined) backupData.enableImplicitContext = syncData.enableImplicitContext;
       }
 

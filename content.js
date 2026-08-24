@@ -903,6 +903,17 @@ function showPopupToast(instance, message, type = 'success') {
   }, 2200);
 }
 
+// When the background's model fallback chain rescued an answer, tell the
+// user which models failed and who actually responded. Informational only —
+// the completed-state paths already switched to the responding model's
+// metadata, this just prevents the success from looking unconditional.
+function notifyModelFallback(instance, response) {
+  if (!response || !Array.isArray(response.fallbackFailedModels) || response.fallbackFailedModels.length === 0) return;
+  const failed = response.fallbackFailedModels.join(', ');
+  const answered = response.usedModelName || 'another model';
+  showPopupToast(instance, `${failed} failed — answered by ${answered}`);
+}
+
 // --- NEW: Custom Dropdown Helpers ---
 function getSortedTreeLists(lists) {
   const listMap = {};
@@ -1124,11 +1135,93 @@ function createCustomDropdown(lists, currentValue, onChange, options = {}) {
 // which works on any length and also opens the empty-question scratchpad.
 const MAX_FLOATING_BUTTON_WORDS = 500;
 
+// --- Implicit lookup context ---
+// Captures the sentence around the selection plus the page title so the
+// model can pick the right sense of ambiguous words ("bank", "java", ...).
+// Best-effort by design: every failure path yields empty context, never an
+// exception, and lookups behave exactly as before when nothing is captured.
+// Only short selections get context — a long passage the user deliberately
+// selected speaks for itself.
+const IMPLICIT_CONTEXT_MAX_SELECTION_CHARS = 160;
+
+function normalizeContextText(text) {
+  return String(text || '')
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Pure helper: locates selText inside hostText and expands outward to
+// sentence boundaries (. ! ? …), capped on both sides so a pathological
+// host (a whole table, a script tag) can never produce a huge "sentence".
+function sentenceAround(hostText, selText, radius = 240) {
+  if (!hostText || !selText) return '';
+  let hay = hostText;
+  let idx = hay.indexOf(selText);
+  if (idx === -1) {
+    // Whitespace often differs between a Selection string and textContent
+    // (nested tags); compare whitespace-flattened copies instead.
+    hay = hay.replace(/\s+/g, ' ');
+    idx = hay.indexOf(selText.replace(/\s+/g, ' '));
+  }
+  if (idx === -1) return '';
+
+  const terminators = '.!?…';
+  let start = idx;
+  let walked = 0;
+  while (start > 0 && walked < radius && !terminators.includes(hay[start - 1])) {
+    start--;
+    walked++;
+  }
+  let end = idx + selText.length;
+  walked = 0;
+  while (end < hay.length && walked < radius) {
+    const ch = hay[end];
+    end++;
+    if (terminators.includes(ch)) break; // keep the terminator itself
+    walked++;
+  }
+  return normalizeContextText(hay.slice(start, end));
+}
+
+function extractImplicitContext(selection, selectedText) {
+  const context = { sentence: '', pageTitle: '' };
+
+  try {
+    const title = normalizeContextText(document.title).slice(0, 200);
+    if (title) context.pageTitle = title;
+  } catch (e) {
+    // Pages without a title (or an exotic environment) just send no title.
+  }
+
+  const titleOnly = () => (context.pageTitle ? context : null);
+  if (!selectedText || selectedText.length > IMPLICIT_CONTEXT_MAX_SELECTION_CHARS) {
+    return titleOnly();
+  }
+
+  try {
+    if (!selection || selection.rangeCount === 0) return titleOnly();
+    const anchor = selection.getRangeAt(0).commonAncestorContainer;
+    const host = anchor.nodeType === Node.TEXT_NODE ? anchor.parentElement : anchor;
+    if (!host) return titleOnly();
+    const hostText = normalizeContextText(host.textContent);
+    if (!hostText) return titleOnly();
+    context.sentence = sentenceAround(hostText, normalizeContextText(selectedText)).slice(0, 400);
+  } catch (e) {
+    // Selection structures vary wildly (shadow DOM, inputs, canvases);
+    // context is an enhancement, never a blocker.
+  }
+
+  return (context.sentence || context.pageTitle) ? context : null;
+}
+
 // --- Main mouseup listener ---
 document.addEventListener('mouseup', (event) => {
   // 1. Check for selection inside existing popups (Nested Selection) FIRST
   let selectedText = "";
   let selectionRect = null;
+
+  let nestedImplicitContext = null;
 
   // Check from top-most to bottom-most
   for (let i = activePopups.length - 1; i >= 0; i--) {
@@ -1139,6 +1232,9 @@ document.addEventListener('mouseup', (event) => {
       if (text.length > 0) {
         selectedText = text;
         selectionRect = selection.getRangeAt(0).getBoundingClientRect();
+        // Context is captured here, while the shadow selection still exists;
+        // it is usually gone by the time the open button is clicked.
+        nestedImplicitContext = extractImplicitContext(selection, text);
         break; // Found a nested selection, stop looking
       }
     }
@@ -1150,7 +1246,7 @@ document.addEventListener('mouseup', (event) => {
     if (wordCount > 0 && wordCount <= MAX_FLOATING_BUTTON_WORDS) {
       // Reset flags to avoid sticking
       activePopups.forEach(p => { p.isClickInside = false; p.isInteracting = false; });
-      showOpenButtonPopup(selectionRect, selectedText);
+      showOpenButtonPopup(selectionRect, selectedText, nestedImplicitContext);
       return;
     }
   }
@@ -1193,7 +1289,7 @@ document.addEventListener('mouseup', (event) => {
         return;
       }
 
-      showOpenButtonPopup(selectionRect, selectedText);
+      showOpenButtonPopup(selectionRect, selectedText, extractImplicitContext(selection, selectedText));
     }
   } else {
     // No text selected anywhere. logic for closing is handled in mousedown (outside click)
@@ -1203,7 +1299,9 @@ document.addEventListener('mouseup', (event) => {
 // --- NEW: Custom event listener for programmatic trigger from custom viewer ---
 document.addEventListener('trigger-ai-popup', (e) => {
   if (e.detail && e.detail.rect && e.detail.text) {
-    initiatePopupSequence(e.detail.rect, e.detail.text, e.detail.prompt);
+    // The viewer's text layer lives in this document, so the selection is
+    // still readable here; if it has already been cleared, no context.
+    initiatePopupSequence(e.detail.rect, e.detail.text, e.detail.prompt, extractImplicitContext(window.getSelection(), e.detail.text));
   }
 });
 
@@ -1244,7 +1342,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       if (selectedText.length > 0) {
         const rect = selection.getRangeAt(0).getBoundingClientRect();
         // For manual trigger, we can skip the Open button and just show the popup.
-        initiatePopupSequence(rect, selectedText);
+        initiatePopupSequence(rect, selectedText, undefined, extractImplicitContext(selection, selectedText));
       } else {
         // NEW: Trigger empty popup for questioning when no text is selected
         initiateEmptyPopupSequence();
@@ -1283,7 +1381,7 @@ function initiateEmptyPopupSequence() {
 }
 
 // --- NEW: Function to show intermediate 'Open' button ---
-function showOpenButtonPopup(rect, selectedText) {
+function showOpenButtonPopup(rect, selectedText, implicitContext) {
   const popupContainer = document.createElement('div');
   popupContainer.style.all = 'initial';
   popupContainer.style.position = 'fixed';
@@ -1313,7 +1411,7 @@ function showOpenButtonPopup(rect, selectedText) {
   openBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     removePopupInstance(instance);
-    initiatePopupSequence(rect, selectedText);
+    initiatePopupSequence(rect, selectedText, undefined, implicitContext);
   });
 
   shadow.appendChild(openBtn);
@@ -1443,8 +1541,10 @@ function initiatePopupSequence(rect, selectedText, customPrompt, implicitContext
 
         renderMessages(popupInstance);
 
-        const modelName = response && response.models ? (response.models.find(m => m.id === response.defaultModelId)?.name || 'Unknown Model') : 'Unknown Model';
+        const modelName = (response && response.usedModelName)
+          || (response && response.models ? (response.models.find(m => m.id === response.defaultModelId)?.name || 'Unknown Model') : 'Unknown Model');
         createActionButtons(popupInstance, selectedText, definitionText, modelName, response.promptName, response?.citations || []);
+        notifyModelFallback(popupInstance, response);
         
         // --- NEW: Trigger Hallucination Verification (with Smart Bypass) ---
         chrome.storage.sync.get(['enableHallucinationGuard'], (guardData) => {
@@ -1618,6 +1718,18 @@ function trackAiStream(instance, locateStreamingSlot) {
     const target = locateStreamingSlot();
     if (!target || target.isError) return;
 
+    if (msg.standby) {
+      // The background's model fallback chain lost a model (4xx, timeout,
+      // network). Swap the possibly-partial streamed answer back into the
+      // animated thinking state, labeled with what happened, while the next
+      // model in the chain is tried.
+      target.isStreaming = false;
+      target.isStatus = false;
+      target.isThinking = true;
+      const who = typeof msg.failedName === 'string' && msg.failedName ? msg.failedName : 'Model';
+      target.content = `${who} didn't respond — trying next model…`;
+    } else {
+
     if (msg.reset || !target.isStreaming) {
       // First visible token of a pass: retire the thinking placeholder and
       // start streaming into the same slot. `reset` handles the web-search
@@ -1629,6 +1741,7 @@ function trackAiStream(instance, locateStreamingSlot) {
       target.content = '';
     }
     if (typeof msg.delta === 'string') target.content += msg.delta;
+    }
 
     // Tokens arrive far faster than repaints are worth; render at most every
     // 80ms. The final full render happens in the sendMessage callback anyway.
@@ -2246,6 +2359,7 @@ function retryMessage(instance, messageIndex) {
 
       if (response && !response.error) {
         instance.messages[messageIndex] = { role: 'assistant', content: response.definition, citations: response.citations || [], isError: false, needsRetry: false };
+        notifyModelFallback(instance, response);
       } else {
         instance.messages[messageIndex] = { 
            role: 'assistant', 
@@ -2474,17 +2588,19 @@ function redefineWithModelAndPrompt(instance, word, modelId, promptContent) {
         } else {
           // Update the definition
           const definitionText = response ? response.definition : "Error resolving definition";
-          const modelName = response && response.models ? (response.models.find(m => m.id === modelId)?.name || 'Unknown Model') : 'Unknown Model';
-          
+          const modelName = (response && response.usedModelName)
+            || (response && response.models ? (response.models.find(m => m.id === modelId)?.name || 'Unknown Model') : 'Unknown Model');
+
           if (response && response.usedPrompt) {
              // Instead of wiping the array, rebuild/modify the existing messages.
              // If we already have follow-ups, preserve them.
              if (instance.messages && instance.messages.length > 2) {
                 instance.messages[0] = { role: 'user', content: response.usedPrompt };
                 instance.messages[1] = { role: 'assistant', content: response.definition, citations: response.citations || [] };
-                
-                // Flag subsequent AI messages as needing retry
-                instance.lastModelId = modelId;
+
+                // Flag subsequent AI messages as needing retry. Credit the
+                // model that actually answered when the fallback chain fired.
+                instance.lastModelId = (response.usedModelId || modelId);
                 instance.lastModelName = modelName;
                 instance.lastPromptContent = promptContent;
                 instance.sourceWord = word;
@@ -2510,6 +2626,7 @@ function redefineWithModelAndPrompt(instance, word, modelId, promptContent) {
 
           // Re-create the save button after model change
           createActionButtons(instance, word, definitionText, modelName, response.promptName, response?.citations || []);
+          notifyModelFallback(instance, response);
 
           // --- NEW: Trigger Hallucination Verification for Redefined Fetch (with Smart Bypass) ---
           chrome.storage.sync.get(['enableHallucinationGuard'], (guardData) => {
@@ -3085,7 +3202,8 @@ function createFollowupInput(instance, word) {
 
         if (response && !response.error) {
           instance.messages.push({ role: 'assistant', content: response.definition, citations: response.citations || [] });
-          
+          notifyModelFallback(instance, response);
+
           // --- NEW: Trigger Hallucination Verification (with Smart Bypass) ---
           chrome.storage.sync.get(['enableHallucinationGuard'], (guardData) => {
             if (guardData.enableHallucinationGuard) {

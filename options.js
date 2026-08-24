@@ -153,8 +153,8 @@ document.addEventListener('DOMContentLoaded', () => {
   loadDefaultPromptSelect(); // Load default prompt selector
   loadAnkiSettings(); // Load saved Anki settings on page load
   loadReminderSettings(); // Load saved Reminder settings on page load
-  loadFollowupSettings();
-    loadImplicitContextSetting(); // Load follow-up custom message
+  loadFollowupSettings(); // Load follow-up custom message
+  loadImplicitContextSetting(); // Load implicit context toggle
   loadHallucinationGuardSettings(); // Load Hallucination Guard settings
   loadSearchApiSettings(); // Load Search API settings
   loadPdfAuthorName(); // Load Custom Author Name
@@ -206,6 +206,15 @@ document.addEventListener('DOMContentLoaded', () => {
   safeAddListener('edit-model-btn', 'click', editSelectedModel);
   safeAddListener('delete-model-btn', 'click', deleteSelectedModel);
   safeAddListener('model-select', 'change', (e) => setDefaultModel(e.target.value));
+  safeAddListener('move-model-up-btn', 'click', () => moveSelectedModel(-1));
+  safeAddListener('move-model-down-btn', 'click', () => moveSelectedModel(1));
+  safeAddListener('enable-model-fallback', 'change', (e) => {
+    chrome.storage.sync.set({ enableModelFallback: e.target.checked }, () => {
+      updateStatus(e.target.checked
+        ? 'Model fallback enabled — models are tried top-to-bottom on failure.'
+        : 'Model fallback disabled — only the selected model will be used.', 'success');
+    });
+  });
   safeAddListener('enable-implicit-context', 'change', (e) => {
     chrome.storage.sync.set({ enableImplicitContext: e.target.checked }, () => {
       updateStatus(e.target.checked
@@ -568,25 +577,35 @@ function saveModel() {
 }
 
 function loadModels() {
-  chrome.storage.sync.get(['models', 'defaultModelId'], (data) => {
+  chrome.storage.sync.get({ 'models': [], 'defaultModelId': null, 'enableModelFallback': true }, (data) => {
     const models = data.models || [];
     const defaultModelId = data.defaultModelId;
     const selectEl = document.getElementById('model-select');
     const noModelsMsg = document.getElementById('no-models-message');
     const editModelBtn = document.getElementById('edit-model-btn');
     const deleteModelBtn = document.getElementById('delete-model-btn');
+    const moveUpBtn = document.getElementById('move-model-up-btn');
+    const moveDownBtn = document.getElementById('move-model-down-btn');
+    const fallbackToggle = document.getElementById('enable-model-fallback');
     selectEl.innerHTML = '';
+
+    // Absent flag means enabled: the fallback chain is the default behavior.
+    if (fallbackToggle) fallbackToggle.checked = data.enableModelFallback !== false;
 
     if (models.length === 0) {
       noModelsMsg.style.display = 'block';
       selectEl.style.display = 'none'; // Hide the select dropdown
       editModelBtn.style.display = 'none'; // Hide edit button
       deleteModelBtn.style.display = 'none'; // Hide delete button
+      moveUpBtn.style.display = 'none';
+      moveDownBtn.style.display = 'none';
     } else {
       noModelsMsg.style.display = 'none';
       selectEl.style.display = 'block'; // Show the select dropdown
       editModelBtn.style.display = 'inline-block'; // Show edit button
       deleteModelBtn.style.display = 'inline-block'; // Show delete button
+      moveUpBtn.style.display = 'inline-block';
+      moveDownBtn.style.display = 'inline-block';
 
       models.forEach(model => {
         const option = document.createElement('option');
@@ -603,8 +622,7 @@ function loadModels() {
 }
 
 function loadHallucinationGuardSettings() {
-  chrome.storage.sync.get(['enableHallucinationGuard', 'verificationModelId',
-          'enableImplicitContext', 'models'], (data) => {
+  chrome.storage.sync.get(['enableHallucinationGuard', 'verificationModelId', 'models'], (data) => {
     const enableGuard = data.enableHallucinationGuard || false;
     const verificationModelId = data.verificationModelId;
     const models = data.models || [];
@@ -702,6 +720,36 @@ function setDefaultModel(modelId) {
   chrome.storage.sync.set({ defaultModelId: modelId }, () => {
     updateStatus('Default model updated.', 'success');
     loadModels();
+  });
+}
+
+// Reorders the models array, which doubles as the fallback chain: the
+// background tries models top-to-bottom when one fails. The moved model
+// stays selected so repeated clicks keep walking it through the list.
+function moveSelectedModel(delta) {
+  const selectEl = document.getElementById('model-select');
+  const selectedId = selectEl.value;
+  if (!selectedId) {
+    alert('No model selected to move.');
+    return;
+  }
+
+  chrome.storage.sync.get(['models'], (data) => {
+    const models = data.models || [];
+    const index = models.findIndex(m => m.id === selectedId);
+    const targetIndex = index + delta;
+
+    if (index === -1 || targetIndex < 0 || targetIndex >= models.length) {
+      updateStatus(delta < 0 ? 'This model is already first in the fallback order.' : 'This model is already last in the fallback order.');
+      return;
+    }
+
+    [models[index], models[targetIndex]] = [models[targetIndex], models[index]];
+
+    chrome.storage.sync.set({ models }, () => {
+      updateStatus('Fallback order updated.', 'success');
+      loadModels();
+    });
   });
 }
 
@@ -2773,6 +2821,7 @@ function restoreBackup() {
         const syncKeys = [
           'models', 'customPrompts', 'defaultModelId', 'defaultPromptId',
           'tavilyApiKey', 'enableHallucinationGuard', 'verificationModelId',
+          'enableModelFallback', 'enableImplicitContext',
           'ttsSettings', 'ankiSettings', 'backupReminderFrequency', 'backupSubfolder',
           'backupInclude', 'followupCustomMessage', 'showUserQuestions',
           'sttEngine', 'sttApiKey', 'sttApiUrl', 'sttModel', 'sttCustomHeaders',
