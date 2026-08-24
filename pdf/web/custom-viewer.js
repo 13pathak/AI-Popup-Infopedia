@@ -3385,14 +3385,22 @@ function renderSidebar() {
         deleteBtn.textContent = 'Delete';
         deleteBtn.addEventListener('click', (e) => {
             e.stopPropagation(); // prevent clicking the item itself
-            
+
             // Remove from global array
             highlights = highlights.filter(h => h.id !== hl.id);
             saveHighlights();
-            
+
             // Remove from DOM
             document.querySelectorAll(`.custom-highlight[data-hl-id="${hl.id}"]`).forEach(el => el.remove());
             document.querySelectorAll(`.note-indicator[data-hl-id="${hl.id}"]`).forEach(el => el.remove());
+
+            // If popups are anchored to the deleted highlight, close them
+            // now: otherwise a still-open note editor would silently drop
+            // its Save (the lookup guards against the missing record) and
+            // the .active class would linger. Same anchor-vanished rule
+            // adoptRemoteHighlights applies for cross-tab deletions;
+            // deleting an unrelated highlight leaves open popups alone.
+            if (activeHighlightId === hl.id) hidePopups();
         });
         
         actions.appendChild(deleteBtn);
