@@ -1209,6 +1209,15 @@ document.addEventListener('trigger-ai-popup', (e) => {
 
 // --- NEW: Message Listener for activation ---
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  // Live streamed answer deltas from the background for a request this popup
+  // initiated (keyed by requestId). Unknown requestIds (e.g. a delta landing
+  // in a different frame) are simply ignored. No response is expected.
+  if (request.type === "aiDefinitionDelta" && request.requestId) {
+    const record = activeStreamHandlers.get(request.requestId);
+    if (record) record.handle(request);
+    return;
+  }
+
   if (request.type === "triggerPopup") {
     let shouldHandle = false;
 
@@ -1358,10 +1367,16 @@ function initiatePopupSequence(rect, selectedText, customPrompt) {
       if (actions) actions.remove();
     }
 
-    const payload = { type: "getAiDefinition", word: selectedText };
+    const stream = trackAiStream(popupInstance, () => {
+      const msgs = popupInstance.messages;
+      return msgs.length > 0 ? msgs[msgs.length - 1] : null;
+    });
+
+    const payload = { type: "getAiDefinition", word: selectedText, requestId: stream.requestId };
     if (customPrompt) payload.customPrompt = customPrompt;
 
     chrome.runtime.sendMessage(payload, (response) => {
+      stream.done();
       // Verify instance still exists (user might have closed it)
       if (!activePopups.includes(popupInstance)) {
         stopLoadingQuoteRotation(popupInstance);
@@ -1571,6 +1586,71 @@ function stopLoadingQuoteRotation(instance) {
   if (instance && instance.loadingQuoteTimer) {
     clearInterval(instance.loadingQuoteTimer);
     instance.loadingQuoteTimer = null;
+  }
+}
+
+// --- Streaming answer display ---
+// The background service worker streams answer deltas on a separate
+// tab-targeted message channel (sendResponse is one-shot). Callers register
+// the popup message slot that is currently the thinking placeholder; the
+// first delta converts it in place into a live streaming message, so the
+// surrounding conversation (and every existing completed-state behavior)
+// is untouched. The final sendResponse still rebuilds the messages
+// authoritatively, which also cleans up any half-rendered markdown.
+const activeStreamHandlers = new Map();
+
+function trackAiStream(instance, locateStreamingSlot) {
+  const requestId = 'sr_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+  let renderScheduled = false;
+
+  activeStreamHandlers.set(requestId, {
+    instance: instance,
+    handle: (msg) => {
+    if (!activePopups.includes(instance)) {
+      activeStreamHandlers.delete(requestId);
+      return;
+    }
+    const target = locateStreamingSlot();
+    if (!target || target.isError) return;
+
+    if (msg.reset || !target.isStreaming) {
+      // First visible token of a pass: retire the thinking placeholder and
+      // start streaming into the same slot. `reset` handles the web-search
+      // orchestrator re-asking the model — its earlier partial text (if any)
+      // must not be glued onto the final answer.
+      target.isThinking = false;
+      target.isStatus = false;
+      target.isStreaming = true;
+      target.content = '';
+    }
+    if (typeof msg.delta === 'string') target.content += msg.delta;
+
+    // Tokens arrive far faster than repaints are worth; render at most every
+    // 80ms. The final full render happens in the sendMessage callback anyway.
+    if (!renderScheduled) {
+      renderScheduled = true;
+      setTimeout(() => {
+        renderScheduled = false;
+        if (activePopups.includes(instance)) {
+          try { renderMessages(instance); } catch (e) { console.error('crash in stream render', e); }
+        }
+      }, 80);
+    }
+    }
+  });
+
+  return {
+    requestId: requestId,
+    done: () => { activeStreamHandlers.delete(requestId); }
+  };
+}
+
+// Drops any in-flight stream registration for a popup being destroyed, so a
+// closed popup does not linger in the handler map (and hold its DOM) until a
+// stray delta or the final sendResponse happens to arrive.
+function cleanupStreamHandlersFor(instance) {
+  for (const [requestId, record] of activeStreamHandlers) {
+    if (record.instance === instance) activeStreamHandlers.delete(requestId);
   }
 }
 
@@ -2144,9 +2224,12 @@ function retryMessage(instance, messageIndex) {
 
   const modelId = instance.lastModelId || null;
 
+  const stream = trackAiStream(instance, () => instance.messages[messageIndex]);
+
   chrome.runtime.sendMessage(
-    { type: "getAiDefinition", word: instance.sourceWord, modelId: modelId, messages: messagesContext },
+    { type: "getAiDefinition", word: instance.sourceWord, modelId: modelId, messages: messagesContext, requestId: stream.requestId },
     (response) => {
+      stream.done();
       if (!activePopups.includes(instance)) {
         stopLoadingQuoteRotation(instance);
         return;
@@ -2332,16 +2415,22 @@ function redefineWithModelAndPrompt(instance, word, modelId, promptContent) {
     if (actions) actions.remove();
 
     // Send message to background
+    const stream = trackAiStream(instance, () => {
+      const msgs = instance.messages;
+      return msgs.length > 0 ? msgs[msgs.length - 1] : null;
+    });
+
     chrome.runtime.sendMessage(
-      { type: "getAiDefinition", word: word, modelId: modelId, customPrompt: promptContent },
+      { type: "getAiDefinition", word: word, modelId: modelId, customPrompt: promptContent, requestId: stream.requestId },
       (response) => {
+        stream.done();
         if (!activePopups.includes(instance)) {
           stopLoadingQuoteRotation(instance);
           return;
         }
-        
-        // Remove the temporary thinking indicator
-        instance.messages = instance.messages.filter(m => !m.isThinking);
+
+        // Remove the temporary thinking indicator or streamed partial answer
+        instance.messages = instance.messages.filter(m => !m.isThinking && !m.isStreaming);
 
         if (chrome.runtime.lastError) {
           response = { error: chrome.runtime.lastError.message };
@@ -2968,9 +3057,15 @@ function createFollowupInput(instance, word) {
     const selectedModelOpt = popup.querySelector('#ai-popup-model-selector');
     const modelId = selectedModelOpt ? selectedModelOpt.value : null;
 
+    const stream = trackAiStream(instance, () => {
+      const msgs = instance.messages;
+      return msgs.length > 0 ? msgs[msgs.length - 1] : null;
+    });
+
     chrome.runtime.sendMessage(
-      { type: "getAiDefinition", word: word, modelId: modelId, messages: instance.messages.filter(m => !m.isThinking && !m.isError) },
+      { type: "getAiDefinition", word: word, modelId: modelId, messages: instance.messages.filter(m => !m.isThinking && !m.isError && !m.isStreaming), requestId: stream.requestId },
       (response) => {
+        stream.done();
         if (!activePopups.includes(instance)) {
           stopLoadingQuoteRotation(instance);
           return;
@@ -2980,8 +3075,8 @@ function createFollowupInput(instance, word) {
         sendBtn.disabled = false;
         input.focus();
 
-        // Remove the loading indicator
-        instance.messages = instance.messages.filter(m => !m.isThinking);
+        // Remove the loading indicator or streamed partial answer
+        instance.messages = instance.messages.filter(m => !m.isThinking && !m.isStreaming);
 
         if (response && !response.error) {
           instance.messages.push({ role: 'assistant', content: response.definition, citations: response.citations || [] });
@@ -3085,6 +3180,7 @@ function removePopupInstance(instance) {
   if (index > -1) {
     activePopups.splice(index, 1);
     stopLoadingQuoteRotation(instance);
+    cleanupStreamHandlersFor(instance);
     if (instance.stopMic) instance.stopMic();
     if (instance.container) instance.container.remove();
   }
