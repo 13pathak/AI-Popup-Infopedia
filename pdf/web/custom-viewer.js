@@ -2763,9 +2763,12 @@ if (findPrevBtn) findPrevBtn.addEventListener('click', () => navigateSearch(-1))
 if (findInput) {
     findInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
-            const query = findInput.value.trim();
+            // Trim only to detect emptiness: leading/trailing spaces are
+            // meaningful (whole-word queries like " the "), so the raw
+            // value is what gets searched.
+            const query = findInput.value.trim() === '' ? '' : findInput.value;
             if (query === currentSearchQuery && query !== '') {
-                navigateSearch(1);
+                navigateSearch(e.shiftKey ? -1 : 1);
             } else {
                 performSearch(query);
             }
