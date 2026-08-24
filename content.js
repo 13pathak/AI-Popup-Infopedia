@@ -1334,7 +1334,7 @@ function showOpenButtonPopup(rect, selectedText) {
 }
 
 // --- NEW: Helper to start the popup logic (extracted from mouseup) ---
-function initiatePopupSequence(rect, selectedText, customPrompt) {
+function initiatePopupSequence(rect, selectedText, customPrompt, implicitContext) {
   // A second selection while a request is still running used to leave another
   // loading card on the page. Keep normal stacked conversations, but replace
   // an unfinished request so the UI never accumulates stuck loaders.
@@ -1354,6 +1354,11 @@ function initiatePopupSequence(rect, selectedText, customPrompt) {
   // --- NEW: Store the source text to prevent duplicate triggers ---
   popupInstance.sourceText = selectedText;
 
+  // Implicit context (surrounding sentence + page title) rides along on
+  // every request this popup makes — initial lookup, redefine, follow-ups,
+  // and retries all reuse the instance copy captured at selection time.
+  popupInstance.implicitContext = implicitContext || null;
+
   function performInitialFetch() {
     const currentQuote = (typeof popupInstance.quoteIndex === 'number') 
       ? LOADING_QUOTES[popupInstance.quoteIndex] 
@@ -1372,7 +1377,7 @@ function initiatePopupSequence(rect, selectedText, customPrompt) {
       return msgs.length > 0 ? msgs[msgs.length - 1] : null;
     });
 
-    const payload = { type: "getAiDefinition", word: selectedText, requestId: stream.requestId };
+    const payload = { type: "getAiDefinition", word: selectedText, requestId: stream.requestId, context: popupInstance.implicitContext || undefined };
     if (customPrompt) payload.customPrompt = customPrompt;
 
     chrome.runtime.sendMessage(payload, (response) => {
@@ -2227,7 +2232,7 @@ function retryMessage(instance, messageIndex) {
   const stream = trackAiStream(instance, () => instance.messages[messageIndex]);
 
   chrome.runtime.sendMessage(
-    { type: "getAiDefinition", word: instance.sourceWord, modelId: modelId, messages: messagesContext, requestId: stream.requestId },
+    { type: "getAiDefinition", word: instance.sourceWord, modelId: modelId, messages: messagesContext, requestId: stream.requestId, context: instance.implicitContext || undefined },
     (response) => {
       stream.done();
       if (!activePopups.includes(instance)) {
@@ -2421,7 +2426,7 @@ function redefineWithModelAndPrompt(instance, word, modelId, promptContent) {
     });
 
     chrome.runtime.sendMessage(
-      { type: "getAiDefinition", word: word, modelId: modelId, customPrompt: promptContent, requestId: stream.requestId },
+      { type: "getAiDefinition", word: word, modelId: modelId, customPrompt: promptContent, requestId: stream.requestId, context: instance.implicitContext || undefined },
       (response) => {
         stream.done();
         if (!activePopups.includes(instance)) {
@@ -3063,7 +3068,7 @@ function createFollowupInput(instance, word) {
     });
 
     chrome.runtime.sendMessage(
-      { type: "getAiDefinition", word: word, modelId: modelId, messages: instance.messages.filter(m => !m.isThinking && !m.isError && !m.isStreaming), requestId: stream.requestId },
+      { type: "getAiDefinition", word: word, modelId: modelId, messages: instance.messages.filter(m => !m.isThinking && !m.isError && !m.isStreaming), requestId: stream.requestId, context: instance.implicitContext || undefined },
       (response) => {
         stream.done();
         if (!activePopups.includes(instance)) {

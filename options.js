@@ -153,7 +153,8 @@ document.addEventListener('DOMContentLoaded', () => {
   loadDefaultPromptSelect(); // Load default prompt selector
   loadAnkiSettings(); // Load saved Anki settings on page load
   loadReminderSettings(); // Load saved Reminder settings on page load
-  loadFollowupSettings(); // Load follow-up custom message
+  loadFollowupSettings();
+    loadImplicitContextSetting(); // Load follow-up custom message
   loadHallucinationGuardSettings(); // Load Hallucination Guard settings
   loadSearchApiSettings(); // Load Search API settings
   loadPdfAuthorName(); // Load Custom Author Name
@@ -205,6 +206,13 @@ document.addEventListener('DOMContentLoaded', () => {
   safeAddListener('edit-model-btn', 'click', editSelectedModel);
   safeAddListener('delete-model-btn', 'click', deleteSelectedModel);
   safeAddListener('model-select', 'change', (e) => setDefaultModel(e.target.value));
+  safeAddListener('enable-implicit-context', 'change', (e) => {
+    chrome.storage.sync.set({ enableImplicitContext: e.target.checked }, () => {
+      updateStatus(e.target.checked
+        ? 'Implicit context enabled — lookups now include the surrounding sentence and page title.'
+        : 'Implicit context disabled — only the selected text is sent.', 'success');
+    });
+  });
   safeAddListener('save-model-btn', 'click', saveModel);
   safeAddListener('provider-preset-select', 'change', applyProviderPreset);
   safeAddListener('detect-ollama-btn', 'click', detectOllamaModels);
@@ -595,7 +603,8 @@ function loadModels() {
 }
 
 function loadHallucinationGuardSettings() {
-  chrome.storage.sync.get(['enableHallucinationGuard', 'verificationModelId', 'models'], (data) => {
+  chrome.storage.sync.get(['enableHallucinationGuard', 'verificationModelId',
+          'enableImplicitContext', 'models'], (data) => {
     const enableGuard = data.enableHallucinationGuard || false;
     const verificationModelId = data.verificationModelId;
     const models = data.models || [];
@@ -809,6 +818,15 @@ function loadFollowupSettings() {
     if (data.showUserQuestions !== undefined) {
       document.getElementById('show-user-questions-checkbox').checked = data.showUserQuestions;
     }
+  });
+}
+
+// Absent flag means enabled: implicit context is the default behavior, so
+// the checkbox only turns off when the user explicitly saved "false".
+function loadImplicitContextSetting() {
+  chrome.storage.sync.get({ 'enableImplicitContext': true }, (data) => {
+    const toggle = document.getElementById('enable-implicit-context');
+    if (toggle) toggle.checked = data.enableImplicitContext !== false;
   });
 }
 

@@ -241,7 +241,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     // Get all saved models and the ID of the default one
     chrome.storage.sync.get(['models', 'defaultModelId', 'customPrompts', 'defaultPromptId', 'tavilyApiKey'], async (data) => {
-      const { models, defaultModelId, customPrompts, defaultPromptId, tavilyApiKey } = data;
+      const { models, defaultModelId, customPrompts, defaultPromptId, tavilyApiKey, enableImplicitContext } = data;
 
       if (!models || models.length === 0 || !defaultModelId) {
         sendResponse({ error: "No default AI model configured. Please set one in the options page.", models: [], defaultModelId: null });
@@ -321,6 +321,29 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         "messages": safeMessagesText,
         "stream": true
       };
+
+      // The popup sends the sentence around the selection plus the page
+      // title. It rides in a system message with strict instructions: the
+      // context ONLY disambiguates which sense of the term to explain; the
+      // answer itself must stay about the term and never mention the page,
+      // title, or surrounding text. kept out of usedPrompt and of the
+      // popup's conversation, so nothing user-visible (display, saves,
+      // verification input) changes.
+      if (enableImplicitContext !== false && request.context && typeof request.context === 'object') {
+        const cleanCtxText = (value) => String(value || '')
+          .replace(/[\u0000-\u001f\u007f]/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+        const ctxSentence = typeof request.context.sentence === 'string' ? cleanCtxText(request.context.sentence).slice(0, 400) : '';
+        const ctxTitle = typeof request.context.pageTitle === 'string' ? cleanCtxText(request.context.pageTitle).slice(0, 200) : '';
+        if (ctxSentence || ctxTitle) {
+          const parts = ['The user selected a term while reading a web page and wants it explained.'];
+          if (ctxTitle) parts.push(`Page title: "${ctxTitle}".`);
+          if (ctxSentence) parts.push(`Sentence containing the selection: "${ctxSentence}".`);
+          parts.push('Use this context ONLY to decide which meaning of the selected term applies (for example, "bank" as a riverbank versus a financial institution). Explain the term itself. Do NOT mention, quote, refer to, or summarize the page, its title, or the surrounding sentence in your answer.');
+          safeMessagesText.unshift({ role: 'system', content: parts.join(' ') });
+        }
+      }
 
       if (modelToUse.enableSearchGrounding) {
         payload.tools = [{
@@ -957,6 +980,7 @@ function triggerBackup(type = "Auto", customBackupInclude = null) {
         if (syncData.defaultModelId !== undefined) backupData.defaultModelId = syncData.defaultModelId;
         if (syncData.verificationModelId !== undefined) backupData.verificationModelId = syncData.verificationModelId;
         if (syncData.enableHallucinationGuard !== undefined) backupData.enableHallucinationGuard = syncData.enableHallucinationGuard;
+        if (syncData.enableImplicitContext !== undefined) backupData.enableImplicitContext = syncData.enableImplicitContext;
       }
 
       // 3. Custom Prompts

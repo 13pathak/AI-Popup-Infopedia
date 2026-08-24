@@ -1446,6 +1446,18 @@
             <div id="tavily-status" style="margin-top: 10px; font-weight: bold; min-height: 1em; color: var(--secondary-color);"></div>
         </div>
 
+        <div class="settings-section">
+            <h3 class="section-title">Word Lookup Context</h3>
+            <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer;">
+                <input type="checkbox" id="enable-implicit-context" style="margin-top: 4px;">
+                <span><strong>Send implicit context with lookups</strong><br>
+                    <small>Also send the sentence around your selection and the page title so the model can pick the
+                        right meaning of ambiguous words like "bank" or "java". The answer still explains only the
+                        selected word and will not mention the context. Note: this shares that sentence and title with
+                        your AI provider — disable it for maximum privacy.</small></span>
+            </label>
+        </div>
+
         <div id="followup-settings-container" class="settings-section">
             <h3 class="section-title">Follow-up Settings</h3>
             <label for="followup-custom-message">Custom Follow-up Message</label>
