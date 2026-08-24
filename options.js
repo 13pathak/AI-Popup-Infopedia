@@ -206,8 +206,17 @@ document.addEventListener('DOMContentLoaded', () => {
   safeAddListener('edit-model-btn', 'click', editSelectedModel);
   safeAddListener('delete-model-btn', 'click', deleteSelectedModel);
   safeAddListener('model-select', 'change', (e) => setDefaultModel(e.target.value));
-  safeAddListener('move-model-up-btn', 'click', () => moveSelectedModel(-1));
-  safeAddListener('move-model-down-btn', 'click', () => moveSelectedModel(1));
+  safeAddListener('reorder-models-btn', 'click', openReorderModelsModal);
+  safeAddListener('reorder-models-cancel-btn', 'click', () => {
+    const modal = document.getElementById('reorder-models-modal');
+    if (modal) modal.style.display = 'none';
+  });
+  safeAddListener('reorder-models-modal', 'click', (e) => {
+    if (e.target.id === 'reorder-models-modal') {
+      e.target.style.display = 'none';
+    }
+  });
+  safeAddListener('reorder-models-save-btn', 'click', saveReorderedModels);
   safeAddListener('enable-model-fallback', 'change', (e) => {
     chrome.storage.sync.set({ enableModelFallback: e.target.checked }, () => {
       updateStatus(e.target.checked
@@ -584,8 +593,7 @@ function loadModels() {
     const noModelsMsg = document.getElementById('no-models-message');
     const editModelBtn = document.getElementById('edit-model-btn');
     const deleteModelBtn = document.getElementById('delete-model-btn');
-    const moveUpBtn = document.getElementById('move-model-up-btn');
-    const moveDownBtn = document.getElementById('move-model-down-btn');
+    const reorderBtn = document.getElementById('reorder-models-btn');
     const fallbackToggle = document.getElementById('enable-model-fallback');
     selectEl.innerHTML = '';
 
@@ -597,15 +605,13 @@ function loadModels() {
       selectEl.style.display = 'none'; // Hide the select dropdown
       editModelBtn.style.display = 'none'; // Hide edit button
       deleteModelBtn.style.display = 'none'; // Hide delete button
-      moveUpBtn.style.display = 'none';
-      moveDownBtn.style.display = 'none';
+      if (reorderBtn) reorderBtn.style.display = 'none';
     } else {
       noModelsMsg.style.display = 'none';
       selectEl.style.display = 'block'; // Show the select dropdown
       editModelBtn.style.display = 'inline-block'; // Show edit button
       deleteModelBtn.style.display = 'inline-block'; // Show delete button
-      moveUpBtn.style.display = 'inline-block';
-      moveDownBtn.style.display = 'inline-block';
+      if (reorderBtn) reorderBtn.style.display = models.length > 1 ? 'inline-block' : 'none';
 
       models.forEach(model => {
         const option = document.createElement('option');
@@ -723,33 +729,127 @@ function setDefaultModel(modelId) {
   });
 }
 
-// Reorders the models array, which doubles as the fallback chain: the
-// background tries models top-to-bottom when one fails. The moved model
-// stays selected so repeated clicks keep walking it through the list.
-function moveSelectedModel(delta) {
-  const selectEl = document.getElementById('model-select');
-  const selectedId = selectEl.value;
-  if (!selectedId) {
-    alert('No model selected to move.');
-    return;
-  }
+// --- Drag and Drop Reordering Modal for Models ---
+let reorderCurrentModels = [];
+let dragModelSrcEl = null;
 
-  chrome.storage.sync.get(['models'], (data) => {
-    const models = data.models || [];
-    const index = models.findIndex(m => m.id === selectedId);
-    const targetIndex = index + delta;
-
-    if (index === -1 || targetIndex < 0 || targetIndex >= models.length) {
-      updateStatus(delta < 0 ? 'This model is already first in the fallback order.' : 'This model is already last in the fallback order.');
+function openReorderModelsModal() {
+  const modal = document.getElementById('reorder-models-modal');
+  if (!modal) return;
+  chrome.storage.sync.get({ models: [] }, (data) => {
+    reorderCurrentModels = [...(data.models || [])];
+    if (reorderCurrentModels.length < 2) {
+      updateStatus('You need at least 2 models to reorder fallback priority.');
       return;
     }
+    renderReorderModels();
+    modal.style.display = 'flex';
+  });
+}
 
-    [models[index], models[targetIndex]] = [models[targetIndex], models[index]];
+function renderReorderModels() {
+  const container = document.getElementById('reorder-models-container');
+  if (!container) return;
+  container.innerHTML = '';
 
-    chrome.storage.sync.set({ models }, () => {
-      updateStatus('Fallback order updated.', 'success');
-      loadModels();
-    });
+  reorderCurrentModels.forEach((model, index) => {
+    const item = document.createElement('div');
+    item.className = 'reorder-item';
+    item.draggable = true;
+    item.dataset.id = model.id;
+    item.style.display = 'flex';
+    item.style.alignItems = 'center';
+    item.style.justifyContent = 'space-between';
+
+    const left = document.createElement('div');
+    left.style.display = 'flex';
+    left.style.alignItems = 'center';
+
+    const handle = document.createElement('div');
+    handle.className = 'drag-handle';
+    handle.innerHTML = '&#8942;&#8942;'; // :: icon
+
+    const rankBadge = document.createElement('span');
+    rankBadge.style.cssText = 'font-size: 11px; font-weight: bold; background: var(--border-color); color: var(--text-color); border-radius: 10px; padding: 2px 7px; margin-right: 8px;';
+    rankBadge.textContent = `#${index + 1}`;
+
+    const nameSpan = document.createElement('span');
+    nameSpan.textContent = model.name;
+
+    left.appendChild(handle);
+    left.appendChild(rankBadge);
+    left.appendChild(nameSpan);
+
+    item.appendChild(left);
+
+    item.addEventListener('dragstart', handleModelDragStart);
+    item.addEventListener('dragover', handleModelDragOver);
+    item.addEventListener('dragenter', handleModelDragEnter);
+    item.addEventListener('dragleave', handleModelDragLeave);
+    item.addEventListener('drop', handleModelDrop);
+    item.addEventListener('dragend', handleModelDragEnd);
+
+    container.appendChild(item);
+  });
+}
+
+function handleModelDragStart(e) {
+  dragModelSrcEl = this;
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', this.dataset.id);
+  setTimeout(() => this.classList.add('dragging'), 0);
+}
+
+function handleModelDragOver(e) {
+  if (e.preventDefault) e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  return false;
+}
+
+function handleModelDragEnter(e) {
+  this.classList.add('over');
+}
+
+function handleModelDragLeave(e) {
+  this.classList.remove('over');
+}
+
+function handleModelDrop(e) {
+  if (e.stopPropagation) e.stopPropagation();
+
+  if (dragModelSrcEl && dragModelSrcEl !== this) {
+    const draggedId = dragModelSrcEl.dataset.id;
+    const targetId = this.dataset.id;
+
+    const draggedOrigIndex = reorderCurrentModels.findIndex(m => m.id === draggedId);
+    const targetOrigIndex = reorderCurrentModels.findIndex(m => m.id === targetId);
+
+    if (draggedOrigIndex !== -1 && targetOrigIndex !== -1) {
+      const [removed] = reorderCurrentModels.splice(draggedOrigIndex, 1);
+      const newTargetIndex = reorderCurrentModels.findIndex(m => m.id === targetId);
+      if (draggedOrigIndex < targetOrigIndex) {
+        reorderCurrentModels.splice(newTargetIndex + 1, 0, removed);
+      } else {
+        reorderCurrentModels.splice(newTargetIndex, 0, removed);
+      }
+      renderReorderModels();
+    }
+  }
+  return false;
+}
+
+function handleModelDragEnd(e) {
+  this.classList.remove('dragging');
+  const items = document.querySelectorAll('#reorder-models-container .reorder-item');
+  items.forEach(item => item.classList.remove('over'));
+}
+
+function saveReorderedModels() {
+  chrome.storage.sync.set({ models: reorderCurrentModels }, () => {
+    const modal = document.getElementById('reorder-models-modal');
+    if (modal) modal.style.display = 'none';
+    loadModels();
+    updateStatus('Fallback order updated successfully.', 'success');
   });
 }
 
