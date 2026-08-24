@@ -1719,6 +1719,8 @@ function handleEditClick(event) {
   itemElement.querySelector('.star-item-btn').style.display = 'none'; // Hide star button during edit
   itemElement.querySelector('.edit-item-btn').style.display = 'none';
   itemElement.querySelector('.delete-item-btn').style.display = 'none';
+  const explainBtnInEdit = itemElement.querySelector('.explain-clip-btn');
+  if (explainBtnInEdit) explainBtnInEdit.style.display = 'none';
 
   const editWordInput = document.createElement('input');
   editWordInput.type = 'text';
@@ -2316,7 +2318,10 @@ function mergeHistory(newItems, parseErrors) {
     // --- END NEW ---
 
     newItems.forEach(item => {
-      if (!item.word || !item.definition) {
+      // Clips are the one item type allowed an empty definition — they are
+      // raw selections parked for later explanation. Everything else still
+      // needs both fields, and malformed clip rows (no word) still skip.
+      if (!item.word || (!item.definition && item.modelName !== 'clip')) {
         console.warn("Skipping item with missing data (word or definition):", item);
         parseErrors++;
         return;
@@ -3474,8 +3479,11 @@ function renderFilteredHistory(history, scrollTopToRestore = null, totalHistoryC
     historyList.style.display = 'block';
 
     history.forEach(item => {
+      const isClip = item.modelName === 'clip';
+      const isUndefinedClip = isClip && !item.definition;
+
       const itemElement = document.createElement('div');
-      itemElement.className = 'history-item';
+      itemElement.className = 'history-item' + (isClip ? ' is-clip' : '');
       itemElement.dataset.timestamp = histId(item);
       // Only real ids go in the DOM: dataset coerces null to the truthy
       // string "null", which defeats the falsy checks downstream.
@@ -3496,15 +3504,30 @@ function renderFilteredHistory(history, scrollTopToRestore = null, totalHistoryC
       }
 
       displayView.innerHTML = `
+        ${isClip ? '<span class="clip-chip" title="Saved from a selection without an AI call">clipped</span>' : ''}
         <div class="history-word">${escapeHTML(item.word)}</div>
         <div class="history-definition">${formattedDefinition}</div>
+        ${isUndefinedClip ? '<div class="clip-hint">Not explained yet — use the ✨ button to explain it with AI, or Edit to add a definition.</div>' : ''}
         <div class="history-model" style="font-size: 0.8em; color: #888; margin-top: 4px;">
-          Model: ${escapeHTML(item.modelName || 'Unknown')} | 
-          Prompt: ${escapeHTML(item.promptName || 'Unknown')} | 
+          Model: ${escapeHTML(item.modelName || 'Unknown')} |
+          Prompt: ${escapeHTML(item.promptName || 'Unknown')} |
           Date: ${new Date(item.timestamp).toLocaleDateString()}${sourceHtml}
         </div>
       `;
       itemElement.appendChild(displayView);
+
+      // Deferred lookup: explain an unexplained clip with the normal AI
+      // pipeline and write the answer back into the item. Only shown for
+      // clips that still lack a definition.
+      if (isUndefinedClip) {
+        const explainBtn = document.createElement('button');
+        explainBtn.className = 'explain-clip-btn';
+        explainBtn.innerHTML = optIcon('zap', 1.1);
+        explainBtn.title = 'Explain this clip with AI';
+        explainBtn.dataset.timestamp = histId(item);
+        explainBtn.addEventListener('click', handleExplainClipClick);
+        itemElement.appendChild(explainBtn);
+      }
 
       // Add buttons (same pattern as the edit/delete/favorite rows above)
       const ankiButton = document.createElement('button');
@@ -3512,6 +3535,12 @@ function renderFilteredHistory(history, scrollTopToRestore = null, totalHistoryC
       ankiButton.innerHTML = '<strong>A</strong>';
       ankiButton.title = 'Send to Anki';
       ankiButton.dataset.timestamp = histId(item);
+      // A clip without a definition would send an empty card back; gray the
+      // button out until it is explained or hand-defined via Edit.
+      if (isUndefinedClip) {
+        ankiButton.disabled = true;
+        ankiButton.title = 'Explain or define this clip before sending to Anki';
+      }
       ankiButton.addEventListener('click', handleSendToAnkiClick);
       itemElement.appendChild(ankiButton);
 
@@ -3579,6 +3608,53 @@ function handleToggleFavoriteClick(event) {
         btn.innerHTML = item.favorite ? optIcon('starFilled', 1.1) : optIcon('star', 1.1);
         btn.className = 'star-item-btn' + (item.favorite ? ' favorited' : '');
         btn.title = item.favorite ? 'Remove from favorites' : 'Add to favorites';
+      }
+    });
+  });
+}
+
+// --- Deferred clip lookup: explain an unexplained clip in place ---
+// Fires the normal getAiDefinition pipeline (default model, fallback chain,
+// grounding) with the clip's full text and writes the answer back into the
+// history item. The item keeps its "Clip" prompt name for lineage, but the
+// model credit switches to whoever actually answered.
+function handleExplainClipClick(event) {
+  const itemKey = event.currentTarget.dataset.timestamp;
+
+  chrome.storage.local.get(['history'], (result) => {
+    const history = result.history || [];
+    const index = history.findIndex(i => histId(i) === itemKey);
+    if (index === -1) return;
+    const clipItem = history[index];
+
+    // Guard against double clicks and stale rows after a re-render.
+    const liveBtn = document.querySelector(`.explain-clip-btn[data-timestamp="${CSS.escape(itemKey)}"]`);
+    if (liveBtn) {
+      liveBtn.disabled = true;
+      liveBtn.innerHTML = optIcon('spinner', 1.1);
+    }
+
+    chrome.runtime.sendMessage({ type: 'getAiDefinition', word: clipItem.word }, (response) => {
+      if (chrome.runtime.lastError) response = { error: chrome.runtime.lastError.message };
+      if (!response || response.error) {
+        updateStatus(`Clip explanation failed: ${(response && response.error) || 'unknown error'}`, 'error');
+        applyFilters(); // restore the button
+        return;
+      }
+      if (response.definition) {
+        history[index] = {
+          ...history[index],
+          definition: response.definition,
+          modelName: response.usedModelName || history[index].modelName,
+          citations: Array.isArray(response.citations) ? response.citations : []
+        };
+        chrome.storage.local.set({ history }, () => {
+          updateStatus('Clip explained.', 'success');
+          applyFilters();
+        });
+      } else {
+        updateStatus('The model returned an empty answer. Try again or edit the clip manually.', 'error');
+        applyFilters();
       }
     });
   });
@@ -3717,7 +3793,16 @@ async function bulkExportToAnki() {
   // Get history items
   const historyData = await new Promise(resolve => chrome.storage.local.get('history', resolve));
   const history = historyData.history || [];
-  const itemsToExport = history.filter(item => timestamps.includes(histId(item)));
+  // Unexplained clips would export as blank-backed cards; skip them like
+  // the per-item Anki button does (it is disabled for these).
+  const selectedItems = history.filter(item => timestamps.includes(histId(item)));
+  const skippedClips = selectedItems.filter(item => item.modelName === 'clip' && !item.definition).length;
+  const itemsToExport = selectedItems.filter(item => !(item.modelName === 'clip' && !item.definition));
+
+  if (skippedClips > 0) {
+    updateIOStatus(`${skippedClips} unexplained clip(s) skipped — explain them first.`, 'error');
+    if (itemsToExport.length === 0) return;
+  }
 
   let successCount = 0;
 
@@ -3785,9 +3870,11 @@ function startFlashcardReview() {
       history = history.filter(item => item.listId === selectedList);
     }
 
-    // Filter for cards due for review
+    // Filter for cards due for review. Unexplained clips are skipped —
+    // their card back would be blank until a definition exists.
     const now = Date.now();
     flashcardQueue = history.filter(item => {
+      if (item.modelName === 'clip' && !item.definition) return false;
       const nextReview = item.nextReview || 0;
       return nextReview <= now;
     });

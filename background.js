@@ -666,6 +666,44 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  // --- Clip: save the raw selection to history without an AI call ---
+  // Clips land in the last-used list — the same list the last explicit save
+  // chose — so saving one never re-points where future saves go (the id
+  // written back is the one just read). Duplicate clips (same full text,
+  // same list) are skipped, the same composite-key idea the CSV importer
+  // uses, minus the timestamp component since every clip gets a fresh one.
+  if (request.type === "saveClip") {
+    const clipText = typeof request.text === 'string' ? request.text.trim() : '';
+    if (!clipText) {
+      sendResponse({ status: 'error', error: 'Nothing selected to clip.' });
+      return;
+    }
+
+    chrome.storage.local.get(['history', 'lastUsedListId'], (result) => {
+      const history = result.history || [];
+      const listId = result.lastUsedListId || null;
+
+      const isDuplicate = history.some(item =>
+        item.modelName === 'clip' &&
+        item.word === clipText &&
+        (item.listId || null) === listId
+      );
+      if (isDuplicate) {
+        sendResponse({ status: 'duplicate' });
+        return;
+      }
+
+      saveToHistory(clipText, '', listId, 'clip', 'Clip', request.sourceUrl, request.sourceTitle, [], (err) => {
+        if (err) {
+          sendResponse({ status: 'error', error: err.message });
+        } else {
+          sendResponse({ status: 'saved' });
+        }
+      });
+    });
+    return true;
+  }
+
   // --- Case 2.5: Open PDF Tab ---
   if (request.type === "openPdfTab") {
     openPrintTab(request.htmlContent);

@@ -671,8 +671,15 @@ const popupStyles = `
   }
 
   /* --- Open Button Popup --- */
-  #ai-open-button-popup {
+  #ai-open-button-group {
     position: fixed;
+    display: flex;
+    align-items: stretch;
+    gap: 6px;
+    pointer-events: auto;
+    z-index: 1;
+  }
+  #ai-open-button-popup {
     background-color: var(--popup-accent-btn-bg);
     color: var(--popup-accent-btn-text);
     border: 1px solid var(--popup-accent-btn-border);
@@ -683,8 +690,22 @@ const popupStyles = `
     font-weight: bold;
     cursor: pointer;
     box-shadow: 0 2px 6px var(--popup-shadow-1);
-    pointer-events: auto;
-    z-index: 1;
+  }
+  #ai-clip-button-popup {
+    background-color: var(--popup-accent-btn-bg);
+    color: var(--popup-accent-btn-text);
+    border: 1px solid var(--popup-accent-btn-border);
+    border-radius: 8px;
+    padding: 6px 9px;
+    font-family: var(--popup-font-family);
+    cursor: pointer;
+    box-shadow: 0 2px 6px var(--popup-shadow-1);
+    display: inline-flex;
+    align-items: center;
+  }
+  #ai-clip-button-popup:disabled {
+    opacity: 0.7;
+    cursor: default;
   }
   #ai-open-button-popup:hover {
     background-color: var(--popup-accent-btn-hover);
@@ -864,7 +885,8 @@ const POPUP_ICON_PATHS = {
   checkCircle: '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>',
   chevronDown: '<polyline points="6 9 12 15 18 9"/>',
   chevronRight: '<polyline points="9 18 15 12 9 6"/>',
-  sparkles: '<path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/>'
+  sparkles: '<path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/>',
+  bookmark: '<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>'
 };
 
 function iconSvg(name, size = 16) {
@@ -1380,6 +1402,46 @@ function initiateEmptyPopupSequence() {
   });
 }
 
+// Source attribution for saved history entries. Inside the custom PDF
+// viewer this content script runs on the extension's own page, so
+// location.href/document.title describe the viewer chrome — not the
+// document. Record the original PDF instead; its URL arrives as the
+// ?file= query parameter.
+function collectSourceMetadata() {
+  let sourceUrl = window.location.href;
+  let sourceTitle = document.title;
+  if (window.location.pathname.includes('custom-viewer.html')) {
+    const pdfUrl = new URLSearchParams(window.location.search).get('file');
+    if (pdfUrl) {
+      sourceUrl = pdfUrl;
+      try {
+        // Label the entry by the PDF's filename. Prefer a "*.pdf"
+        // segment (path first, then query values) so endpoint URLs
+        // like /getdoc?id=…&name=thesis.pdf still get a human label;
+        // otherwise the last path segment. Falls back on odd URLs.
+        // Each candidate is decoded exactly once — pathname segments
+        // need explicit decoding while searchParams values arrive
+        // already decoded, so a blanket second pass threw on names
+        // containing a literal '%' ("Report 50% Final") and collapsed
+        // the whole title to 'PDF document'.
+        const url = new URL(pdfUrl, window.location.href);
+        const safeDecode = (s) => {
+          try { return decodeURIComponent(s); } catch { return s; }
+        };
+        const label = url.pathname.split('/')
+          .map(safeDecode)
+          .filter(seg => /\.pdf$/i.test(seg)).pop()
+          || [...url.searchParams.values()].find(v => /\.pdf$/i.test(v))
+          || safeDecode(url.pathname.split('/').pop());
+        sourceTitle = label || 'PDF document';
+      } catch {
+        sourceTitle = 'PDF document';
+      }
+    }
+  }
+  return { sourceUrl, sourceTitle };
+}
+
 // --- NEW: Function to show intermediate 'Open' button ---
 function showOpenButtonPopup(rect, selectedText, implicitContext) {
   const popupContainer = document.createElement('div');
@@ -1399,14 +1461,18 @@ function showOpenButtonPopup(rect, selectedText, implicitContext) {
   styleTag.textContent = popupStyles;
   shadow.appendChild(styleTag);
 
-  const openBtn = document.createElement('button');
-  openBtn.id = 'ai-open-button-popup';
-  openBtn.textContent = 'Ask AI';
+  const buttonGroup = document.createElement('div');
+  buttonGroup.id = 'ai-open-button-group';
 
   // Position it a bit above the selection if possible
   const topPos = rect.top >= 40 ? rect.top - 40 : rect.bottom + 10;
-  openBtn.style.left = `${rect.left}px`;
-  openBtn.style.top = `${topPos}px`;
+  buttonGroup.style.left = `${rect.left}px`;
+  buttonGroup.style.top = `${topPos}px`;
+
+  const openBtn = document.createElement('button');
+  openBtn.id = 'ai-open-button-popup';
+  openBtn.textContent = 'Ask AI';
+  openBtn.title = 'Explain the selection with AI';
 
   openBtn.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -1414,12 +1480,48 @@ function showOpenButtonPopup(rect, selectedText, implicitContext) {
     initiatePopupSequence(rect, selectedText, undefined, implicitContext);
   });
 
-  shadow.appendChild(openBtn);
+  // One-click clip: save the raw selection to history without calling any
+  // model. The full text is stored; the history view clamps it for display,
+  // and its "Explain" action can turn it into a real definition later.
+  const clipBtn = document.createElement('button');
+  clipBtn.id = 'ai-clip-button-popup';
+  clipBtn.title = 'Clip: save the selection to history (no AI call)';
+  clipBtn.innerHTML = iconSvg('bookmark', 15);
+  clipBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    clipBtn.disabled = true;
+
+    const finish = (label) => {
+      clipBtn.innerHTML = iconSvg(label === 'duplicate' ? 'bookmark' : 'check', 15);
+      clipBtn.title = label === 'duplicate' ? 'Already clipped' : 'Clipped to history';
+      setTimeout(() => removePopupInstance(instance), 900);
+    };
+
+    const { sourceUrl, sourceTitle } = collectSourceMetadata();
+    chrome.runtime.sendMessage({
+      type: 'saveClip',
+      text: selectedText,
+      sourceUrl: sourceUrl,
+      sourceTitle: sourceTitle
+    }, (response) => {
+      if (chrome.runtime.lastError) {
+        clipBtn.innerHTML = iconSvg('xCircle', 15);
+        clipBtn.title = 'Clip failed — please try again';
+        clipBtn.disabled = false;
+        console.error('Clip save failed:', chrome.runtime.lastError.message);
+        return;
+      }
+      finish(response && response.status === 'duplicate' ? 'duplicate' : 'saved');
+    });
+  });
+
+  buttonGroup.append(openBtn, clipBtn);
+  shadow.appendChild(buttonGroup);
   document.documentElement.appendChild(popupContainer);
 
   const instance = {
     container: popupContainer,
-    popup: openBtn,
+    popup: buttonGroup,
     shadow: shadow,
     isInteracting: false,
     isClickInside: false,
@@ -2802,41 +2904,8 @@ function createActionButtons(instance, word, definition, modelName, promptName, 
         }
       }
 
-      // Inside the custom PDF viewer this content script runs on the
-      // extension's own page, so location.href/document.title describe
-      // the viewer chrome — not the document. Record the original PDF
-      // instead; its URL arrives as the ?file= query parameter.
-      let sourceUrl = window.location.href;
-      let sourceTitle = document.title;
-      if (window.location.pathname.includes('custom-viewer.html')) {
-        const pdfUrl = new URLSearchParams(window.location.search).get('file');
-        if (pdfUrl) {
-          sourceUrl = pdfUrl;
-          try {
-            // Label the entry by the PDF's filename. Prefer a "*.pdf"
-            // segment (path first, then query values) so endpoint URLs
-            // like /getdoc?id=…&name=thesis.pdf still get a human label;
-            // otherwise the last path segment. Falls back on odd URLs.
-            // Each candidate is decoded exactly once — pathname segments
-            // need explicit decoding while searchParams values arrive
-            // already decoded, so a blanket second pass threw on names
-            // containing a literal '%' ("Report 50% Final") and collapsed
-            // the whole title to 'PDF document'.
-            const url = new URL(pdfUrl, window.location.href);
-            const safeDecode = (s) => {
-              try { return decodeURIComponent(s); } catch { return s; }
-            };
-            const label = url.pathname.split('/')
-              .map(safeDecode)
-              .filter(seg => /\.pdf$/i.test(seg)).pop()
-              || [...url.searchParams.values()].find(v => /\.pdf$/i.test(v))
-              || safeDecode(url.pathname.split('/').pop());
-            sourceTitle = label || 'PDF document';
-          } catch {
-            sourceTitle = 'PDF document';
-          }
-        }
-      }
+      // Source attribution for the history entry.
+      const { sourceUrl, sourceTitle } = collectSourceMetadata();
 
       // Send message to background to save with listId
       chrome.runtime.sendMessage({

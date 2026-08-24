@@ -874,7 +874,8 @@
         .delete-item-btn,
         .edit-item-btn,
         .anki-item-btn,
-        .star-item-btn {
+        .star-item-btn,
+        .explain-clip-btn {
             position: absolute;
             background: none;
             border: none;
@@ -894,7 +895,8 @@
         .delete-item-btn:hover,
         .edit-item-btn:hover,
         .anki-item-btn:hover:not(:disabled),
-        .star-item-btn:hover {
+        .star-item-btn:hover,
+        .explain-clip-btn:hover:not(:disabled) {
             background-color: var(--border-color);
             transform: scale(1.05);
         }
@@ -912,6 +914,41 @@
         .star-item-btn { top: 16px; right: 108px; }
         .star-item-btn:hover { color: #F59E0B; }
         .star-item-btn.favorited { color: #F59E0B; }
+
+        /* --- CLIPS (selections saved without an AI call) --- */
+        .explain-clip-btn { top: 16px; right: 140px; }
+        .explain-clip-btn:hover:not(:disabled) { color: var(--primary-color); }
+        .explain-clip-btn:disabled { color: var(--secondary-color); cursor: default; transform: none; background: none; }
+
+        .clip-chip {
+            display: inline-block;
+            font-style: italic;
+            font-size: 0.72em;
+            font-weight: 600;
+            color: var(--text-muted);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 2px 8px;
+            margin-bottom: 8px;
+        }
+
+        .clip-hint {
+            font-size: 0.85em;
+            font-style: italic;
+            color: var(--text-muted);
+            opacity: 0.85;
+            margin-top: 6px;
+        }
+
+        /* Clip texts can be whole passages; clamp them so one long clip
+           cannot stretch the history list. The full text stays in the DOM
+           (title, edit dialog, explain action all use it). */
+        .history-item.is-clip .history-word {
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
 
         /* --- BULK SELECTION --- */
         .bulk-checkbox {
