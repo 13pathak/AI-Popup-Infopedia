@@ -1967,11 +1967,42 @@ function hidePopups() {
 
 // Markup tools logic
 let currentMarkupType = 'Highlight';
+
+// Re-render an existing highlight's overlays after an in-place edit
+// (type conversion or recolor): drop its divs anywhere and redraw through
+// the ordinary drawHighlight path, so variant classes, inline styles, and
+// the .active state always match the stored record instead of being
+// hand-patched piecemeal.
+function redrawExistingHighlight(hl) {
+    document.querySelectorAll(`.custom-highlight[data-hl-id="${hl.id}"], .note-indicator[data-hl-id="${hl.id}"]`)
+        .forEach(el => el.remove());
+    const pageDiv = document.querySelector(`.page[data-page-number="${hl.pageNumber}"]`);
+    if (pageDiv && pageDiv._viewport) drawHighlight(hl, pageDiv, pageDiv._viewport);
+}
+
 document.querySelectorAll('.markup-tool-btn').forEach(btn => {
     btn.addEventListener('click', (e) => {
-        document.querySelectorAll('.markup-tool-btn').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        currentMarkupType = btn.dataset.type;
+        const activateTool = () => {
+            document.querySelectorAll('.markup-tool-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            currentMarkupType = btn.dataset.type;
+        };
+        // Editing context (picker opened via edit-btn-color): convert the
+        // active highlight's type in place instead of silently rewriting
+        // only the future-selection default. The tool also becomes the
+        // future default and takes the visual active state — one source
+        // of truth, no desync between what the picker shows and what a
+        // fresh selection would use.
+        if (activeHighlightId !== null) {
+            const hl = highlights.find(h => h.id === activeHighlightId);
+            if (!hl) return;
+            hl.markupType = btn.dataset.type;
+            activateTool();
+            redrawExistingHighlight(hl);
+            saveHighlights();
+            return; // picker stays open for a follow-up color choice
+        }
+        activateTool();
     });
 });
 
@@ -1985,13 +2016,10 @@ document.querySelectorAll('.color-btn').forEach(btn => {
             const hl = highlights.find(h => h.id === activeHighlightId);
             if (hl) {
                 hl.color = color;
-                document.querySelectorAll(`.custom-highlight[data-hl-id="${hl.id}"]`).forEach(el => {
-                    if (hl.markupType === 'Underline' || hl.markupType === 'StrikeOut') {
-                        el.style.borderColor = color;
-                    } else {
-                        el.style.backgroundColor = color;
-                    }
-                });
+                // Redraw through the shared path: any type conversion made
+                // via the tool buttons above must be reflected in the same
+                // pass, and hand-patched inline styles would go stale.
+                redrawExistingHighlight(hl);
                 saveHighlights();
             }
             hidePopups();
