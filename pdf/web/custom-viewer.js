@@ -259,10 +259,18 @@ function hasChromeStorage() {
 // function that closes over it (loadStorageData, the save* helpers, the
 // onChanged listener) so a future top-level call cannot hit the temporal
 // dead zone; the values need fileUrl, resolved just above.
+//
+// Hash fragments (#page=3 and friends) are view state, not document
+// identity: the same PDF opened bare, at a page hash, or at different
+// hashes must share one annotation/theme namespace or saved highlights
+// fragment across invisible copies. Query strings stay in the key —
+// servers do serve genuinely distinct documents from them. String()
+// preserves the historical 'pdf_*_null' keys when fileUrl is absent.
+const storageFileUrl = String(fileUrl).replace(/#.*$/, '');
 const SYNC_KEYS = {
-    highlights: 'pdf_highlights_' + fileUrl,
-    bookmarks: 'pdf_bookmarks_' + fileUrl,
-    lastPage: 'pdf_lastpage_' + fileUrl
+    highlights: 'pdf_highlights_' + storageFileUrl,
+    bookmarks: 'pdf_bookmarks_' + storageFileUrl,
+    lastPage: 'pdf_lastpage_' + storageFileUrl
 };
 
 // Whether this document has its own dark-mode override, once known.
@@ -287,23 +295,37 @@ async function loadStorageData() {
         // Per-document toggle override; when unset, the viewer defaults to
         // the extension-wide uiTheme (supersedes the old global
         // 'pdf_dark_mode' key, which is no longer read).
-        const darkModeKey = 'pdf_dark_mode_' + fileUrl;
+        const darkModeKey = 'pdf_dark_mode_' + storageFileUrl;
 
         chrome.storage.local.get([highlightsKey, bookmarksKey, lastPageKey, darkModeKey], (result) => {
+            // Theme settlement the promise waits on: null when the
+            // override branch decides synchronously. Without awaiting the
+            // sync read here, resolve() used to fire with
+            // perDocThemeActive still unknown, leaving the live
+            // global-theme gate blind for a racy span after load.
+            let themePending = null;
             if (result[darkModeKey] !== undefined) {
                 perDocThemeActive = true;
                 mirrorPerDocTheme(darkModeKey, result[darkModeKey] === true);
                 applyViewerDarkMode(result[darkModeKey] === true);
             } else if (chrome.storage && chrome.storage.sync) {
-                chrome.storage.sync.get({ uiTheme: 'dark' }, (syncData) => {
-                    perDocThemeActive = false;
-                    const theme = (syncData && syncData.uiTheme) || 'dark';
-                    rememberUiThemeMirror(theme);
-                    // No per-doc override anymore: drop any stale mirror
-                    // entry so the bootstrap falls through to uiTheme.
-                    clearPerDocThemeMirror(darkModeKey);
-                    applyViewerDarkMode(uiThemePrefersDark(theme));
+                themePending = new Promise((themeDone) => {
+                    chrome.storage.sync.get({ uiTheme: 'dark' }, (syncData) => {
+                        perDocThemeActive = false;
+                        const theme = (syncData && syncData.uiTheme) || 'dark';
+                        rememberUiThemeMirror(theme);
+                        // No per-doc override anymore: drop any stale mirror
+                        // entry so the bootstrap falls through to uiTheme.
+                        clearPerDocThemeMirror(darkModeKey);
+                        applyViewerDarkMode(uiThemePrefersDark(theme));
+                        themeDone();
+                    });
                 });
+            } else {
+                // No override and no sync surface: nothing will ever set
+                // the tri-state later; park it at "follows global" so the
+                // adoption gate starts deterministically.
+                perDocThemeActive = false;
             }
             if (result[highlightsKey]) {
                 highlights = sanitizeStoredHighlights(result[highlightsKey]);
@@ -322,7 +344,9 @@ async function loadStorageData() {
             }
             if (typeof renderSidebar === 'function') renderSidebar();
             if (typeof renderBookmarks === 'function') renderBookmarks();
-            resolve();
+            // Annotation state above is already parsed and rendered; only
+            // the theme round-trip can hold the promise open briefly.
+            Promise.resolve(themePending).then(() => resolve());
         });
     });
 }
@@ -540,7 +564,7 @@ if (hasChromeStorage()) {
             // corrects it.
             if (key.startsWith('pdf_dark_mode_')) {
                 if (change.newValue === undefined) clearPerDocThemeMirror(key);
-                if (key === 'pdf_dark_mode_' + fileUrl) {
+                if (key === 'pdf_dark_mode_' + storageFileUrl) {
                     adoptRemoteViewerTheme(key, change.newValue);
                 }
                 continue;
@@ -2155,8 +2179,8 @@ document.getElementById('dark_mode_toggle').addEventListener('click', () => {
         // global-themed and let a later options-page change clobber the
         // explicit choice just made.
         perDocThemeActive = true;
-        chrome.storage.local.set({ ['pdf_dark_mode_' + fileUrl]: isDark });
-        mirrorPerDocTheme('pdf_dark_mode_' + fileUrl, isDark);
+        chrome.storage.local.set({ ['pdf_dark_mode_' + storageFileUrl]: isDark });
+        mirrorPerDocTheme('pdf_dark_mode_' + storageFileUrl, isDark);
     }
 });
 
