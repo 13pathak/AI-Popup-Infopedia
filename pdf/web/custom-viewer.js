@@ -1732,6 +1732,7 @@ function updatePageNumber() {
     // every scroll frame in large documents.
     let lo = 0;
     let hi = pages.length - 1;
+    let idx = -1;
     while (lo <= hi) {
         const mid = (lo + hi) >> 1;
         const page = pages[mid];
@@ -1740,19 +1741,27 @@ function updatePageNumber() {
         } else if (page.offsetTop + page.clientHeight <= containerCenter) {
             lo = mid + 1;
         } else {
-            const currentNum = parseInt(page.dataset.pageNumber, 10);
-            document.getElementById('page_num').value = currentNum;
-
-            // Auto-resume save logic (debounced to avoid spamming storage)
-            if (autoSavedLastPage !== currentNum) {
-                autoSavedLastPage = currentNum;
-                clearTimeout(scrollSaveTimeout);
-                scrollSaveTimeout = setTimeout(() => {
-                    saveLastPage(currentNum);
-                }, 1000);
-            }
-            return;
+            idx = mid;
+            break;
         }
+    }
+
+    // The center fell between pages: .page has a 10px bottom margin, and a
+    // stop inside that gap satisfies neither branch above. Attribute it to
+    // the page the search narrowed to (lo - 1); the clamps also cover
+    // centering above page 1 or below the last page.
+    if (idx === -1) idx = Math.min(Math.max(lo - 1, 0), pages.length - 1);
+
+    const currentNum = parseInt(pages[idx].dataset.pageNumber, 10);
+    document.getElementById('page_num').value = currentNum;
+
+    // Auto-resume save logic (debounced to avoid spamming storage)
+    if (autoSavedLastPage !== currentNum) {
+        autoSavedLastPage = currentNum;
+        clearTimeout(scrollSaveTimeout);
+        scrollSaveTimeout = setTimeout(() => {
+            saveLastPage(currentNum);
+        }, 1000);
     }
 }
 
