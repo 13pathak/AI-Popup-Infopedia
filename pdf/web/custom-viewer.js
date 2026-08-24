@@ -3014,6 +3014,9 @@ function drawSearchHighlightsForPage(pageNumber, pageDiv, viewport) {
                     // Rotated/skewed run: map the run's origin, top-left,
                     // and end corners through the viewport, then place the
                     // highlight as a div rotated into the text direction.
+                    // convertToViewportPoint returns [x, y] arrays — index
+                    // them like the upright branch below (.x/.y are
+                    // undefined and would emit "NaNpx"/"undefinedpx").
                     const [a, b, c, d, e, f] = r.matrix;
                     const m = Math.hypot(a, b);
                     const ux = a / m, uy = b / m;   // advance direction
@@ -3024,12 +3027,12 @@ function drawSearchHighlightsForPage(pageNumber, pageDiv, viewport) {
                         e + nx * r.dirHeight + ux * r.dirWidth,
                         f + ny * r.dirHeight + uy * r.dirWidth
                     );
-                    div.style.left = `${pT.x}px`;
-                    div.style.top = `${pT.y}px`;
-                    div.style.width = `${Math.hypot(pE.x - pT.x, pE.y - pT.y)}px`;
-                    div.style.height = `${Math.hypot(pT.x - pO.x, pT.y - pO.y)}px`;
+                    div.style.left = `${pT[0]}px`;
+                    div.style.top = `${pT[1]}px`;
+                    div.style.width = `${Math.hypot(pE[0] - pT[0], pE[1] - pT[1])}px`;
+                    div.style.height = `${Math.hypot(pT[0] - pO[0], pT[1] - pO[1])}px`;
                     div.style.transformOrigin = '0 0';
-                    div.style.transform = `rotate(${Math.atan2(pE.y - pT.y, pE.x - pT.x)}rad)`;
+                    div.style.transform = `rotate(${Math.atan2(pE[1] - pT[1], pE[0] - pT[0])}rad)`;
                 } else {
                     const pt1 = viewport.convertToViewportPoint(r.pdfX, r.pdfY);
                     const pt2 = viewport.convertToViewportPoint(r.pdfX + r.pdfWidth, r.pdfY - r.pdfHeight);
