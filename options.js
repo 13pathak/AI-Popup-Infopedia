@@ -233,6 +233,12 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   safeAddListener('save-model-btn', 'click', saveModel);
   safeAddListener('provider-preset-select', 'change', applyProviderPreset);
+  safeAddListener('endpoint', 'input', updateApiKeyGuidance);
+  safeAddListener('apiKey-provider-link', 'click', (e) => {
+    e.preventDefault();
+    const href = e.currentTarget.getAttribute('href');
+    if (href && href !== '#') openInNewTab(href);
+  });
   safeAddListener('detect-ollama-btn', 'click', detectOllamaModels);
   safeAddListener('ollama-model-select', 'change', (e) => {
     document.getElementById('modelName').value = e.target.value;
@@ -432,11 +438,56 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // --- PROVIDER PRESETS (form helper only; never persisted with the model) ---
 const PROVIDER_PRESETS = {
-  gemini:     { name: 'Gemini Flash',     endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', model: 'gemini-2.5-flash' },
-  groq:       { name: 'Groq Llama',       endpoint: 'https://api.groq.com/openai/v1/chat/completions',                        model: 'llama-3.3-70b-versatile' },
-  openrouter: { name: 'OpenRouter Model', endpoint: 'https://openrouter.ai/api/v1/chat/completions',                          model: 'meta-llama/llama-3.3-70b-instruct:free' },
-  openai:     { name: 'OpenAI Mini',      endpoint: 'https://api.openai.com/v1/chat/completions',                             model: 'gpt-4o-mini' },
-  ollama:     { name: 'Local Ollama',     endpoint: 'http://localhost:11434/v1/chat/completions',                             model: 'llama3.2' }
+  gemini: {
+    name: 'Gemini Flash',
+    providerLabel: 'Google Gemini',
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
+    model: 'gemini-2.5-flash',
+    requiresKey: true,
+    keyPlaceholder: 'Paste your Gemini API key (e.g. AIzaSy...)',
+    keyLink: 'https://aistudio.google.com/app/apikey',
+    keyLinkText: 'Get a free Google Gemini API key →'
+  },
+  groq: {
+    name: 'Groq Llama',
+    providerLabel: 'Groq',
+    endpoint: 'https://api.groq.com/openai/v1/chat/completions',
+    model: 'llama-3.3-70b-versatile',
+    requiresKey: true,
+    keyPlaceholder: 'Paste your Groq API key (e.g. gsk_...)',
+    keyLink: 'https://console.groq.com/keys',
+    keyLinkText: 'Get a free Groq API key →'
+  },
+  openrouter: {
+    name: 'OpenRouter Model',
+    providerLabel: 'OpenRouter',
+    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+    model: 'meta-llama/llama-3.3-70b-instruct:free',
+    requiresKey: true,
+    keyPlaceholder: 'Paste your OpenRouter API key (e.g. sk-or-...)',
+    keyLink: 'https://openrouter.ai/keys',
+    keyLinkText: 'Get an OpenRouter API key →'
+  },
+  openai: {
+    name: 'OpenAI Mini',
+    providerLabel: 'OpenAI',
+    endpoint: 'https://api.openai.com/v1/chat/completions',
+    model: 'gpt-4o-mini',
+    requiresKey: true,
+    keyPlaceholder: 'Paste your OpenAI API key (e.g. sk-...)',
+    keyLink: 'https://platform.openai.com/api-keys',
+    keyLinkText: 'Get an OpenAI API key →'
+  },
+  ollama: {
+    name: 'Local Ollama',
+    providerLabel: 'Ollama',
+    endpoint: 'http://localhost:11434/v1/chat/completions',
+    model: 'llama3.2',
+    requiresKey: false,
+    keyPlaceholder: 'Not needed for local Ollama (leave blank)',
+    keyLink: '',
+    keyLinkText: ''
+  }
 };
 
 function resetOllamaHelpers() {
@@ -448,12 +499,81 @@ function resetOllamaHelpers() {
   if (status) status.textContent = '';
 }
 
+function updateApiKeyGuidance() {
+  const providerKey = document.getElementById('provider-preset-select')?.value || 'custom';
+  const endpointVal = (document.getElementById('endpoint')?.value || '').trim();
+  const apiKeyInput = document.getElementById('apiKey');
+  const badge = document.getElementById('apiKey-status-badge');
+  const hint = document.getElementById('apiKey-hint');
+  const linkContainer = document.getElementById('apiKey-link-container');
+  const providerLink = document.getElementById('apiKey-provider-link');
+
+  if (!badge || !hint) return;
+
+  const preset = PROVIDER_PRESETS[providerKey];
+  const isLocalEndpoint = endpointVal.includes('localhost') ||
+                          endpointVal.includes('127.0.0.1') ||
+                          endpointVal.startsWith('http://192.168.') ||
+                          endpointVal.startsWith('http://10.') ||
+                          endpointVal.includes('0.0.0.0');
+
+  if (providerKey === 'ollama' || (providerKey === 'custom' && isLocalEndpoint && endpointVal)) {
+    badge.textContent = 'Not needed (Local Model)';
+    badge.style.background = 'rgba(16, 185, 129, 0.15)';
+    badge.style.color = 'var(--secondary-color)';
+    hint.innerHTML = 'Local models run offline on your machine (like Ollama or LM Studio) and <strong>do not require</strong> an API key.';
+    if (apiKeyInput) apiKeyInput.placeholder = 'Not required for local models (leave blank)';
+    if (linkContainer) linkContainer.style.display = 'none';
+  } else if (preset && preset.requiresKey) {
+    const providerTitle = preset.providerLabel || preset.name;
+    badge.textContent = `Required for ${providerTitle}`;
+    badge.style.background = 'rgba(59, 130, 246, 0.15)';
+    badge.style.color = 'var(--primary-color)';
+    hint.innerHTML = `<strong>Required:</strong> ${providerTitle} is an online service that requires an API key to authenticate requests.`;
+    if (apiKeyInput && preset.keyPlaceholder) apiKeyInput.placeholder = preset.keyPlaceholder;
+    if (linkContainer && providerLink && preset.keyLink) {
+      providerLink.href = preset.keyLink;
+      providerLink.textContent = preset.keyLinkText || `Get a ${providerTitle} API key →`;
+      linkContainer.style.display = 'block';
+    } else if (linkContainer) {
+      linkContainer.style.display = 'none';
+    }
+  } else {
+    // Custom / Manual
+    if (isLocalEndpoint && endpointVal) {
+      badge.textContent = 'Not needed (Local Model)';
+      badge.style.background = 'rgba(16, 185, 129, 0.15)';
+      badge.style.color = 'var(--secondary-color)';
+      hint.innerHTML = 'Local models run offline on your computer and <strong>do not require</strong> an API key.';
+      if (apiKeyInput) apiKeyInput.placeholder = 'Not required for local models (leave blank)';
+      if (linkContainer) linkContainer.style.display = 'none';
+    } else if (endpointVal) {
+      badge.textContent = 'Required for Cloud Providers';
+      badge.style.background = 'rgba(59, 130, 246, 0.15)';
+      badge.style.color = 'var(--primary-color)';
+      hint.innerHTML = '<strong>Required:</strong> Online AI providers require an API key to authenticate requests. (Leave blank only for local offline models).';
+      if (apiKeyInput) apiKeyInput.placeholder = 'Paste your API key (e.g., sk-..., gsk_..., AIza...)';
+      if (linkContainer) linkContainer.style.display = 'none';
+    } else {
+      badge.textContent = 'Required for cloud · Optional for local';
+      badge.style.background = 'rgba(148, 163, 184, 0.15)';
+      badge.style.color = 'var(--text-muted)';
+      hint.innerHTML = 'Required for online AI services (Gemini, Groq, OpenAI, etc.). Leave blank <strong>only</strong> if you run a local model on your computer (Ollama, LM Studio).';
+      if (apiKeyInput) apiKeyInput.placeholder = 'Paste your API key (leave blank for local models)';
+      if (linkContainer) linkContainer.style.display = 'none';
+    }
+  }
+}
+
 function applyProviderPreset() {
   const key = document.getElementById('provider-preset-select').value;
   const preset = PROVIDER_PRESETS[key];
   resetOllamaHelpers();
-  // "custom" leaves every field untouched
-  if (!preset) return;
+  // "custom" leaves every field untouched, but refreshes guidance
+  if (!preset) {
+    updateApiKeyGuidance();
+    return;
+  }
   document.getElementById('endpoint').value = preset.endpoint;
   document.getElementById('modelName').value = preset.model;
   // Only fill the name if empty or still an untouched preset default, so we
@@ -467,6 +587,7 @@ function applyProviderPreset() {
     document.getElementById('ollama-detect-status').textContent =
       'Tip: Ollama only accepts browser requests when started with OLLAMA_ORIGINS="*" (see FAQ → Local LLMs Setup).';
   }
+  updateApiKeyGuidance();
 }
 
 async function detectOllamaModels() {
@@ -523,6 +644,7 @@ function showModelForm(isEdit = false, model = {}) {
   if (presetEntry && presetEntry[0] === 'ollama') {
     document.getElementById('ollama-detect-row').style.display = 'block';
   }
+  updateApiKeyGuidance();
 
   document.getElementById('model-form-container').style.display = 'block';
   document.getElementById('model-selection-container').style.display = 'none';
@@ -540,6 +662,7 @@ function hideModelForm() {
   document.getElementById('enableSearchGrounding').checked = false;
   document.getElementById('provider-preset-select').value = 'custom';
   resetOllamaHelpers();
+  updateApiKeyGuidance();
 }
 
 function saveModel() {
@@ -578,7 +701,12 @@ function saveModel() {
         updateStatus(`Error saving model: ${chrome.runtime.lastError.message}`, 'error');
         return;
       }
-      updateStatus('Model saved successfully!', 'success');
+      const isLocal = newModelConfig.endpointUrl.includes('localhost') || newModelConfig.endpointUrl.includes('127.0.0.1');
+      if (!newModelConfig.apiKey && !isLocal) {
+        updateStatus('Model saved! Note: Cloud providers usually require an API key to work.', 'success');
+      } else {
+        updateStatus('Model saved successfully!', 'success');
+      }
       hideModelForm();
       loadModels();
     });

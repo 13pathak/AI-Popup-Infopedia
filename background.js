@@ -1695,7 +1695,11 @@ async function handleTestConnection(request, sendResponse) {
 
       let authMsg = "";
       if (response.status === 401 || response.status === 403) {
-        authMsg = `Authentication Failed (HTTP ${response.status}): Your API key is invalid, expired, or missing permissions for this model. (Provider response: ${errorDetail})`;
+        if (!apiKey || !apiKey.trim()) {
+          authMsg = `Authentication Failed (HTTP ${response.status}): This online provider requires an API key. Please enter your API key in the API Key field. (Provider response: ${errorDetail})`;
+        } else {
+          authMsg = `Authentication Failed (HTTP ${response.status}): Your API key is invalid, expired, or missing permissions for this model. (Provider response: ${errorDetail})`;
+        }
       } else if (response.status === 404) {
         authMsg = `Model or Endpoint Not Found (HTTP 404): The endpoint URL path or the model name "${modelName}" is not recognized by the provider. (Provider response: ${errorDetail})`;
       } else if (response.status === 429) {

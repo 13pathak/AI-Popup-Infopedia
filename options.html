@@ -1431,8 +1431,7 @@
                     <option value="openai">OpenAI</option>
                     <option value="ollama">Ollama (Local)</option>
                 </select>
-                <small>Optional. Pick a provider to auto-fill the endpoint URL and a suggested model name — you only need
-                    to paste your API key.</small>
+                <small>Select a provider to auto-fill the endpoint URL and model name.</small>
             </div>
             <div>
                 <label for="configName">Configuration Name (e.g., "Local Llama")</label>
@@ -1454,8 +1453,15 @@
                 <select id="ollama-model-select" style="display: none; margin-top: 5px;"></select>
             </div>
             <div>
-                <label for="apiKey">API Key (optional)</label>
-                <input type="password" id="apiKey">
+                <div style="display: flex; align-items: center; justify-content: space-between; max-width: 480px; margin-bottom: calc(var(--spacing-unit) / 2);">
+                    <label for="apiKey" style="margin-bottom: 0;">API Key</label>
+                    <span id="apiKey-status-badge" style="font-size: 0.78em; padding: 2px 8px; border-radius: 6px; font-weight: 500; background: rgba(148, 163, 184, 0.15); color: var(--text-muted);">Required for cloud · Optional for local</span>
+                </div>
+                <input type="password" id="apiKey" placeholder="Paste your API key (leave blank for local models)">
+                <small id="apiKey-hint" style="display: block; line-height: 1.45; margin-top: 5px;">Required for online AI services (Gemini, Groq, OpenAI, etc.). Leave blank <strong>only</strong> if running a local model on your computer (Ollama, LM Studio).</small>
+                <div id="apiKey-link-container" style="margin-top: 6px; font-size: 0.85em; display: none;">
+                    <a id="apiKey-provider-link" href="#" target="_blank" rel="noopener noreferrer" style="color: var(--primary-color); text-decoration: underline; font-weight: 500; display: inline-flex; align-items: center; gap: 4px;">Get an API key &rarr;</a>
+                </div>
             </div>
             <div style="display: flex; align-items: center; gap: 10px; margin-top: 10px; margin-bottom: 10px;">
                 <input type="checkbox" id="enableSearchGrounding" style="width: auto;">
