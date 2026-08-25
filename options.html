@@ -1408,14 +1408,16 @@
         </div>
         <p id="no-models-message" style="display: none; margin-top: 10px;">No models configured. Click '+' to add one.
         </p>
-        <div style="display: flex; align-items: flex-start; gap: 10px; margin-top: calc(var(--spacing-unit) * 2);">
-            <input type="checkbox" id="enable-model-fallback" style="margin-top: 4px;">
-            <label for="enable-model-fallback" style="margin-bottom: 0;">
-                <strong>Model fallback</strong><br>
-                <small>If the selected model fails (error or timeout), automatically retry the request with the
-                    next model in the list. Use the Reorder button to arrange the priority with drag &amp; drop.</small>
-            </label>
         </div>
+
+        <div id="model-fallback-container" class="settings-section">
+            <h3 class="section-title">Model Fallback</h3>
+            <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer;">
+                <input type="checkbox" id="enable-model-fallback" style="margin-top: 4px;">
+                <span><strong>Model fallback</strong><br>
+                    <small>If the selected model fails (error or timeout), automatically retry the request with the
+                        next model in the list. Use the Reorder button to arrange the priority with drag &amp; drop.</small></span>
+            </label>
         </div>
 
         <div id="model-form-container" style="display: none;">
@@ -1516,14 +1518,17 @@
             <label for="followup-custom-message">Custom Follow-up Message</label>
             <textarea id="followup-custom-message" rows="3" placeholder="e.g., restrict your reply within 500 characters"></textarea>
             <small style="display: block; margin-top: 5px;">This message will be automatically appended to every subsequent question you ask in the popup. For example, 'Provide a maximum 6-sentence response with each sentence not containing more than 10 words.'</small>
-            <div style="margin-top: 15px;">
-                <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
-                    <input type="checkbox" id="show-user-questions-checkbox">
-                    Show your own questions in the main popup
-                </label>
-            </div>
             <button id="save-followup-settings-btn" style="margin-top: 10px; background-color: var(--secondary-color);">Save Follow-up Settings</button>
             <div id="followup-status" style="margin-top: 10px; font-weight: bold; min-height: 1em;"></div>
+        </div>
+
+        <div id="user-questions-container" class="settings-section">
+            <h3 class="section-title">Show Questions in Popup</h3>
+            <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer;">
+                <input type="checkbox" id="show-user-questions-checkbox" style="margin-top: 4px;">
+                <span><strong>Show your own questions in the main popup</strong><br>
+                    <small>Display the follow-up questions you type in the popup chat history. When unchecked, only the AI's responses are displayed.</small></span>
+            </label>
         </div>
 
         <div id="status"></div>

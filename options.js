@@ -231,6 +231,13 @@ document.addEventListener('DOMContentLoaded', () => {
         : 'Implicit context disabled — only the selected text is sent.', 'success');
     });
   });
+  safeAddListener('show-user-questions-checkbox', 'change', (e) => {
+    chrome.storage.sync.set({ showUserQuestions: e.target.checked }, () => {
+      updateStatus(e.target.checked
+        ? 'Enabled: Your questions will be displayed in the popup chat history.'
+        : 'Disabled: Your questions will be hidden in the popup chat history.', 'success');
+    });
+  });
   safeAddListener('save-model-btn', 'click', saveModel);
   safeAddListener('provider-preset-select', 'change', applyProviderPreset);
   safeAddListener('endpoint', 'input', updateApiKeyGuidance);
