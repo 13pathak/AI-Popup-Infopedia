@@ -56,19 +56,89 @@ When the primary model grounds its response with live web search results, the Ha
 - **CSV Export & Import:** Export single lists or all history to CSV, and import with automatic list creation.
 - **Settings Backup:** Export/import all models and prompts as JSON.
 
-### 🎴 Flashcards (Spaced Repetition)
-Built-in flashcard system with spaced repetition for effective learning:
+### 🎴 Flashcards (FSRS Spaced Repetition)
+Built-in flashcard system powered by the state-of-the-art **FSRS-6 algorithm**:
+- **Personalized Scheduling**: Memory stability and card difficulty dynamically adjust after every review.
+- **Focused Review Mode**: Distraction-free, keyboard-driven studying (`1`=Again, `2`=Hard, `3`=Good, `4`=Easy, `Space`=Flip).
+- **1-Click Memory Optimizer**: Directly personalizes all 21 FSRS parameters to your learning speed inside the browser.
+- **List Filtering & Progress Tracking**: Practice all cards or filter by specific vocabulary decks with live retention analytics.
 
-| Rating | Effect | Next Review |
-|--------|--------|-------------|
-| **Again** | Forgot the word | 1 minute |
-| **Hard** | Struggled to recall | Interval × 0.8 |
-| **Good** | Normal recall | Interval × 1.5 |
-| **Easy** | Instant recall | Interval × 2.5 |
+---
 
-- Review all cards or filter by list.
-- Progress tracking during sessions.
-- Cards automatically scheduled based on your performance.
+## 🧠 FSRS Spaced Repetition System & 1-Click Optimizer
+
+AI Popup Infopedia replaces legacy heuristic algorithms (like SM-2) with a dependency-free, high-fidelity implementation of the **Free Spaced Repetition Scheduler (FSRS-6)**—the same modern cognitive memory model used by Anki.
+
+### 1. How the FSRS Memory Model Works
+
+Instead of guessing review intervals with rigid multipliers, FSRS tracks two core cognitive memory metrics for every word:
+
+* **Stability ($S$, in days):** The time required for your probability of recalling the word to drop to **90%** (target retention). A stability of $12$ means you have a 90% chance of remembering the word 12 days after your last review.
+* **Difficulty ($D$, scale 1–10):** The intrinsic cognitive hardness of the card. Difficult words ($D \to 10$) grow stability slowly; easy words ($D \to 1$) scale intervals exponentially.
+
+#### The Power-Law Forgetting Curve
+At any moment $t$ (days elapsed since last review), your recall probability (Retrievability, $R$) is calculated as:
+
+$$R(t, S) = \left(1 + \text{FACTOR} \cdot \frac{t}{S}\right)^{\text{DECAY}}$$
+
+Where $\text{DECAY} = -W_{20}$ and $\text{FACTOR} = \exp\left(\frac{\ln 0.9}{\text{DECAY}}\right) - 1$.
+
+```
+Probability of Recall (R)
+ 1.0 ┼──────────────────╮
+     │                  │
+ 0.9 ┼──────────────────┼─────────────── Target Retention (Due Date: t = S)
+     │                   ╲
+ 0.5 ┼                    ╲
+     │                     ╰────────────────────────
+ 0.0 ┴──────────┬───────────────────────────────► Elapsed Days (t)
+              t = S
+```
+
+### 2. Rating Buttons & Card Lifecycle
+
+Every review adjusts the card's state through structured learning phases:
+
+| Button | Rating | State Effect | Memory Update |
+| :--- | :---: | :--- | :--- |
+| **Again** | `1` | Enters **Relearning** (10m step) or resets step to 0 | Triggers lapse ($w_{11}–w_{14}$ recovery formula); increments lapse counter |
+| **Hard** | `2` | Intermediate step or scheduled review | Multiplies stability with hard penalty $w_{15}$ ($\le 1.0$) and raises card difficulty |
+| **Good** | `3` | Advances learning step or schedules normal review | Standard stability growth ($w_8–w_{10}$) and slight difficulty adjustment |
+| **Easy** | `4` | Immediately **graduates** to Review | Applies easy bonus multiplier $w_{16}$ ($\ge 1.0$) and lowers card difficulty |
+
+* **Learning Steps:** New cards progress through short intervals (`1m` $\to$ `10m`) before graduating into day-level review.
+* **Review Logging & Telemetry:** Every rating automatically appends a snapshot to the card's `reviewLog` (timestamp, rating, state before review, elapsed days, pre-review stability, difficulty, and millisecond response duration).
+
+---
+
+### 3. Native 1-Click In-Browser Optimizer
+
+The default FSRS model uses global baseline parameters fitted on millions of reviews across diverse learners. Once you accumulate **~1,000 reviews**, you can personalize the entire model to your unique brain physiology with a single click.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  FSRS Memory Model & 1-Click Optimizer            [ Personalized (Active) ] │
+│  428 multi-day recall points (1,120 total reviews)                          │
+│                                                                             │
+│  [ ✨ Optimize Memory Model ]   [ Reset to Defaults ]   [ View Parameters ]  │
+│                                                                             │
+│  📉 Error Reduction: 14.82%  •  📊 Log Loss: 0.3892 → 0.3315  •  ⏱ 490ms    │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+* **Zero-Setup Client-Side Machine Learning:** Runs entirely inside your browser via a dedicated Web Worker (`fsrs-optimizer.worker.js`). No Python, no CLI scripts, no Jupyter notebooks, and no external servers required.
+* **Adam Optimization Engine:** Uses a multi-epoch Adam gradient descent optimizer with central difference numerical gradients to fit all **21 FSRS-6 parameters ($W_0$–$W_{20}$)** against your personal review history.
+* **Loss Metrics:** Minimizes binary cross-entropy Log Loss and Root Mean Square Error (RMSE) against your actual recall outcomes.
+* **Safety Bounding & Parameter Projection:** Strict mathematical bounds prevent overfitting and guarantee monotonic stability ordering ($W_0 \le W_1 \le W_2 \le W_3$).
+* **Full Parameter Transparency:** A collapsible inspector lets you view all 21 active weights, their explanations, and copy them to your clipboard as JSON.
+
+---
+
+### 4. Backup, Export & Cross-Device Sync
+
+* **Automated JSON Backups:** Personalized weights (`customFsrsWeights` & metadata) are automatically backed up and restored alongside your decks and review logs.
+* **CSV Export & Import:** Exports carry the complete `reviewLog` JSON column so you can migrate or backup your exact learning history without loss.
+* **Privacy Toggle:** Unchecking *"Flashcard Review Progress"* in backup settings cleanly strips all review telemetry and custom weights for sharing sanitized decks.
 
 ### 🔗 Anki Integration
 - Connect to Anki via Anki Connect add-on.
@@ -126,7 +196,7 @@ Built-in flashcard system with spaced repetition for effective learning:
 - **PDF.js:** Integrated robust viewer for PDF compatibility.
 - **Shadow DOM:** Popup isolated from page styles.
 - **Chrome Storage API:** `sync` for settings, `local` for history.
-- **Spaced Repetition:** SM-2 inspired algorithm for flashcards.
+- **Spaced Repetition:** FSRS-6 engine with native Web Worker parameter optimizer.
 
 ---
 
