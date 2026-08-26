@@ -1868,13 +1868,13 @@
             <!-- Status and Stats Card -->
             <div style="background-color: var(--input-bg); border: 1px solid var(--border-color); border-radius: 10px; padding: 16px 20px; margin-bottom: 18px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 15px;">
                 <div>
-                    <div style="font-size: 0.85em; color: var(--text-muted); margin-bottom: 4px;">Review Data Logged</div>
+                    <div style="font-size: 0.85em; color: var(--text-muted); margin-bottom: 4px;">Personalized Training Data</div>
                     <div style="font-size: 1.25em; font-weight: 600; color: var(--text-color); display: flex; align-items: baseline; gap: 8px;">
                         <span id="fsrs-review-count">0</span>
-                        <span style="font-size: 0.7em; font-weight: normal; color: var(--text-muted);">reviews recorded</span>
+                        <span id="fsrs-review-count-label" style="font-size: 0.7em; font-weight: normal; color: var(--text-muted);">multi-day recall points</span>
                     </div>
                     <div id="fsrs-status-hint" style="font-size: 0.82em; color: var(--text-muted); margin-top: 4px;">
-                        1,000+ reviews recommended for optimal personalization.
+                        1,000+ multi-day reviews recommended for optimal personalization.
                     </div>
                 </div>
 
@@ -1929,7 +1929,7 @@
                     <!-- Dynamically populated parameter tiles -->
                 </div>
                 <div style="font-size: 0.8em; color: var(--text-muted); line-height: 1.5; border-top: 1px solid var(--border-color); padding-top: 10px;">
-                    💡 <strong>Parameter Guide:</strong> <em>Initial Stability ($W_0-W_3$)</em> sets memory length after the 1st review; <em>Difficulty ($W_4-W_7$)</em> scales card hardness; <em>Recall Growth ($W_8-W_{10}$)</em> multiplies intervals on successful recall; <em>Lapse ($W_{11}-W_{14}$)</em> sets recovery after pressing <em>Again</em>; <em>Rating Multipliers ($W_{15}-W_{16}$)</em> adjust for Hard/Easy; <em>Short-Term ($W_{17}-W_{19}$)</em> governs same-day retests; <em>Decay ($W_{20}$)</em> sets your memory forgetting curve rate.
+                    💡 <strong>Parameter Guide:</strong> <strong>Initial Stability</strong> (W0–W3) sets memory length after the 1st review; <strong>Difficulty</strong> (W4–W7) scales card hardness; <strong>Recall Growth</strong> (W8–W10) multiplies intervals on successful recall; <strong>Lapse &amp; Recovery</strong> (W11–W14) sets recovery after pressing <em>Again</em>; <strong>Rating Multipliers</strong> (W15–W16) adjust for Hard/Easy; <strong>Short-Term</strong> (W17–W19) governs same-day retests; <strong>Memory Decay</strong> (W20) sets your personal forgetting curve rate.
                 </div>
             </div>
         </div>

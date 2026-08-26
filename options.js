@@ -181,10 +181,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Also listen for changes so deep-linking and theme syncing work when options page is already open
+  // Also listen for changes so deep-linking, theme syncing, and memory model updates work when options page is already open
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area === 'sync' && changes.uiTheme) {
       loadThemeSetting();
+    }
+    if (area === 'sync' && (changes.customFsrsWeights || changes.customFsrsWeightsMeta)) {
+      loadMemoryModelSettings();
     }
     if (area === 'local' && changes.activeOptionsTab && changes.activeOptionsTab.newValue) {
       activateRequestedTab(changes.activeOptionsTab.newValue);
@@ -3128,7 +3131,8 @@ function restoreBackup() {
           'ttsSettings', 'ankiSettings', 'backupReminderFrequency', 'backupSubfolder',
           'backupInclude', 'followupCustomMessage', 'showUserQuestions',
           'sttEngine', 'sttApiKey', 'sttApiUrl', 'sttModel', 'sttCustomHeaders',
-          'sttCustomFormData', 'pdfViewerEnabled', 'uiTheme'
+          'sttCustomFormData', 'pdfViewerEnabled', 'uiTheme',
+          'customFsrsWeights', 'customFsrsWeightsMeta'
         ];
         const syncData = {};
         let syncCount = 0;
@@ -4355,30 +4359,49 @@ function loadMemoryModelSettings() {
       }
     }
 
-    // Tally review logs
+    // Tally review logs & multi-day prediction points
     chrome.storage.local.get(['history'], (localData) => {
       const history = localData.history || [];
       let totalLogs = 0;
       let eligibleCards = 0;
+      let predictionPoints = 0;
 
       history.forEach(item => {
-        if (Array.isArray(item.reviewLog) && item.reviewLog.length > 0) {
-          totalLogs += item.reviewLog.length;
-          if (item.reviewLog.length >= 2) eligibleCards++;
+        const logs = item && item.reviewLog;
+        if (Array.isArray(logs) && logs.length > 0) {
+          totalLogs += logs.length;
+          if (logs.length >= 2) {
+            eligibleCards++;
+            for (let i = 1; i < logs.length; i++) {
+              const entry = logs[i];
+              if (entry && entry.rating >= 1 && entry.rating <= 4 && (entry.elapsedDays || 0) > 0) {
+                predictionPoints++;
+              }
+            }
+          }
         }
       });
 
       const countEl = document.getElementById('fsrs-review-count');
-      if (countEl) countEl.textContent = totalLogs.toLocaleString();
+      if (countEl) countEl.textContent = predictionPoints.toLocaleString();
+
+      const labelEl = document.getElementById('fsrs-review-count-label');
+      if (labelEl) {
+        labelEl.textContent = totalLogs !== predictionPoints
+          ? `multi-day recall points (${totalLogs} total reviews)`
+          : `multi-day recall points`;
+      }
 
       const hintEl = document.getElementById('fsrs-status-hint');
       if (hintEl) {
-        if (totalLogs >= 1000) {
-          hintEl.innerHTML = `<span style="color: var(--secondary-color); font-weight: 500;">✨ Great! You have ${totalLogs.toLocaleString()} review records across ${eligibleCards.toLocaleString()} cards. Ready for high-confidence optimization!</span>`;
-        } else if (totalLogs >= 5) {
-          hintEl.textContent = `${totalLogs} review events logged across ${eligibleCards} cards. (1,000+ recommended for best personalization)`;
+        if (predictionPoints >= 1000) {
+          hintEl.innerHTML = `<span style="color: var(--secondary-color); font-weight: 500;">✨ Great! You have ${predictionPoints.toLocaleString()} multi-day recall points across ${eligibleCards.toLocaleString()} cards. Ready for high-confidence optimization!</span>`;
+        } else if (predictionPoints >= 5) {
+          hintEl.textContent = `${predictionPoints} multi-day recall points available across ${eligibleCards} cards (${totalLogs} total logs). 1,000+ recommended for best personalization.`;
+        } else if (totalLogs > 0) {
+          hintEl.textContent = `Need at least 5 reviews on separate days to train your model (${predictionPoints} available from ${totalLogs} total reviews; 1,000+ recommended).`;
         } else {
-          hintEl.textContent = `Need at least 5 review events with elapsed days to optimize (1,000+ recommended). Current: ${totalLogs}`;
+          hintEl.textContent = `No flashcard reviews logged yet. Review cards across multiple days to train your personal model (1,000+ recommended).`;
         }
       }
     });

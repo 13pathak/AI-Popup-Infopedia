@@ -41,16 +41,16 @@
     0.1542                           // 20: forgetting-curve decay
   ]);
 
-  // Standard FSRS parameter bounding ranges for validation & projection
+  // Standard FSRS parameter bounding ranges for validation & projection (matching reference ts-fsrs / fsrs-rs bounds)
   const WEIGHT_BOUNDS = Object.freeze([
-    [0.01, 100], [0.01, 100], [0.01, 100], [0.01, 100], // 0-3: S0(1-4)
-    [1.0, 10.0], [0.01, 5.0],                           // 4-5: D0(G), spread
-    [0.01, 10.0], [0.0, 1.0],                           // 6-7: deltaD, mean reversion
-    [0.01, 10.0], [0.01, 1.0], [0.01, 5.0],             // 8-10: recall S growth
-    [0.01, 10.0], [0.01, 1.0], [0.01, 1.0], [0.01, 1.0],// 11-14: lapse recovery S
-    [0.01, 1.0], [1.0, 10.0],                           // 15-16: hard penalty, easy bonus
-    [0.01, 5.0], [0.0, 5.0], [0.0, 1.0],                // 17-19: short-term S
-    [0.05, 0.50]                                        // 20: decay exponent
+    [0.01, 100.0], [0.01, 100.0], [0.01, 100.0], [0.01, 100.0], // 0-3: S0(1-4)
+    [1.0, 10.0], [0.01, 5.0],                                   // 4-5: D0(G), spread
+    [0.01, 5.0], [0.0, 1.0],                                    // 6-7: deltaD, mean reversion
+    [0.01, 4.0], [0.01, 0.8], [0.01, 3.5],                      // 8-10: recall S growth
+    [0.01, 5.0], [0.01, 0.5], [0.01, 1.0], [0.01, 4.0],        // 11-14: lapse recovery S (w14 default is 1.6483)
+    [0.01, 1.0], [1.0, 6.0],                                    // 15-16: hard penalty, easy bonus
+    [0.01, 3.0], [0.0, 2.0], [0.0, 1.0],                        // 17-19: short-term S
+    [0.05, 0.80]                                                // 20: decay exponent
   ]);
 
   const WEIGHT_DESCRIPTIONS = Object.freeze([

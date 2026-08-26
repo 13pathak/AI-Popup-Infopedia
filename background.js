@@ -1157,6 +1157,12 @@ function triggerBackup(type = "Auto", customBackupInclude = null) {
         if (syncData.backupSubfolder !== undefined) backupData.backupSubfolder = syncData.backupSubfolder;
       }
 
+      // 9. Personalized FSRS Memory Model (governed by the review-progress toggle)
+      if (backupInclude.review) {
+        if (syncData.customFsrsWeights !== undefined) backupData.customFsrsWeights = syncData.customFsrsWeights;
+        if (syncData.customFsrsWeightsMeta !== undefined) backupData.customFsrsWeightsMeta = syncData.customFsrsWeightsMeta;
+      }
+
       // 2. Create Data URI (Base64) - Service Worker safe
       const jsonString = JSON.stringify(backupData, null, 2);
       // Encode properly to handle Unicode characters without the deprecated `unescape`.
