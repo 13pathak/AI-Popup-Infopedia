@@ -667,11 +667,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   // --- Clip: save the raw selection to history without an AI call ---
-  // Clips land in the last-used list — the same list the last explicit save
-  // chose — so saving one never re-points where future saves go (the id
-  // written back is the one just read). Duplicate clips (same full text,
-  // same list) are skipped, the same composite-key idea the CSV importer
-  // uses, minus the timestamp component since every clip gets a fresh one.
+  // --- Case 2.4: Fast clip save ---
+  // Clips land in a dedicated "Clips" list (created automatically if it doesn't
+  // exist yet). Saving a clip never mutates lastUsedListId, so the user's active
+  // study list remains preselected when doing normal lookups. Duplicate clips
+  // (same full text, same clips list) are skipped.
   if (request.type === "saveClip") {
     const clipText = typeof request.text === 'string' ? request.text.trim() : '';
     if (!clipText) {
@@ -679,9 +679,25 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return;
     }
 
-    chrome.storage.local.get(['history', 'lastUsedListId'], (result) => {
+    chrome.storage.local.get(['history', 'wordLists'], (result) => {
+      if (chrome.runtime.lastError) {
+        sendResponse({ status: 'error', error: chrome.runtime.lastError.message });
+        return;
+      }
+
       const history = result.history || [];
-      const listId = result.lastUsedListId || null;
+      let wordLists = result.wordLists || [];
+
+      // Find existing "Clips" list (case-insensitive) or create one
+      let clipsList = wordLists.find(l => l.name && l.name.trim().toLowerCase() === 'clips');
+      let listsUpdated = false;
+      if (!clipsList) {
+        clipsList = { id: `list_${Date.now()}`, name: 'Clips' };
+        wordLists.push(clipsList);
+        listsUpdated = true;
+      }
+
+      const listId = clipsList.id;
 
       const isDuplicate = history.some(item =>
         item.modelName === 'clip' &&
@@ -704,13 +720,27 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
       }
 
-      saveToHistory(clipText, '', listId, 'clip', 'Clip', request.sourceUrl, request.sourceTitle, [], (err) => {
-        if (err) {
-          sendResponse({ status: 'error', error: err.message });
-        } else {
-          sendResponse({ status: 'saved' });
-        }
-      }, cleanContext);
+      const performSave = () => {
+        saveToHistory(clipText, '', listId, 'clip', 'Clip', request.sourceUrl, request.sourceTitle, [], (err) => {
+          if (err) {
+            sendResponse({ status: 'error', error: err.message });
+          } else {
+            sendResponse({ status: 'saved' });
+          }
+        }, cleanContext, false);
+      };
+
+      if (listsUpdated) {
+        chrome.storage.local.set({ wordLists: wordLists }, () => {
+          if (chrome.runtime.lastError) {
+            sendResponse({ status: 'error', error: chrome.runtime.lastError.message });
+            return;
+          }
+          performSave();
+        });
+      } else {
+        performSave();
+      }
     });
     return true;
   }
@@ -874,8 +904,8 @@ function generateHistoryItemId() {
   return 'h_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
 }
 
-// --- UPDATED to accept source URL, title, and optional context ---
-function saveToHistory(word, definition, listId, modelName, promptName, sourceUrl, sourceTitle, citations, callback, context = null) {
+// --- UPDATED to accept source URL, title, optional context, and updateLastUsed flag ---
+function saveToHistory(word, definition, listId, modelName, promptName, sourceUrl, sourceTitle, citations, callback, context = null, updateLastUsed = true) {
   historySavePromise = historySavePromise.then(() => {
     return new Promise((resolve) => {
       chrome.storage.local.get(['history'], (result) => {
@@ -910,8 +940,12 @@ function saveToHistory(word, definition, listId, modelName, promptName, sourceUr
         // Add new item to the beginning of the array
         history.unshift(newItem);
 
-        // --- NEW: Save back history AND the lastUsedListId ---
-        chrome.storage.local.set({ history: history, lastUsedListId: listId }, () => {
+        const storageUpdates = { history: history };
+        if (updateLastUsed) {
+          storageUpdates.lastUsedListId = listId;
+        }
+
+        chrome.storage.local.set(storageUpdates, () => {
           if (chrome.runtime.lastError) {
             console.error("Failed to save history to storage:", chrome.runtime.lastError);
             if (callback) {
