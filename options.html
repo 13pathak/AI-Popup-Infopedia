@@ -1258,6 +1258,156 @@
             }
         }
 
+        /* --- FOCUSED REVIEW MODE --- */
+        /* Full-screen distraction-free overlay. The live card and rating
+           controls are re-parented into its stage at runtime (see
+           enterFocusMode in options.js), so IDs and listeners stay unique.
+           The stage carries the same perspective the classic container
+           gives the flip card. */
+        #focus-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 20000;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            background-color: var(--bg-color);
+            animation: focus-overlay-in 160ms ease-out;
+        }
+
+        #focus-overlay.focus-active { display: flex; }
+
+        @keyframes focus-overlay-in {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        #focus-progress-track {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: var(--border-color);
+        }
+
+        #focus-progress-fill {
+            height: 100%;
+            width: 0%;
+            background: var(--primary-color);
+            transition: width 0.2s ease;
+        }
+
+        #focus-exit-btn,
+        #focus-delete-btn {
+            background: transparent;
+            border: 1px solid var(--border-color);
+            color: var(--text-muted);
+            border-radius: 8px;
+            padding: 6px 12px;
+            font-size: 0.85em;
+        }
+
+        #focus-topbar {
+            position: absolute;
+            top: 14px;
+            right: 16px;
+            display: flex;
+            gap: 8px;
+        }
+
+        #focus-exit-btn:hover { color: var(--text-color); border-color: var(--text-muted); }
+        #focus-delete-btn:hover { color: var(--danger-color); border-color: var(--danger-color); }
+
+        #focus-stage {
+            flex: 1;
+            width: 100%;
+            max-width: 680px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            gap: 4px;
+            perspective: 1400px; /* flip-card depth, as on #flashcard-container */
+        }
+
+        #focus-stage #flashcard-card { width: 100%; }
+
+        /* Keyboard hints appear only while focused; they're pure CSS so the
+           re-parented buttons themselves stay untouched. */
+        body.focus-lock #show-answer-btn::after,
+        body.focus-lock .rating-btn::after,
+        body.focus-lock #focus-delete-btn::after {
+            margin-left: 8px;
+            font-size: 0.75em;
+            font-family: monospace;
+            padding: 1px 6px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            opacity: 0.75;
+        }
+
+        body.focus-lock #show-answer-btn::after { content: "Space"; }
+        body.focus-lock .rating-btn[data-rating="1"]::after { content: "1"; }
+        body.focus-lock .rating-btn[data-rating="2"]::after { content: "2"; }
+        body.focus-lock .rating-btn[data-rating="3"]::after { content: "3"; }
+        body.focus-lock .rating-btn[data-rating="4"]::after { content: "4"; }
+        body.focus-lock #focus-delete-btn::after { content: "Del"; }
+
+        /* Pressed-button feel: native mouse presses (:active) and hotkey
+           activations (.kb-pressed, added briefly by the keyboard handler)
+           share the same tactile dip. */
+        .rating-btn,
+        #show-answer-btn,
+        #focus-exit-btn,
+        #focus-delete-btn {
+            transition: transform 90ms ease, filter 90ms ease;
+        }
+
+        .rating-btn:active, .rating-btn.kb-pressed,
+        #show-answer-btn:active, #show-answer-btn.kb-pressed,
+        #focus-exit-btn:active, #focus-exit-btn.kb-pressed,
+        #focus-delete-btn:active, #focus-delete-btn.kb-pressed {
+            transform: scale(0.95);
+            filter: brightness(1.15);
+        }
+
+        /* Session-complete view swaps the card controls for the summary.
+           !important is required: the review flow toggles these elements
+           via inline styles, which would otherwise win over this state. */
+        #focus-stage.focus-complete #flashcard-card,
+        #focus-stage.focus-complete #show-answer-btn,
+        #focus-stage.focus-complete #rating-buttons { display: none !important; }
+
+        #focus-summary {
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            gap: 12px;
+            text-align: center;
+        }
+
+        #focus-summary.focus-visible { display: flex; }
+
+        .focus-stat-row {
+            display: flex;
+            gap: 18px;
+            flex-wrap: wrap;
+            justify-content: center;
+            color: var(--text-muted);
+            font-size: 0.95em;
+        }
+
+        .focus-stat-row strong { color: var(--text-color); }
+
+        body.focus-lock { overflow: hidden; }
+
+        @media (prefers-reduced-motion: reduce) {
+            #focus-overlay { animation: none; }
+            #focus-progress-fill { transition: none; }
+        }
+
     </style>
 </head>
 
@@ -1787,6 +1937,9 @@
                 <option value="all">All Lists</option>
             </select>
             <button id="start-review-btn" style="background-color: var(--secondary-color);">Start Review</button>
+            <label class="checkbox-label" for="focus-mode-toggle" title="Open review sessions in the distraction-free full-screen mode" style="gap: 6px; flex-shrink: 0;">
+                <input type="checkbox" id="focus-mode-toggle" checked> Focused
+            </label>
         </div>
 
         <div id="flashcard-stats"
@@ -2364,6 +2517,28 @@
             <div class="modal-actions" style="margin-top: 20px; display: flex; gap: 10px; justify-content: flex-end;">
                 <button id="reorder-models-cancel-btn" style="background-color: #555;">Cancel</button>
                 <button id="reorder-models-save-btn" style="background-color: var(--secondary-color);">Save Order</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- --- FOCUSED REVIEW MODE OVERLAY --- -->
+    <!-- Card + answer/rating controls are re-parented into the stage at
+         runtime; see enterFocusMode() in options.js. -->
+    <div id="focus-overlay" role="dialog" aria-modal="true" aria-label="Focused review session">
+        <div id="focus-progress-track"><div id="focus-progress-fill"></div></div>
+        <div id="focus-topbar">
+            <button id="focus-delete-btn" type="button" title="Delete this flashcard (Delete)">🗑 Delete</button>
+            <button id="focus-exit-btn" type="button" title="Exit focused review (Esc)">✕ Exit</button>
+        </div>
+        <div id="focus-stage">
+            <!-- #flashcard-card, #show-answer-btn, #rating-buttons move here -->
+            <div id="focus-summary">
+                <h3 style="color: var(--secondary-color); margin: 0;">Session complete</h3>
+                <div class="focus-stat-row" id="focus-summary-stats"></div>
+                <div style="display: flex; gap: 10px; margin-top: 8px;">
+                    <button id="focus-review-again-btn" type="button" style="background-color: var(--primary-color);">Review Again</button>
+                    <button id="focus-exit-summary-btn" type="button" style="background-color: var(--button-bg);">Exit Focused Mode</button>
+                </div>
             </div>
         </div>
     </div>

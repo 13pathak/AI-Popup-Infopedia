@@ -389,6 +389,7 @@ document.addEventListener('DOMContentLoaded', () => {
     btn.addEventListener('click', (e) => rateFlashcard(parseInt(e.target.dataset.rating)));
   });
   initMemoryModelSection();
+  initFocusMode();
 
   // --- NEW: PDF File Access Check ---
   // MV3 removed chrome.extension (and with it isAllowedFileSchemeAccess),
@@ -1997,7 +1998,7 @@ function handleDeleteClick(event) {
 }
 
 // --- deleteHistoryItem ---
-function deleteHistoryItem(itemKey) {
+function deleteHistoryItem(itemKey, onDone) {
   // Rebuilding the list replaces its contents and would otherwise reset this
   // scrollable element to the top.
   const historyList = document.getElementById('history-list');
@@ -2012,6 +2013,7 @@ function deleteHistoryItem(itemKey) {
     const newHistory = history.filter(item => histId(item) !== itemKey);
     chrome.storage.local.set({ history: newHistory }, () => {
       applyFilters(scrollTop);
+      if (onDone) onDone();
     });
   });
 }
@@ -4120,11 +4122,17 @@ function startFlashcardReview() {
       document.getElementById('flashcard-container').style.display = 'none';
       document.getElementById('review-complete').style.display = 'none';
       document.getElementById('no-cards-message').style.display = 'block';
+      // Nothing left to review: close the overlay rather than leave the
+      // completion summary frozen over the classic empty state.
+      if (focusModeActive) exitFocusMode();
     } else {
       document.getElementById('flashcard-container').style.display = 'block';
       document.getElementById('review-complete').style.display = 'none';
       document.getElementById('no-cards-message').style.display = 'none';
       showCurrentCard();
+      // Auto-enter the distraction-free overlay when the preference is on.
+      const focusToggle = document.getElementById('focus-mode-toggle');
+      if (focusToggle && focusToggle.checked) enterFocusMode();
     }
   });
 }
@@ -4138,14 +4146,27 @@ function formatFlashcardDefinition(card) {
 }
 
 function showCurrentCard() {
+  focusRatingLock = false;
+  // Deletion is offered per card, never on the summary screen.
+  document.getElementById('focus-delete-btn').style.display = '';
+
   if (currentCardIndex >= flashcardQueue.length) {
     // Review complete. Also reset the flip so a session ending mid-flip
     // can't carry a stale .flipped into the next one.
     document.getElementById('flashcard-card').classList.remove('flipped');
     document.getElementById('flashcard-container').style.display = 'none';
     document.getElementById('review-complete').style.display = 'block';
+    updateFocusProgress(); // completion means 100%
+    if (focusModeActive) showFocusSummary();
     return;
   }
+
+  // Shown-at timestamp feeds the per-card duration recorded in reviewLog.
+  focusCardShownAt = Date.now();
+
+  // A fresh card clears any focused-mode summary from a previous run.
+  document.getElementById('focus-stage').classList.remove('focus-complete');
+  document.getElementById('focus-summary').classList.remove('focus-visible');
 
   const card = flashcardQueue[currentCardIndex];
 
@@ -4164,6 +4185,8 @@ function showCurrentCard() {
   document.getElementById('flashcard-card').classList.remove('flipped');
   document.getElementById('show-answer-btn').style.display = 'inline-block';
   document.getElementById('rating-buttons').style.display = 'none';
+
+  updateFocusProgress();
 }
 
 function showFlashcardAnswer() {
@@ -4179,6 +4202,13 @@ function rateFlashcard(rating) {
   // FSRS computes the next memory state and due date from the card's full
   // review history (stability, difficulty, time since last review).
   const patch = FSRS.rate(card, rating, now);
+
+  // Silent per-card duration data (how long this card was on screen before
+  // the rating). Anki's revlog carries the same field; the optimizer can
+  // use it later without any UI cost now.
+  const lastLog = patch.reviewLog[patch.reviewLog.length - 1];
+  if (lastLog && focusCardShownAt) lastLog.ms = Math.max(0, now - focusCardShownAt);
+  focusRatingCounts[rating] = (focusRatingCounts[rating] || 0) + 1;
 
   // Update the card in storage
   chrome.storage.local.get(['history'], (result) => {
@@ -4214,6 +4244,218 @@ function rateFlashcard(rating) {
       showCurrentCard();
     });
   });
+}
+
+// --- FOCUSED REVIEW MODE ---
+// Full-screen, keyboard-driven review: card + answer/rating controls only.
+// The live DOM nodes (#flashcard-card, #show-answer-btn, #rating-buttons)
+// are re-parented into the overlay's stage rather than duplicated, so IDs,
+// listeners and the flip animation all keep working unmodified.
+
+let focusModeActive = false;
+let focusCardShownAt = 0;
+let focusSessionStart = 0;
+let focusRatingCounts = { 1: 0, 2: 0, 3: 0, 4: 0 };
+// Blocks hotkey ratings until the next card renders, so a double keypress
+// can never rate the same card twice.
+let focusRatingLock = false;
+
+// Brief pressed-state flash so hotkey activations look like real button
+// presses (mouse presses get the same look via :active in CSS).
+function flashPressedButton(btn) {
+  if (!btn) return;
+  btn.classList.add('kb-pressed');
+  setTimeout(() => btn.classList.remove('kb-pressed'), 140);
+}
+
+function enterFocusMode() {
+  // Session stats reset on every (re)start — including "Review Again" while
+  // the overlay is already active.
+  focusSessionStart = Date.now();
+  focusRatingCounts = { 1: 0, 2: 0, 3: 0, 4: 0 };
+  if (focusModeActive) return;
+
+  const overlay = document.getElementById('focus-overlay');
+  const stage = document.getElementById('focus-stage');
+  if (!overlay || !stage) return;
+
+  const summary = document.getElementById('focus-summary');
+  stage.insertBefore(document.getElementById('flashcard-card'), summary);
+  stage.insertBefore(document.getElementById('show-answer-btn'), summary);
+  stage.insertBefore(document.getElementById('rating-buttons'), summary);
+
+  focusModeActive = true;
+  document.body.classList.add('focus-lock');
+  overlay.classList.add('focus-active');
+
+  document.addEventListener('keydown', focusKeydownHandler);
+
+  // Focus lands on the card itself (not a button) so Enter/Space can never
+  // trigger a native button activation alongside the keyboard handler.
+  const cardEl = document.getElementById('flashcard-card');
+  cardEl.setAttribute('tabindex', '-1');
+  cardEl.focus();
+
+  updateFocusProgress();
+}
+
+function exitFocusMode() {
+  if (!focusModeActive) return;
+  focusModeActive = false;
+  focusRatingLock = false; // cancels any hotkey rating still in its delay
+  document.removeEventListener('keydown', focusKeydownHandler);
+  document.getElementById('focus-overlay').classList.remove('focus-active');
+  document.body.classList.remove('focus-lock');
+
+  // Return the controls to the classic review container. Its only other
+  // child is the progress line, so appending restores the original order.
+  const container = document.getElementById('flashcard-container');
+  container.appendChild(document.getElementById('flashcard-card'));
+  container.appendChild(document.getElementById('show-answer-btn'));
+  container.appendChild(document.getElementById('rating-buttons'));
+
+  // Exiting mid-session loses nothing (every rating is already persisted),
+  // so there is deliberately no confirmation prompt.
+  document.getElementById('start-review-btn').focus();
+}
+
+// Keyboard: Space/Enter reveals, 1-4 rate (only after reveal), Esc exits.
+// preventDefault keeps activation fully with this handler — a focused button
+// must not also respond natively to Space/Enter.
+function focusKeydownHandler(e) {
+  if (e.ctrlKey || e.altKey || e.metaKey) return;
+
+  const answerVisible = document.getElementById('rating-buttons').style.display !== 'none';
+
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    exitFocusMode();
+    return;
+  }
+  if (e.key === 'Delete') {
+    e.preventDefault();
+    if (currentCardIndex < flashcardQueue.length) deleteCurrentFocusCard();
+    return;
+  }
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    trapFocusInOverlay(e.shiftKey);
+    return;
+  }
+  if (e.key === ' ' || e.key === 'Enter') {
+    e.preventDefault();
+    if (!answerVisible) showFlashcardAnswer();
+    return;
+  }
+  if (e.key >= '1' && e.key <= '4' && answerVisible) {
+    e.preventDefault();
+    if (focusRatingLock) return;
+    focusRatingLock = true;
+    flashPressedButton(document.querySelector(`.rating-btn[data-rating="${e.key}"]`));
+    // A beat lets the pressed-state register before the next card replaces
+    // the panel. Esc during the gap cancels the rating.
+    setTimeout(() => {
+      if (focusModeActive) rateFlashcard(parseInt(e.key, 10));
+    }, 90);
+  }
+}
+
+// Deletes the card on screen. Every occurrence leaves the queue — an
+// Again-requeued copy of the same card must not resurface later.
+function deleteCurrentFocusCard() {
+  if (currentCardIndex >= flashcardQueue.length) return;
+  const card = flashcardQueue[currentCardIndex];
+  if (!confirm(`Delete "${card.word}" permanently? This cannot be undone.`)) return;
+
+  const key = histId(card);
+  flashcardQueue = flashcardQueue.filter(c => histId(c) !== key);
+  document.getElementById('total-cards-num').textContent = flashcardQueue.length;
+  // The index stays put: the next card shifts into the deleted slot.
+  showCurrentCard();
+  deleteHistoryItem(key);
+}
+
+// Keep Tab cycling inside the dialog. Candidates are enumerated from the
+// states the review flow actually toggles, rather than layout queries, so
+// this stays testable outside a rendered browser.
+function focusOverlayFocusables() {
+  const els = [];
+  const push = (el) => { if (el && el.style.display !== 'none') els.push(el); };
+  push(document.getElementById('focus-delete-btn'));
+  push(document.getElementById('focus-exit-btn'));
+  if (!document.getElementById('focus-stage').classList.contains('focus-complete')) {
+    push(document.getElementById('show-answer-btn'));
+    if (document.getElementById('rating-buttons').style.display !== 'none') {
+      document.querySelectorAll('#rating-buttons .rating-btn').forEach(b => push(b));
+    }
+  }
+  if (document.getElementById('focus-summary').classList.contains('focus-visible')) {
+    push(document.getElementById('focus-review-again-btn'));
+    push(document.getElementById('focus-exit-summary-btn'));
+  }
+  return els;
+}
+
+function trapFocusInOverlay(backwards) {
+  const focusables = focusOverlayFocusables();
+  if (focusables.length === 0) return;
+  let idx = focusables.indexOf(document.activeElement);
+  if (idx === -1) idx = 0;
+  idx = (idx + (backwards ? -1 : 1) + focusables.length) % focusables.length;
+  focusables[idx].focus();
+}
+
+function updateFocusProgress() {
+  if (!focusModeActive) return;
+  const fill = document.getElementById('focus-progress-fill');
+  if (!fill) return;
+  const total = Math.max(flashcardQueue.length, 1);
+  const done = Math.min(currentCardIndex, total);
+  fill.style.width = `${Math.round((done / total) * 100)}%`;
+}
+
+// Session-end summary shown inside the overlay: closure for the run without
+// dumping the user straight back into the settings page.
+function showFocusSummary() {
+  // No card on screen, nothing to delete.
+  document.getElementById('focus-delete-btn').style.display = 'none';
+  const seconds = Math.max(1, Math.round((Date.now() - focusSessionStart) / 1000));
+  const mins = Math.floor(seconds / 60);
+  const rem = seconds % 60;
+  const counts = focusRatingCounts;
+  document.getElementById('focus-summary-stats').innerHTML = `
+    <span><strong>${cardsReviewedCount}</strong> reviewed</span>
+    <span><strong>${counts[1]}</strong> again</span>
+    <span><strong>${counts[2]}</strong> hard</span>
+    <span><strong>${counts[3]}</strong> good</span>
+    <span><strong>${counts[4]}</strong> easy</span>
+    <span><strong>${mins}m ${rem}s</strong></span>
+  `;
+  document.getElementById('focus-stage').classList.add('focus-complete');
+  document.getElementById('focus-summary').classList.add('focus-visible');
+  document.getElementById('focus-review-again-btn').focus();
+}
+
+function initFocusMode() {
+  const toggle = document.getElementById('focus-mode-toggle');
+  if (toggle) {
+    chrome.storage.sync.get({ focusReviewDefault: true }, (data) => {
+      toggle.checked = data.focusReviewDefault !== false;
+    });
+    toggle.addEventListener('change', () => {
+      chrome.storage.sync.set({ focusReviewDefault: toggle.checked });
+    });
+  }
+  // Self-contained binding: safeAddListener lives inside the DOMContentLoaded
+  // closure and is not visible from this top-level function.
+  const bind = (id, handler) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('click', handler);
+  };
+  bind('focus-exit-btn', exitFocusMode);
+  bind('focus-exit-summary-btn', exitFocusMode);
+  bind('focus-review-again-btn', startFlashcardReview);
+  bind('focus-delete-btn', deleteCurrentFocusCard);
 }
 
 // Load flashcard lists when tab is clicked (handled by tab switching)
