@@ -1078,7 +1078,7 @@ function triggerBackup(type = "Auto", customBackupInclude = null) {
           if (backupInclude.review) return item;
           const {
             nextReview, interval, lastReviewed, stability, difficulty,
-            reps, lapses, learningSteps, state, ...rest
+            reps, lapses, learningSteps, state, reviewLog, ...rest
           } = item;
           return rest;
         };

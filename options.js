@@ -82,6 +82,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (tab.dataset.tab === "flashcards-content") {
         loadFlashcardLists();
         loadStats(); // Load stats dashboard
+        loadMemoryModelSettings();
       }
 
       // --- NEW: Load Reminder settings when tab is clicked ---
@@ -384,6 +385,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('.rating-btn').forEach(btn => {
     btn.addEventListener('click', (e) => rateFlashcard(parseInt(e.target.dataset.rating)));
   });
+  initMemoryModelSection();
 
   // --- NEW: PDF File Access Check ---
   // MV3 removed chrome.extension (and with it isAllowedFileSchemeAccess),
@@ -2125,7 +2127,7 @@ function escapeCSV(str) {
 // carry the full FSRS memory state so a restored file resumes scheduling
 // exactly where it left off instead of falling back to migration defaults.
 const HISTORY_CSV_BASE_HEADERS = ['timestamp', 'word', 'definition', 'listName', 'modelName', 'promptName', 'sourceUrl', 'sourceTitle', 'favorite'];
-const HISTORY_CSV_REVIEW_HEADERS = ['nextReview', 'interval', 'lastReviewed', 'stability', 'difficulty', 'reps', 'lapses', 'learningSteps', 'state'];
+const HISTORY_CSV_REVIEW_HEADERS = ['nextReview', 'interval', 'lastReviewed', 'stability', 'difficulty', 'reps', 'lapses', 'learningSteps', 'state', 'reviewLog'];
 
 function buildHistoryCsvString(historyItems, listIdToNameMap, includeReview) {
   const headers = includeReview
@@ -2156,7 +2158,10 @@ function buildHistoryCsvString(historyItems, listIdToNameMap, includeReview) {
           escapeCSV(item.reps || ''),
           escapeCSV(item.lapses || ''),
           escapeCSV(item.learningSteps || ''),
-          escapeCSV(item.state || '')
+          escapeCSV(item.state || ''),
+          // Full rating history as compact JSON — the reviewLog holds one
+          // record per past rating for future FSRS parameter optimization.
+          escapeCSV(item.reviewLog ? JSON.stringify(item.reviewLog) : '')
         );
       }
       return cells.join(',');
@@ -2370,6 +2375,7 @@ function importHistory(event) {
     const lapsesIndex = headers.indexOf('lapses');
     const learningStepsIndex = headers.indexOf('learningSteps');
     const stateIndex = headers.indexOf('state');
+    const reviewLogIndex = headers.indexOf('reviewLog');
 
     if (tsIndex === -1 || wordIndex === -1 || defIndex === -1) {
       updateIOStatus("File is missing required headers: timestamp, word, or definition.", "error");
@@ -2430,6 +2436,17 @@ function importHistory(event) {
           newItem.lapses = parseInt(fields[lapsesIndex]) || 0;
           newItem.learningSteps = parseInt(fields[learningStepsIndex]) || 0;
           newItem.state = fields[stateIndex];
+        }
+        // Rating history (compact JSON). Malformed JSON keeps the item but
+        // drops the log — the scheduler doesn't depend on it, only future
+        // parameter optimization does.
+        if (reviewLogIndex !== -1 && fields[reviewLogIndex]) {
+          try {
+            const log = JSON.parse(fields[reviewLogIndex]);
+            if (Array.isArray(log)) newItem.reviewLog = log;
+          } catch (e) {
+            console.warn('Skipping malformed reviewLog on CSV row:', e.message);
+          }
         }
 
         newItems.push(newItem);
@@ -4303,6 +4320,296 @@ function loadStats() {
       heatmapGrid.appendChild(cell);
     }
   });
+}
+
+// --- FSRS MEMORY MODEL & 1-CLICK OPTIMIZER ---
+
+function loadMemoryModelSettings() {
+  chrome.storage.sync.get(['customFsrsWeights', 'customFsrsWeightsMeta'], (syncData) => {
+    if (syncData.customFsrsWeights) {
+      FSRS.setWeights(syncData.customFsrsWeights);
+    } else {
+      FSRS.setWeights(null);
+    }
+
+    const isCustom = FSRS.isCustomWeightsActive();
+    const badge = document.getElementById('fsrs-model-badge');
+    const badgeText = document.getElementById('fsrs-model-badge-text');
+    const resetBtn = document.getElementById('fsrs-reset-btn');
+
+    if (badge && badgeText) {
+      if (isCustom) {
+        const meta = syncData.customFsrsWeightsMeta;
+        const dateStr = meta && meta.timestamp ? new Date(meta.timestamp).toLocaleDateString() : 'Active';
+        badgeText.textContent = `Personalized (Optimized: ${dateStr})`;
+        badge.style.background = 'rgba(5, 150, 105, 0.12)';
+        badge.style.color = 'var(--secondary-color)';
+        badge.style.borderColor = 'rgba(5, 150, 105, 0.3)';
+        if (resetBtn) resetBtn.style.display = 'inline-block';
+      } else {
+        badgeText.textContent = 'Default (Global Baseline)';
+        badge.style.background = 'rgba(37, 99, 235, 0.1)';
+        badge.style.color = 'var(--primary-color)';
+        badge.style.borderColor = 'rgba(37, 99, 235, 0.25)';
+        if (resetBtn) resetBtn.style.display = 'none';
+      }
+    }
+
+    // Tally review logs
+    chrome.storage.local.get(['history'], (localData) => {
+      const history = localData.history || [];
+      let totalLogs = 0;
+      let eligibleCards = 0;
+
+      history.forEach(item => {
+        if (Array.isArray(item.reviewLog) && item.reviewLog.length > 0) {
+          totalLogs += item.reviewLog.length;
+          if (item.reviewLog.length >= 2) eligibleCards++;
+        }
+      });
+
+      const countEl = document.getElementById('fsrs-review-count');
+      if (countEl) countEl.textContent = totalLogs.toLocaleString();
+
+      const hintEl = document.getElementById('fsrs-status-hint');
+      if (hintEl) {
+        if (totalLogs >= 1000) {
+          hintEl.innerHTML = `<span style="color: var(--secondary-color); font-weight: 500;">✨ Great! You have ${totalLogs.toLocaleString()} review records across ${eligibleCards.toLocaleString()} cards. Ready for high-confidence optimization!</span>`;
+        } else if (totalLogs >= 5) {
+          hintEl.textContent = `${totalLogs} review events logged across ${eligibleCards} cards. (1,000+ recommended for best personalization)`;
+        } else {
+          hintEl.textContent = `Need at least 5 review events with elapsed days to optimize (1,000+ recommended). Current: ${totalLogs}`;
+        }
+      }
+    });
+
+    renderFsrsParameters();
+  });
+}
+
+function renderFsrsParameters() {
+  const grid = document.getElementById('fsrs-params-grid');
+  if (!grid) return;
+
+  const weights = FSRS.getWeights();
+  const defWeights = FSRS.getDefaultWeights();
+  const descs = FSRS.WEIGHT_DESCRIPTIONS || [];
+
+  grid.innerHTML = '';
+
+  descs.forEach((d, idx) => {
+    const val = weights[idx];
+    const defVal = defWeights[idx];
+    const isDiff = Math.abs(val - defVal) > 1e-4;
+
+    const tile = document.createElement('div');
+    tile.style.backgroundColor = 'var(--card-bg)';
+    tile.style.border = isDiff ? '1px solid var(--secondary-color)' : '1px solid var(--border-color)';
+    tile.style.borderRadius = '8px';
+    tile.style.padding = '10px 14px';
+    tile.style.display = 'flex';
+    tile.style.flexDirection = 'column';
+    tile.style.gap = '4px';
+
+    tile.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: baseline;">
+        <span style="font-size: 0.82em; font-weight: 600; color: var(--primary-color);">W[${idx}] • ${escapeHTML(d.key.toUpperCase())}</span>
+        <span style="font-size: 0.72em; padding: 2px 6px; border-radius: 4px; background: var(--button-bg); color: var(--text-muted);">${escapeHTML(d.group)}</span>
+      </div>
+      <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 2px;">
+        <span style="font-size: 0.88em; font-weight: 500; color: var(--text-color);">${escapeHTML(d.name)}</span>
+        <span style="font-size: 1em; font-family: monospace; font-weight: 600; color: ${isDiff ? 'var(--secondary-color)' : 'var(--text-color)'};">${val.toFixed(4)}</span>
+      </div>
+      <div style="font-size: 0.76em; color: var(--text-muted); line-height: 1.35; margin-top: 2px;">
+        ${escapeHTML(d.desc)}
+      </div>
+    `;
+
+    grid.appendChild(tile);
+  });
+}
+
+function handleOptimizeMemoryModel() {
+  const optBtn = document.getElementById('fsrs-optimize-btn');
+  const optBtnText = document.getElementById('fsrs-optimize-btn-text');
+  const progressBanner = document.getElementById('fsrs-progress-banner');
+  const progressBar = document.getElementById('fsrs-progress-bar');
+  const progressPct = document.getElementById('fsrs-progress-pct');
+  const progressLabel = document.getElementById('fsrs-progress-label');
+  const resultBanner = document.getElementById('fsrs-result-banner');
+  const resultDetails = document.getElementById('fsrs-result-details');
+
+  if (optBtn) optBtn.disabled = true;
+  if (optBtnText) optBtnText.textContent = 'Optimizing...';
+  if (resultBanner) resultBanner.style.display = 'none';
+
+  if (progressBanner) {
+    progressBanner.style.display = 'block';
+    if (progressBar) progressBar.style.width = '0%';
+    if (progressPct) progressPct.textContent = '0%';
+    if (progressLabel) progressLabel.textContent = 'Analyzing review log history...';
+  }
+
+  chrome.storage.local.get(['history'], (data) => {
+    const history = data.history || [];
+
+    function onComplete(result) {
+      if (progressBanner) progressBanner.style.display = 'none';
+      if (optBtn) optBtn.disabled = false;
+      if (optBtnText) optBtnText.textContent = 'Optimize Memory Model';
+
+      if (!result || !result.success) {
+        updateStatus(result && result.error ? result.error : 'Optimization could not complete due to insufficient review data.', 'error');
+        return;
+      }
+
+      // Save custom weights & metadata
+      chrome.storage.sync.set({
+        customFsrsWeights: result.weights,
+        customFsrsWeightsMeta: {
+          timestamp: Date.now(),
+          initialLoss: result.initialLoss,
+          optimizedLoss: result.optimizedLoss,
+          initialRmse: result.initialRmse,
+          optimizedRmse: result.optimizedRmse,
+          lossReductionPercent: result.lossReductionPercent,
+          reviewCount: result.reviewCount,
+          cardCount: result.cardCount,
+          durationMs: result.durationMs
+        }
+      }, () => {
+        FSRS.setWeights(result.weights);
+        loadMemoryModelSettings();
+
+        if (resultBanner && resultDetails) {
+          resultBanner.style.display = 'block';
+          resultDetails.innerHTML = `
+            <div>Personalized <strong>21 FSRS parameters</strong> to your memory curve.</div>
+            <div style="margin-top: 4px; display: flex; flex-wrap: wrap; gap: 12px; font-size: 0.95em;">
+              <span>📉 Error Reduction: <strong style="color: var(--secondary-color);">${result.lossReductionPercent}%</strong></span>
+              <span>📊 Log Loss: <strong>${result.initialLoss} → ${result.optimizedLoss}</strong></span>
+              <span>📈 RMSE: <strong>${result.initialRmse} → ${result.optimizedRmse}</strong></span>
+              <span>⏱ Analyzed: <strong>${result.reviewCount}</strong> review points in <strong>${(result.durationMs / 1000).toFixed(2)}s</strong></span>
+            </div>
+          `;
+        }
+
+        updateStatus('FSRS memory model successfully optimized!', 'success');
+      });
+    }
+
+    // Try Web Worker for non-blocking execution
+    let workerLaunched = false;
+    try {
+      if (typeof Worker !== 'undefined') {
+        const worker = new Worker('fsrs-optimizer.worker.js');
+        workerLaunched = true;
+
+        worker.onmessage = function (e) {
+          const msg = e.data || {};
+          if (msg.type === 'progress') {
+            const p = msg.data || {};
+            if (progressBar) progressBar.style.width = `${p.percent || 0}%`;
+            if (progressPct) progressPct.textContent = `${p.percent || 0}%`;
+            if (progressLabel) progressLabel.textContent = `Optimizing parameters (Loss: ${p.currentLoss ? p.currentLoss.toFixed(4) : '...'})`;
+          } else if (msg.type === 'done') {
+            worker.terminate();
+            onComplete(msg.data);
+          } else if (msg.type === 'error') {
+            worker.terminate();
+            onComplete({ success: false, error: msg.data && msg.data.error });
+          }
+        };
+
+        worker.onerror = function (err) {
+          console.warn('Worker error, falling back to sync optimizer:', err);
+          worker.terminate();
+          fallbackSync();
+        };
+
+        worker.postMessage({
+          action: 'optimize',
+          history: history,
+          options: { epochs: 100, learningRate: 0.04 }
+        });
+      }
+    } catch (e) {
+      console.warn('Could not launch worker, using main thread optimizer:', e);
+      workerLaunched = false;
+    }
+
+    if (!workerLaunched) {
+      fallbackSync();
+    }
+
+    function fallbackSync() {
+      setTimeout(() => {
+        try {
+          const result = FSRS.optimize(history, {
+            epochs: 80,
+            learningRate: 0.04,
+            onProgress: (p) => {
+              if (progressBar) progressBar.style.width = `${p.percent || 0}%`;
+              if (progressPct) progressPct.textContent = `${p.percent || 0}%`;
+            }
+          });
+          onComplete(result);
+        } catch (err) {
+          onComplete({ success: false, error: err.message });
+        }
+      }, 50);
+    }
+  });
+}
+
+function handleResetMemoryModel() {
+  if (!confirm('Reset memory model back to standard global FSRS default weights?')) {
+    return;
+  }
+
+  chrome.storage.sync.remove(['customFsrsWeights', 'customFsrsWeightsMeta'], () => {
+    FSRS.setWeights(null);
+    loadMemoryModelSettings();
+    const resultBanner = document.getElementById('fsrs-result-banner');
+    if (resultBanner) resultBanner.style.display = 'none';
+    updateStatus('FSRS memory model reset to global defaults.', 'success');
+  });
+}
+
+function initMemoryModelSection() {
+  const toggleBtn = document.getElementById('fsrs-toggle-params-btn');
+  const drawer = document.getElementById('fsrs-params-drawer');
+  if (toggleBtn && drawer) {
+    toggleBtn.addEventListener('click', () => {
+      const isHidden = drawer.style.display === 'none' || !drawer.style.display;
+      drawer.style.display = isHidden ? 'block' : 'none';
+      toggleBtn.textContent = isHidden ? 'Hide Parameters' : 'View Parameters';
+    });
+  }
+
+  const copyBtn = document.getElementById('fsrs-copy-weights-btn');
+  if (copyBtn) {
+    copyBtn.addEventListener('click', () => {
+      const weights = FSRS.getWeights();
+      navigator.clipboard.writeText(JSON.stringify(weights, null, 2)).then(() => {
+        const orig = copyBtn.textContent;
+        copyBtn.textContent = 'Copied!';
+        setTimeout(() => { copyBtn.textContent = orig; }, 1800);
+      });
+    });
+  }
+
+  const optBtn = document.getElementById('fsrs-optimize-btn');
+  if (optBtn) {
+    optBtn.addEventListener('click', handleOptimizeMemoryModel);
+  }
+
+  const resetBtn = document.getElementById('fsrs-reset-btn');
+  if (resetBtn) {
+    resetBtn.addEventListener('click', handleResetMemoryModel);
+  }
+
+  loadMemoryModelSettings();
 }
 
 // --- STT Settings ---
