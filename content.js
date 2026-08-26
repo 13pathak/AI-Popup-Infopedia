@@ -1558,7 +1558,8 @@ function initiatePopupSequence(rect, selectedText, customPrompt, implicitContext
 
   // Implicit context (surrounding sentence + page title) rides along on
   // every request this popup makes — initial lookup, redefine, follow-ups,
-  // and retries all reuse the instance copy captured at selection time.
+  // retries, and Hallucination Guard verification all reuse the instance
+  // copy captured at selection time.
   popupInstance.implicitContext = implicitContext || null;
 
   function performInitialFetch() {
@@ -3563,7 +3564,10 @@ function triggerVerification(popupInstance, originalPrompt, aiResponse) {
   chrome.runtime.sendMessage({
     type: "verifyAiResponse",
     originalPrompt: originalPrompt,
-    aiResponse: aiResponse
+    aiResponse: aiResponse,
+    // The verifier needs the same context the answering model saw, or it
+    // flags context-derived facts as claims the model couldn't know.
+    context: popupInstance.implicitContext || undefined
   }, (response) => {
     if (!activePopups.includes(popupInstance)) return;
     // The message may have been replaced since (e.g. a redefine rebuilt

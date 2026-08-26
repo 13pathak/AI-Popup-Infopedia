@@ -154,6 +154,28 @@ function parseSseChatText(rawText, onDelta) {
   return { choices: [{ message: message, finish_reason: acc.finishReason || 'stop' }] };
 }
 
+// --- Implicit lookup context ---
+// Sanitizes the {sentence, pageTitle} pair captured by the popup. Both the
+// definition call and the Hallucination Guard verifier consume it, so the
+// cleaning rules (strip control characters, flatten whitespace, cap lengths)
+// live in one place. Returns null when nothing usable was captured.
+function cleanImplicitContext(context) {
+  if (!context || typeof context !== 'object') return null;
+  const cleanCtxText = (value) => String(value || '')
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const sentence = typeof context.sentence === 'string' ? cleanCtxText(context.sentence).slice(0, 400) : '';
+  const pageTitle = typeof context.pageTitle === 'string' ? cleanCtxText(context.pageTitle).slice(0, 200) : '';
+  return (sentence || pageTitle) ? { sentence, pageTitle } : null;
+}
+
+// Appended to the implicit-context system message, but only for models that
+// actually carry the web_search tool (the fallback chain can mix grounded
+// and ungrounded models). Without it, models read the context sentence as a
+// knowledge source and skip the web_search they would otherwise have made.
+const IMPLICIT_CONTEXT_SEARCH_ADDENDUM = ' The page context is not a source of knowledge about the selected term: seeing the term in a sentence does not mean you know it. If you are not already familiar with the selected term from your own knowledge, or it may be newer than your training data, call the web_search tool before answering instead of explaining from the page context.';
+
 // --- NEW: Listen for keyboard shortcuts (commands) ---
 chrome.commands.onCommand.addListener((command) => {
   if (command === "trigger-popup") {
@@ -331,22 +353,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       // title. It rides in a system message with strict instructions: the
       // context ONLY disambiguates which sense of the term to explain; the
       // answer itself must stay about the term and never mention the page,
-      // title, or surrounding text. kept out of usedPrompt and of the
-      // popup's conversation, so nothing user-visible (display, saves,
-      // verification input) changes.
+      // title, or surrounding text. Kept out of usedPrompt and of the
+      // popup's conversation, so nothing user-visible (display, saves)
+      // changes. requestDefinitionFromModel appends the search addendum to
+      // this message for grounded models only — otherwise the context
+      // sentence reads as available knowledge and suppresses web_search.
+      let implicitContextMessage = null;
       if (enableImplicitContext !== false && request.context && typeof request.context === 'object') {
-        const cleanCtxText = (value) => String(value || '')
-          .replace(/[\u0000-\u001f\u007f]/g, ' ')
-          .replace(/\s+/g, ' ')
-          .trim();
-        const ctxSentence = typeof request.context.sentence === 'string' ? cleanCtxText(request.context.sentence).slice(0, 400) : '';
-        const ctxTitle = typeof request.context.pageTitle === 'string' ? cleanCtxText(request.context.pageTitle).slice(0, 200) : '';
-        if (ctxSentence || ctxTitle) {
+        const cleanContext = cleanImplicitContext(request.context);
+        if (cleanContext) {
           const parts = ['The user selected a term while reading a web page and wants it explained.'];
-          if (ctxTitle) parts.push(`Page title: "${ctxTitle}".`);
-          if (ctxSentence) parts.push(`Sentence containing the selection: "${ctxSentence}".`);
+          if (cleanContext.pageTitle) parts.push(`Page title: "${cleanContext.pageTitle}".`);
+          if (cleanContext.sentence) parts.push(`Sentence containing the selection: "${cleanContext.sentence}".`);
           parts.push('Use this context ONLY to decide which meaning of the selected term applies (for example, "bank" as a riverbank versus a financial institution). Explain the term itself. Do NOT mention, quote, refer to, or summarize the page, its title, or the surrounding sentence in your answer.');
-          safeMessagesText.unshift({ role: 'system', content: parts.join(' ') });
+          implicitContextMessage = { role: 'system', content: parts.join(' ') };
+          safeMessagesText.unshift(implicitContextMessage);
         }
       }
 
@@ -373,21 +394,32 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         };
 
         if (modelConfig.enableSearchGrounding) {
-        payload.tools = [{
-          "type": "function",
-          "function": {
-            "name": "web_search",
-            "description": "Searches the web for recent events, news, or factual information that might not be in your training data.",
-            "parameters": {
-              "type": "object",
-              "properties": {
-                "query": { "type": "string", "description": "The search query to look up on the web" }
-              },
-              "required": ["query"]
+          payload.tools = [{
+            "type": "function",
+            "function": {
+              "name": "web_search",
+              "description": "Searches the web for recent events, news, or factual information that might not be in your training data. Use it whenever you are not confident you know the answer, even if the page context or the conversation already mentions the topic.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "query": { "type": "string", "description": "The search query to look up on the web" }
+                },
+                "required": ["query"]
+              }
             }
+          }];
+
+          // Only grounded models learn that context is not knowledge. The
+          // clone keeps safeMessagesText pristine: another model in the
+          // fallback chain (without grounding) will re-slice the original.
+          const ctxIndex = payload.messages.indexOf(implicitContextMessage);
+          if (ctxIndex !== -1) {
+            payload.messages[ctxIndex] = {
+              role: 'system',
+              content: implicitContextMessage.content + IMPLICIT_CONTEXT_SEARCH_ADDENDUM
+            };
           }
-        }];
-      }
+        }
 
         // --- THIS IS THE OPTIONAL FIX (HEADERS) ---
         // Create headers object
@@ -843,23 +875,37 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   // --- Case 7: Verify AI Response ---
   if (request.type === "verifyAiResponse") {
-    chrome.storage.sync.get(['models', 'verificationModelId'], async (data) => {
+    chrome.storage.sync.get(['models', 'verificationModelId', 'enableImplicitContext'], async (data) => {
       const { models, verificationModelId } = data;
       if (!models || !verificationModelId) {
         sendResponse({ error: "Verification model not configured." });
         return;
       }
-      
+
       const modelToUse = models.find(m => m.id === verificationModelId);
       if (!modelToUse) {
         sendResponse({ error: "Verification model not found." });
         return;
       }
-      
+
       const { endpointUrl, modelName, apiKey } = modelToUse;
       const { originalPrompt, aiResponse } = request;
-      
-      const verificationPrompt = `You are a strict factual verification system. Review the following original prompt and AI response. Identify any hallucinations, fabricated facts, or logical errors. Output your response as a raw JSON object with this exact structure: {"is_hallucinating": boolean, "reasoning": "brief explanation", "corrections": ["string"]}. Do not include markdown formatting or any other text.\n\nOriginal Prompt: ${originalPrompt}\n\nAI Response: ${aiResponse}`;
+
+      // The answering model saw the implicit context (when enabled); the
+      // verifier must see it too, or it flags context-derived facts as
+      // claims the answering model could not possibly know.
+      let contextSection = '';
+      if (data.enableImplicitContext !== false) {
+        const cleanContext = cleanImplicitContext(request.context);
+        if (cleanContext) {
+          const ctxParts = [];
+          if (cleanContext.pageTitle) ctxParts.push(`page title: "${cleanContext.pageTitle}"`);
+          if (cleanContext.sentence) ctxParts.push(`sentence containing the selection: "${cleanContext.sentence}"`);
+          contextSection = `\n\nPage context the answering model was given (only to disambiguate which meaning of the term applies): ${ctxParts.join('; ')}. Treat statements in the AI Response that accurately reflect this context as taken from it, not as fabrications.`;
+        }
+      }
+
+      const verificationPrompt = `You are a strict factual verification system. Review the following original prompt and AI response. Identify any hallucinations, fabricated facts, or logical errors. Output your response as a raw JSON object with this exact structure: {"is_hallucinating": boolean, "reasoning": "brief explanation", "corrections": ["string"]}. Do not include markdown formatting or any other text.\n\nOriginal Prompt: ${originalPrompt}${contextSection}\n\nAI Response: ${aiResponse}`;
 
       const payload = {
         "model": modelName,
