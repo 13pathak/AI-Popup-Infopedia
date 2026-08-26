@@ -245,15 +245,15 @@ document.addEventListener('DOMContentLoaded', () => {
   safeAddListener('save-model-btn', 'click', saveModel);
   safeAddListener('provider-preset-select', 'change', applyProviderPreset);
   safeAddListener('endpoint', 'input', updateApiKeyGuidance);
+  safeAddListener('apiKey', 'input', handleApiKeyInput);
   safeAddListener('apiKey-provider-link', 'click', (e) => {
     e.preventDefault();
     const href = e.currentTarget.getAttribute('href');
     if (href && href !== '#') openInNewTab(href);
   });
-  safeAddListener('detect-ollama-btn', 'click', detectOllamaModels);
-  safeAddListener('ollama-model-select', 'change', (e) => {
-    document.getElementById('modelName').value = e.target.value;
-  });
+  safeAddListener('fetch-models-btn', 'click', () => fetchProviderModels(true, false));
+  safeAddListener('model-select-dropdown', 'change', handleModelDropdownChange);
+  safeAddListener('detect-ollama-btn', 'click', () => fetchProviderModels(true, false));
   safeAddListener('onboarding-dismiss-btn', 'click', () => {
     chrome.storage.local.set({ onboardingDismissed: true });
     const card = document.getElementById('onboarding-card');
@@ -451,16 +451,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // --- PROVIDER PRESETS (form helper only; never persisted with the model) ---
 const PROVIDER_PRESETS = {
-  gemini: {
-    name: 'Gemini Flash',
-    providerLabel: 'Google Gemini',
-    endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
-    model: 'gemini-2.5-flash',
-    requiresKey: true,
-    keyPlaceholder: 'Paste your Gemini API key (e.g. AIzaSy...)',
-    keyLink: 'https://aistudio.google.com/app/apikey',
-    keyLinkText: 'Get a free Google Gemini API key →'
-  },
   groq: {
     name: 'Groq Llama',
     providerLabel: 'Groq',
@@ -471,13 +461,23 @@ const PROVIDER_PRESETS = {
     keyLink: 'https://console.groq.com/keys',
     keyLinkText: 'Get a free Groq API key →'
   },
+  gemini: {
+    name: 'Gemini Flash',
+    providerLabel: 'Google Gemini',
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
+    model: 'gemini-2.5-flash',
+    requiresKey: true,
+    keyPlaceholder: 'Paste your Gemini API key (e.g. AIzaSy...)',
+    keyLink: 'https://aistudio.google.com/app/apikey',
+    keyLinkText: 'Get a free Google Gemini API key →'
+  },
   openrouter: {
     name: 'OpenRouter Model',
     providerLabel: 'OpenRouter',
     endpoint: 'https://openrouter.ai/api/v1/chat/completions',
     model: 'meta-llama/llama-3.3-70b-instruct:free',
-    requiresKey: true,
-    keyPlaceholder: 'Paste your OpenRouter API key (e.g. sk-or-...)',
+    requiresKey: false,
+    keyPlaceholder: 'Paste your OpenRouter API key (optional for free models)',
     keyLink: 'https://openrouter.ai/keys',
     keyLinkText: 'Get an OpenRouter API key →'
   },
@@ -503,13 +503,23 @@ const PROVIDER_PRESETS = {
   }
 };
 
+function resetModelHelpers() {
+  const select = document.getElementById('model-select-dropdown');
+  const status = document.getElementById('model-fetch-status');
+  if (select) {
+    select.style.display = 'none';
+    select.innerHTML = '';
+  }
+  if (status) {
+    status.style.display = 'none';
+    status.innerHTML = '';
+    status.className = 'model-fetch-note info';
+  }
+}
+
+// Backward compatibility alias
 function resetOllamaHelpers() {
-  const row = document.getElementById('ollama-detect-row');
-  const select = document.getElementById('ollama-model-select');
-  const status = document.getElementById('ollama-detect-status');
-  if (row) row.style.display = 'none';
-  if (select) { select.style.display = 'none'; select.innerHTML = ''; }
-  if (status) status.textContent = '';
+  resetModelHelpers();
 }
 
 function updateApiKeyGuidance() {
@@ -537,16 +547,29 @@ function updateApiKeyGuidance() {
     hint.innerHTML = 'Local models run offline on your machine (like Ollama or LM Studio) and <strong>do not require</strong> an API key.';
     if (apiKeyInput) apiKeyInput.placeholder = 'Not required for local models (leave blank)';
     if (linkContainer) linkContainer.style.display = 'none';
+  } else if (providerKey === 'openrouter') {
+    badge.textContent = 'Optional for Free Models';
+    badge.style.background = 'rgba(16, 185, 129, 0.15)';
+    badge.style.color = 'var(--secondary-color)';
+    hint.innerHTML = 'OpenRouter models are fetched publicly. Leave API key blank for <code>:free</code> models, or paste a key for paid models.';
+    if (apiKeyInput && preset.keyPlaceholder) apiKeyInput.placeholder = preset.keyPlaceholder;
+    if (linkContainer && providerLink && preset.keyLink) {
+      providerLink.href = preset.keyLink;
+      providerLink.textContent = preset.keyLinkText || 'Get an OpenRouter API key →';
+      linkContainer.style.display = 'block';
+    } else if (linkContainer) {
+      linkContainer.style.display = 'none';
+    }
   } else if (preset && preset.requiresKey) {
     const providerTitle = preset.providerLabel || preset.name;
     badge.textContent = `Required for ${providerTitle}`;
     badge.style.background = 'rgba(59, 130, 246, 0.15)';
     badge.style.color = 'var(--primary-color)';
-    hint.innerHTML = `<strong>Required:</strong> ${providerTitle} is an online service that requires an API key to authenticate requests.`;
+    hint.innerHTML = `<strong>Required:</strong> ${providerTitle} requires an API key to authenticate requests. 💡 <em>Paste your key to automatically fetch and choose from all currently active models!</em>`;
     if (apiKeyInput && preset.keyPlaceholder) apiKeyInput.placeholder = preset.keyPlaceholder;
     if (linkContainer && providerLink && preset.keyLink) {
       providerLink.href = preset.keyLink;
-      providerLink.textContent = preset.keyLinkText || `Get a ${providerTitle} API key →`;
+      providerLink.textContent = preset.keyLinkText || `Get a free ${providerTitle} API key →`;
       linkContainer.style.display = 'block';
     } else if (linkContainer) {
       linkContainer.style.display = 'none';
@@ -571,72 +594,307 @@ function updateApiKeyGuidance() {
       badge.textContent = 'Required for cloud · Optional for local';
       badge.style.background = 'rgba(148, 163, 184, 0.15)';
       badge.style.color = 'var(--text-muted)';
-      hint.innerHTML = 'Required for online AI services (Gemini, Groq, OpenAI, etc.). Leave blank <strong>only</strong> if you run a local model on your computer (Ollama, LM Studio).';
+      hint.innerHTML = 'Required for online AI services (Groq, Gemini, OpenAI, etc.). Leave blank <strong>only</strong> if you run a local model on your computer (Ollama, LM Studio).';
       if (apiKeyInput) apiKeyInput.placeholder = 'Paste your API key (leave blank for local models)';
       if (linkContainer) linkContainer.style.display = 'none';
     }
   }
 }
 
+let apiKeyFetchDebounce = null;
+function handleApiKeyInput() {
+  updateApiKeyGuidance();
+  const providerKey = document.getElementById('provider-preset-select')?.value || 'custom';
+  const apiKey = (document.getElementById('apiKey')?.value || '').trim();
+  if (apiKeyFetchDebounce) clearTimeout(apiKeyFetchDebounce);
+  if (['groq', 'gemini', 'openai', 'openrouter'].includes(providerKey) && apiKey.length >= 8) {
+    apiKeyFetchDebounce = setTimeout(() => {
+      fetchProviderModels(false, true);
+    }, 600);
+  }
+}
+
+function handleModelDropdownChange(e) {
+  const selectedModelId = e.target.value;
+  if (!selectedModelId) return;
+  const modelNameInput = document.getElementById('modelName');
+  if (modelNameInput) modelNameInput.value = selectedModelId;
+
+  const providerKey = document.getElementById('provider-preset-select')?.value || 'custom';
+  const nameInput = document.getElementById('configName');
+  const currentName = nameInput ? nameInput.value.trim() : '';
+  const isPresetName = !currentName || Object.values(PROVIDER_PRESETS).some(p => p.name === currentName) ||
+                       currentName.startsWith('Groq') || currentName.startsWith('Gemini') ||
+                       currentName.startsWith('OpenRouter') || currentName.startsWith('OpenAI') ||
+                       currentName.startsWith('Ollama') || currentName.startsWith('Local Ollama');
+  if (isPresetName && nameInput) {
+    const providerLabel = PROVIDER_PRESETS[providerKey]?.providerLabel || providerKey;
+    nameInput.value = `${providerLabel} (${selectedModelId})`;
+  }
+}
+
+async function fetchProviderModels(isManualTrigger = false, autoSelect = true) {
+  const providerKey = document.getElementById('provider-preset-select')?.value || 'custom';
+  const apiKey = (document.getElementById('apiKey')?.value || '').trim();
+  const statusEl = document.getElementById('model-fetch-status');
+  const dropdownEl = document.getElementById('model-select-dropdown');
+  const modelNameInput = document.getElementById('modelName');
+  const configNameInput = document.getElementById('configName');
+  const fetchBtn = document.getElementById('fetch-models-btn');
+  const preset = PROVIDER_PRESETS[providerKey];
+  const providerTitle = preset?.providerLabel || providerKey;
+
+  if (providerKey === 'custom') {
+    if (statusEl && isManualTrigger) {
+      statusEl.style.display = 'block';
+      statusEl.className = 'model-fetch-note info';
+      statusEl.textContent = 'For custom providers, please enter your Model Name and Endpoint URL directly.';
+    }
+    return;
+  }
+
+  if (preset && preset.requiresKey && !apiKey) {
+    if (statusEl) {
+      statusEl.style.display = 'block';
+      statusEl.className = 'model-fetch-note warning';
+      statusEl.innerHTML = `⚠️ Please paste your <strong>${providerTitle} API key</strong> above to fetch available models.`;
+    }
+    return;
+  }
+
+  if (fetchBtn) fetchBtn.disabled = true;
+  if (statusEl) {
+    statusEl.style.display = 'block';
+    statusEl.className = 'model-fetch-note running';
+    statusEl.innerHTML = `<svg class="oi oi-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"/><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/></svg> Fetching active models from ${providerTitle}…`;
+  }
+
+  try {
+    let models = [];
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
+
+    if (providerKey === 'groq') {
+      const res = await fetch('https://api.groq.com/openai/v1/models', {
+        headers: { 'Authorization': `Bearer ${apiKey}` },
+        signal: controller.signal
+      });
+      clearTimeout(timer);
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        let errMsg = `HTTP ${res.status}`;
+        try {
+          const errObj = JSON.parse(errText);
+          if (errObj.error?.message) errMsg = errObj.error.message;
+        } catch (e) {}
+        throw new Error(errMsg);
+      }
+      const data = await res.json();
+      models = (data.data || [])
+        .filter(m => m.active !== false && !m.id.toLowerCase().startsWith('whisper') && !m.id.toLowerCase().includes('guard'))
+        .map(m => ({
+          id: m.id,
+          name: m.id,
+          recommended: m.id.includes('llama-3.3-70b') || m.id.includes('llama-3.1-8b') || m.id.includes('deepseek-r1')
+        }))
+        .sort((a, b) => {
+          if (a.recommended && !b.recommended) return -1;
+          if (!a.recommended && b.recommended) return 1;
+          return a.id.localeCompare(b.id);
+        });
+    } else if (providerKey === 'openrouter') {
+      const headers = apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {};
+      const res = await fetch('https://openrouter.ai/api/v1/models', {
+        headers,
+        signal: controller.signal
+      });
+      clearTimeout(timer);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      models = (data.data || [])
+        .map(m => {
+          const isFree = m.id.endsWith(':free');
+          return {
+            id: m.id,
+            name: `${m.name || m.id}${isFree ? ' ⭐ [Free]' : ''}`,
+            isFree,
+            recommended: isFree || m.id.includes('llama-3.3')
+          };
+        })
+        .sort((a, b) => {
+          if (a.isFree && !b.isFree) return -1;
+          if (!a.isFree && b.isFree) return 1;
+          return a.id.localeCompare(b.id);
+        });
+    } else if (providerKey === 'gemini') {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`, {
+        signal: controller.signal
+      });
+      clearTimeout(timer);
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        let errMsg = `HTTP ${res.status}`;
+        try {
+          const errObj = JSON.parse(errText);
+          if (errObj.error?.message) errMsg = errObj.error.message;
+        } catch (e) {}
+        throw new Error(errMsg);
+      }
+      const data = await res.json();
+      models = (data.models || [])
+        .filter(m => Array.isArray(m.supportedGenerationMethods) && m.supportedGenerationMethods.includes('generateContent'))
+        .map(m => {
+          const id = m.name.replace(/^models\//, '');
+          return {
+            id: id,
+            name: `${m.displayName || id} (${id})`,
+            recommended: id.includes('flash')
+          };
+        })
+        .sort((a, b) => {
+          if (a.recommended && !b.recommended) return -1;
+          if (!a.recommended && b.recommended) return 1;
+          return a.id.localeCompare(b.id);
+        });
+    } else if (providerKey === 'openai') {
+      const res = await fetch('https://api.openai.com/v1/models', {
+        headers: { 'Authorization': `Bearer ${apiKey}` },
+        signal: controller.signal
+      });
+      clearTimeout(timer);
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        let errMsg = `HTTP ${res.status}`;
+        try {
+          const errObj = JSON.parse(errText);
+          if (errObj.error?.message) errMsg = errObj.error.message;
+        } catch (e) {}
+        throw new Error(errMsg);
+      }
+      const data = await res.json();
+      models = (data.data || [])
+        .filter(m => /^(gpt-|o1|o3|chatgpt-)/i.test(m.id) && !m.id.includes('instruct') && !m.id.includes('realtime') && !m.id.includes('audio') && !m.id.includes('embedding') && !m.id.includes('tts') && !m.id.includes('dall-e'))
+        .map(m => ({
+          id: m.id,
+          name: m.id,
+          recommended: m.id.includes('gpt-4o-mini') || m.id.includes('gpt-4o')
+        }))
+        .sort((a, b) => {
+          if (a.recommended && !b.recommended) return -1;
+          if (!a.recommended && b.recommended) return 1;
+          return a.id.localeCompare(b.id);
+        });
+    } else if (providerKey === 'ollama') {
+      const res = await fetch('http://localhost:11434/api/tags', {
+        signal: controller.signal
+      });
+      clearTimeout(timer);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      models = (data.models || [])
+        .map(m => ({
+          id: m.name,
+          name: m.name,
+          recommended: true
+        }));
+      if (models.length === 0) {
+        if (statusEl) {
+          statusEl.className = 'model-fetch-note warning';
+          statusEl.innerHTML = 'Ollama is running but has no models installed. Run <code>ollama pull llama3.2</code> in your terminal first.';
+        }
+        if (fetchBtn) fetchBtn.disabled = false;
+        return;
+      }
+    }
+
+    if (models.length === 0) {
+      if (statusEl) {
+        statusEl.className = 'model-fetch-note warning';
+        statusEl.textContent = `No chat-compatible models were found from ${providerTitle}.`;
+      }
+      return;
+    }
+
+    // Populate the dropdown
+    if (dropdownEl) {
+      dropdownEl.innerHTML = '';
+      const defaultOpt = document.createElement('option');
+      defaultOpt.value = '';
+      defaultOpt.textContent = `-- Select from ${models.length} active models --`;
+      dropdownEl.appendChild(defaultOpt);
+
+      models.forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m.id;
+        opt.textContent = m.name;
+        dropdownEl.appendChild(opt);
+      });
+
+      dropdownEl.style.display = 'block';
+
+      const currentVal = modelNameInput ? modelNameInput.value.trim() : '';
+      const matched = models.find(m => m.id === currentVal);
+      if (matched) {
+        dropdownEl.value = matched.id;
+      } else if (autoSelect) {
+        const recommended = models.find(m => m.recommended) || models[0];
+        if (recommended && (!currentVal || currentVal === preset?.model)) {
+          dropdownEl.value = recommended.id;
+          if (modelNameInput) modelNameInput.value = recommended.id;
+          if (configNameInput && (!configNameInput.value.trim() || Object.values(PROVIDER_PRESETS).some(p => p.name === configNameInput.value.trim()))) {
+            configNameInput.value = `${providerTitle} (${recommended.id})`;
+          }
+        }
+      }
+    }
+
+    if (statusEl) {
+      statusEl.className = 'model-fetch-note success';
+      statusEl.innerHTML = `✓ Successfully fetched <strong>${models.length} active models</strong> from ${providerTitle}. Select one from the dropdown above!`;
+    }
+  } catch (err) {
+    if (statusEl) {
+      statusEl.className = 'model-fetch-note error';
+      statusEl.innerHTML = `⚠️ Failed to fetch models: ${escapeHTML(err.message || 'Connection error')}`;
+    }
+  } finally {
+    if (fetchBtn) fetchBtn.disabled = false;
+  }
+}
+
+// Backward compatibility alias
+function detectOllamaModels() {
+  return fetchProviderModels(true, false);
+}
+
 function applyProviderPreset() {
   const key = document.getElementById('provider-preset-select').value;
   const preset = PROVIDER_PRESETS[key];
-  resetOllamaHelpers();
-  // "custom" leaves every field untouched, but refreshes guidance
+  resetModelHelpers();
   if (!preset) {
     updateApiKeyGuidance();
     return;
   }
   document.getElementById('endpoint').value = preset.endpoint;
   document.getElementById('modelName').value = preset.model;
-  // Only fill the name if empty or still an untouched preset default, so we
-  // never stomp a name the user typed themselves.
   const nameInput = document.getElementById('configName');
   const currentName = nameInput.value.trim();
   const isPresetName = !currentName || Object.values(PROVIDER_PRESETS).some(p => p.name === currentName);
   if (isPresetName) nameInput.value = preset.name;
-  if (key === 'ollama') {
-    document.getElementById('ollama-detect-row').style.display = 'block';
-    document.getElementById('ollama-detect-status').textContent =
-      'Tip: Ollama only accepts browser requests when started with OLLAMA_ORIGINS="*" (see FAQ → Local LLMs Setup).';
-  }
   updateApiKeyGuidance();
-}
 
-async function detectOllamaModels() {
-  const status = document.getElementById('ollama-detect-status');
-  const select = document.getElementById('ollama-model-select');
-  const btn = document.getElementById('detect-ollama-btn');
-  if (!status || !select || !btn) return;
-  btn.disabled = true;
-  status.textContent = 'Looking for Ollama on localhost:11434…';
-  select.style.display = 'none';
-  select.innerHTML = '';
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5000);
-    const res = await fetch('http://localhost:11434/api/tags', { signal: controller.signal });
-    clearTimeout(timer);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    const models = (data.models || []).map(m => m.name).filter(Boolean);
-    if (models.length === 0) {
-      status.textContent = 'Ollama is running but has no models installed. Run "ollama pull llama3.2" first, then detect again.';
-      return;
+  const apiKey = (document.getElementById('apiKey')?.value || '').trim();
+  if (key === 'openrouter' || key === 'ollama') {
+    fetchProviderModels(false, true);
+  } else if (apiKey) {
+    fetchProviderModels(false, true);
+  } else {
+    const status = document.getElementById('model-fetch-status');
+    if (status) {
+      status.style.display = 'block';
+      status.className = 'model-fetch-note info';
+      status.innerHTML = `💡 <strong>Auto-fetch models:</strong> Paste your <strong>${preset.providerLabel}</strong> API key above to automatically load and choose from all currently active models provided by ${preset.providerLabel}.`;
     }
-    models.forEach(name => {
-      const opt = document.createElement('option');
-      opt.value = name;
-      opt.textContent = name;
-      select.appendChild(opt);
-    });
-    document.getElementById('modelName').value = models[0];
-    select.style.display = 'block';
-    status.textContent = `${models.length} model${models.length > 1 ? 's' : ''} found — the first was filled in; pick another below if you prefer.`;
-  } catch (err) {
-    status.textContent = 'Could not reach Ollama. Make sure it is running on localhost:11434 and was started with OLLAMA_ORIGINS="*" (see FAQ → Local LLMs Setup).';
-  } finally {
-    btn.disabled = false;
   }
 }
 
@@ -649,15 +907,15 @@ function showModelForm(isEdit = false, model = {}) {
   document.getElementById('apiKey').value = model.apiKey || '';
   document.getElementById('enableSearchGrounding').checked = model.enableSearchGrounding || false;
 
-  // Display the matching provider when editing. Setting .value programmatically
-  // fires no "change" event, so the user's stored fields are never overwritten.
+  resetModelHelpers();
+
   const presetEntry = Object.entries(PROVIDER_PRESETS).find(([, p]) => p.endpoint === (model.endpointUrl || '').trim());
   document.getElementById('provider-preset-select').value = presetEntry ? presetEntry[0] : 'custom';
-  resetOllamaHelpers();
-  if (presetEntry && presetEntry[0] === 'ollama') {
-    document.getElementById('ollama-detect-row').style.display = 'block';
-  }
   updateApiKeyGuidance();
+
+  if (isEdit && (model.apiKey || (presetEntry && (presetEntry[0] === 'openrouter' || presetEntry[0] === 'ollama')))) {
+    fetchProviderModels(false, false);
+  }
 
   document.getElementById('model-form-container').style.display = 'block';
   document.getElementById('model-selection-container').style.display = 'none';
@@ -666,7 +924,6 @@ function showModelForm(isEdit = false, model = {}) {
 function hideModelForm() {
   document.getElementById('model-form-container').style.display = 'none';
   document.getElementById('model-selection-container').style.display = 'flex';
-  // Clear form fields
   document.getElementById('model-id').value = '';
   document.getElementById('configName').value = '';
   document.getElementById('endpoint').value = '';
@@ -674,7 +931,7 @@ function hideModelForm() {
   document.getElementById('apiKey').value = '';
   document.getElementById('enableSearchGrounding').checked = false;
   document.getElementById('provider-preset-select').value = 'custom';
-  resetOllamaHelpers();
+  resetModelHelpers();
   updateApiKeyGuidance();
 }
 
