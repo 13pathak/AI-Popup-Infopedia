@@ -158,14 +158,20 @@
     return roundTo(Math.pow(1 + FACTOR * elapsedDays / stability, DECAY), 8);
   }
 
-  // Calendar-day difference between two instants (UTC midnights), matching
-  // ts-fsrs's dateDiffInDays: 23:50 -> 00:10 counts as one day, not zero.
+  // Calendar-day difference between two instants using LOCAL midnights, so
+  // "a day later" matches what the user perceives: a late-night session at
+  // 11:30 PM followed by an 8:00 AM review counts as one day even when those
+  // fall on the same UTC day (and vice versa for west-of-UTC timezones).
+  // Note: this intentionally deviates from ts-fsrs, which counts UTC days.
+  // Local midnights are 23h or 25h apart across DST transitions, so the
+  // quotient is rounded, not floored — a spring-forward day still counts
+  // as exactly one calendar day.
   function calendarDaysBetween(earlierMs, laterMs) {
     const a = new Date(earlierMs);
     const b = new Date(laterMs);
-    const dayA = Date.UTC(a.getUTCFullYear(), a.getUTCMonth(), a.getUTCDate());
-    const dayB = Date.UTC(b.getUTCFullYear(), b.getUTCMonth(), b.getUTCDate());
-    return Math.floor((dayB - dayA) / DAY_MS);
+    const dayA = new Date(a.getFullYear(), a.getMonth(), a.getDate()).getTime();
+    const dayB = new Date(b.getFullYear(), b.getMonth(), b.getDate()).getTime();
+    return Math.round((dayB - dayA) / DAY_MS);
   }
 
   // --- Memory-state formulas (FSRS-6) ---
@@ -682,7 +688,8 @@
     optimize: optimize,
     // Exposed for tests and internal migration
     _scheduleCard: scheduleCard,
-    _cardFromItem: cardFromItem
+    _cardFromItem: cardFromItem,
+    _calendarDaysBetween: calendarDaysBetween
   };
 
   // Node export — lets differential test suites require() this file.
