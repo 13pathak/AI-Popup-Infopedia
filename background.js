@@ -679,68 +679,90 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return;
     }
 
-    chrome.storage.local.get(['history', 'wordLists'], (result) => {
-      if (chrome.runtime.lastError) {
-        sendResponse({ status: 'error', error: chrome.runtime.lastError.message });
-        return;
+    let cleanContext = null;
+    if (request.context && typeof request.context === 'object') {
+      const sentence = typeof request.context.sentence === 'string' ? request.context.sentence.trim().slice(0, 400) : '';
+      const pageTitle = typeof request.context.pageTitle === 'string' ? request.context.pageTitle.trim().slice(0, 200) : '';
+      if (sentence || pageTitle) {
+        cleanContext = {};
+        if (sentence) cleanContext.sentence = sentence;
+        if (pageTitle) cleanContext.pageTitle = pageTitle;
       }
+    }
 
-      const history = result.history || [];
-      let wordLists = result.wordLists || [];
-
-      // Find existing "Clips" list (case-insensitive) or create one
-      let clipsList = wordLists.find(l => l.name && l.name.trim().toLowerCase() === 'clips');
-      let listsUpdated = false;
-      if (!clipsList) {
-        clipsList = { id: `list_${Date.now()}`, name: 'Clips' };
-        wordLists.push(clipsList);
-        listsUpdated = true;
-      }
-
-      const listId = clipsList.id;
-
-      const isDuplicate = history.some(item =>
-        item.modelName === 'clip' &&
-        item.word === clipText &&
-        (item.listId || null) === listId
-      );
-      if (isDuplicate) {
-        sendResponse({ status: 'duplicate' });
-        return;
-      }
-
-      let cleanContext = null;
-      if (request.context && typeof request.context === 'object') {
-        const sentence = typeof request.context.sentence === 'string' ? request.context.sentence.trim().slice(0, 400) : '';
-        const pageTitle = typeof request.context.pageTitle === 'string' ? request.context.pageTitle.trim().slice(0, 200) : '';
-        if (sentence || pageTitle) {
-          cleanContext = {};
-          if (sentence) cleanContext.sentence = sentence;
-          if (pageTitle) cleanContext.pageTitle = pageTitle;
-        }
-      }
-
-      const performSave = () => {
-        saveToHistory(clipText, '', listId, 'clip', 'Clip', request.sourceUrl, request.sourceTitle, [], (err) => {
-          if (err) {
-            sendResponse({ status: 'error', error: err.message });
-          } else {
-            sendResponse({ status: 'saved' });
-          }
-        }, cleanContext, false);
-      };
-
-      if (listsUpdated) {
-        chrome.storage.local.set({ wordLists: wordLists }, () => {
+    // The Clips-list find-or-create is a read-modify-write on wordLists, so
+    // it runs inside the same queue that serializes history writes. Without
+    // this, two near-simultaneous clips (or a clip racing options-page list
+    // edits) could both create a "Clips" list — the loser's whole-array
+    // write orphans the other's list id.
+    historySavePromise = historySavePromise.then(() => {
+      return new Promise((resolve) => {
+        chrome.storage.local.get(['history', 'wordLists'], (result) => {
           if (chrome.runtime.lastError) {
             sendResponse({ status: 'error', error: chrome.runtime.lastError.message });
+            resolve();
             return;
           }
-          performSave();
+
+          const history = result.history || [];
+          let wordLists = result.wordLists || [];
+
+          // Find existing "Clips" list (case-insensitive) or create one
+          let clipsList = wordLists.find(l => l.name && l.name.trim().toLowerCase() === 'clips');
+          const isNewList = !clipsList;
+          if (isNewList) {
+            clipsList = { id: `list_${Date.now()}`, name: 'Clips' };
+            wordLists.push(clipsList);
+          }
+
+          const listId = clipsList.id;
+
+          const isDuplicate = history.some(item =>
+            item.modelName === 'clip' &&
+            item.word === clipText &&
+            (item.listId || null) === listId
+          );
+          if (isDuplicate) {
+            sendResponse({ status: 'duplicate' });
+            resolve();
+            return;
+          }
+
+          const performSave = () => {
+            saveToHistory(clipText, '', listId, 'clip', 'Clip', request.sourceUrl, request.sourceTitle, [], (err) => {
+              if (err) {
+                sendResponse({ status: 'error', error: err.message });
+              } else {
+                sendResponse({ status: 'saved' });
+              }
+            }, cleanContext, false);
+            // The history write runs in saveToHistory's own queued task;
+            // this task's job (the wordLists read-modify-write) is done.
+            resolve();
+          };
+
+          if (isNewList) {
+            chrome.storage.local.set({ wordLists: wordLists }, () => {
+              if (chrome.runtime.lastError) {
+                sendResponse({ status: 'error', error: chrome.runtime.lastError.message });
+                resolve();
+                return;
+              }
+              performSave();
+            });
+          } else {
+            performSave();
+          }
         });
-      } else {
-        performSave();
-      }
+      });
+    }).catch((err) => {
+      // A rejected task would poison the queue for every future save, so
+      // failures settle here instead (the queue continues with a resolved
+      // promise). sendResponse may already have fired; a second call is a
+      // harmless no-op for the caller.
+      try {
+        sendResponse({ status: 'error', error: err && err.message ? err.message : 'Clip save failed.' });
+      } catch (e) { /* channel already closed */ }
     });
     return true;
   }
