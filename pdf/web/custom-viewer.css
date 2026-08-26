@@ -445,17 +445,21 @@ body, html {
 
 /* Sidebar Styles */
 #sidebar {
-    width: 300px;
+    width: 340px;
+    height: 100%;
     background: var(--surface-alt);
     border-left: 1px solid var(--border-input);
     display: flex;
     flex-direction: column;
     box-shadow: var(--sidebar-shadow);
     z-index: 1000;
+    overflow: hidden;
+    box-sizing: border-box;
 }
 
 
 #sidebar-header {
+    flex-shrink: 0;
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -467,6 +471,7 @@ body, html {
 #sidebar-header h3 {
     margin: 0;
     font-size: 14px;
+    font-weight: 600;
     color: var(--text);
 }
 
@@ -495,6 +500,42 @@ body, html {
 
 #close_sidebar:hover {
     color: var(--text-hover) !important;
+}
+
+#sidebar-content-bookmarks,
+#sidebar-content-comments,
+#sidebar-content-outline {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    min-height: 0;
+    padding: 12px 14px;
+    box-sizing: border-box;
+}
+
+#sidebar-content-bookmarks::-webkit-scrollbar,
+#sidebar-content-comments::-webkit-scrollbar,
+#sidebar-content-outline::-webkit-scrollbar {
+    width: 6px;
+}
+
+#sidebar-content-bookmarks::-webkit-scrollbar-track,
+#sidebar-content-comments::-webkit-scrollbar-track,
+#sidebar-content-outline::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+#sidebar-content-bookmarks::-webkit-scrollbar-thumb,
+#sidebar-content-comments::-webkit-scrollbar-thumb,
+#sidebar-content-outline::-webkit-scrollbar-thumb {
+    background: rgba(var(--accent-rgb), 0.3);
+    border-radius: 6px;
+}
+
+#sidebar-content-bookmarks::-webkit-scrollbar-thumb:hover,
+#sidebar-content-comments::-webkit-scrollbar-thumb:hover,
+#sidebar-content-outline::-webkit-scrollbar-thumb:hover {
+    background: rgba(var(--accent-rgb), 0.6);
 }
 
 /* Sidebar Icons Strip */
@@ -598,12 +639,15 @@ body, html {
 .sidebar-item {
     background: var(--surface-raised);
     border: 1px solid var(--border-item);
-    border-radius: 4px;
-    padding: 10px;
+    border-radius: 6px;
+    padding: 10px 12px;
     margin-bottom: 10px;
     box-shadow: var(--item-shadow);
     cursor: pointer;
     transition: box-shadow 0.2s, border-color 0.2s;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
 }
 
 .sidebar-item:hover {
@@ -615,7 +659,50 @@ body, html {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 6px;
+    gap: 8px;
+}
+
+.sidebar-item-author-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    min-width: 0;
+}
+
+.sidebar-item-avatar {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    border: 1px solid var(--border-control);
+    background: var(--surface-inset);
+}
+
+.sidebar-item-meta {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.sidebar-item-author {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.sidebar-item-subtitle {
+    font-size: 11px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .sidebar-item-page {
@@ -632,14 +719,15 @@ body, html {
 }
 
 .sidebar-item-text {
-    font-size: 13px;
-    color: var(--text);
+    font-size: 12.5px;
+    color: var(--text-muted);
     line-height: 1.4;
-    margin-bottom: 8px;
     font-style: italic;
     background: var(--surface-inset);
-    padding: 4px;
-    border-left: 2px solid var(--accent);
+    padding: 6px 8px;
+    border-radius: 4px;
+    border-left: 3px solid var(--accent);
+    word-break: break-word;
 }
 
 .sidebar-item-note-input {
@@ -647,24 +735,27 @@ body, html {
     box-sizing: border-box;
     background: var(--field-bg);
     color: var(--text);
-    font-size: 12px;
+    font-size: 13px;
+    line-height: 1.45;
     font-family: inherit;
-    padding: 6px;
+    padding: 8px 10px;
     border: 1px solid var(--border);
-    border-radius: 3px;
-    resize: vertical;
-    min-height: 40px;
+    border-radius: 4px;
+    resize: none;
+    overflow: hidden;
+    min-height: 38px;
+    transition: border-color 0.2s, box-shadow 0.2s;
 }
 
 .sidebar-item-note-input:focus {
     border-color: var(--accent);
     outline: none;
+    box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.2);
 }
 
 .sidebar-item-actions {
     display: flex;
     justify-content: flex-end;
-    margin-top: 6px;
 }
 
 .sidebar-item-actions button {
@@ -682,7 +773,22 @@ body, html {
 }
 
 .sidebar-item-delete {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-faint) !important;
+    padding: 4px;
+    border-radius: 4px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.2s, background 0.2s;
+    flex-shrink: 0;
+}
+
+.sidebar-item-delete:hover {
     color: var(--danger) !important;
+    background: rgba(211, 47, 47, 0.1);
 }
 
 .sidebar-empty-msg {

@@ -11,7 +11,10 @@ const VIEWER_ICON_PATHS = {
   messageSquare: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
   highlighter: '<path d="m9 11-6 6v3h9l3-3"/><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/>',
   bookmark: '<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>',
-  list: '<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>'
+  list: '<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>',
+  trash: '<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
+  edit: '<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>',
+  user: '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>'
 };
 
 function viewerIconSvg(name, size = 14) {
@@ -243,6 +246,7 @@ let pendingFlashHighlightUntil = 0;
 let bookmarks = [];
 let bookmarkCounter = 0;
 let autoSavedLastPage = 1;
+let cachedPdfAuthorName = 'You';
 
 // Extract PDF URL from query string, e.g. custom-viewer.html?file=abc.pdf
 const urlParams = new URLSearchParams(window.location.search);
@@ -303,7 +307,10 @@ async function loadStorageData() {
         // 'pdf_dark_mode' key, which is no longer read).
         const darkModeKey = 'pdf_dark_mode_' + storageFileUrl;
 
-        chrome.storage.local.get([highlightsKey, bookmarksKey, lastPageKey, darkModeKey], (result) => {
+        chrome.storage.local.get([highlightsKey, bookmarksKey, lastPageKey, darkModeKey, 'pdf_author_name'], (result) => {
+            if (result && result.pdf_author_name && typeof result.pdf_author_name === 'string') {
+                cachedPdfAuthorName = result.pdf_author_name.trim() || 'You';
+            }
             // Theme settlement the promise waits on: null when the
             // override branch decides synchronously. Without awaiting the
             // sync read here, resolve() used to fire with
@@ -573,6 +580,11 @@ if (hasChromeStorage()) {
                 if (key === 'pdf_dark_mode_' + storageFileUrl) {
                     adoptRemoteViewerTheme(key, change.newValue);
                 }
+                continue;
+            }
+            if (key === 'pdf_author_name') {
+                cachedPdfAuthorName = (change.newValue && typeof change.newValue === 'string' && change.newValue.trim()) || 'You';
+                if (typeof renderSidebar === 'function') renderSidebar();
                 continue;
             }
             const which = key === SYNC_KEYS.highlights ? 'highlights'
@@ -3284,7 +3296,7 @@ function switchTab(tabName) {
     if (tabName === 'comments') {
         tabComments.classList.add('active');
         contentComments.classList.remove('hidden');
-        sidebarTitle.textContent = 'Comments';
+        sidebarTitle.textContent = highlights.length > 0 ? `Comments (${highlights.length})` : 'Comments';
         renderSidebar(); // re-render comments
     } else if (tabName === 'outline') {
         tabOutline.classList.add('active');
@@ -3293,7 +3305,7 @@ function switchTab(tabName) {
     } else if (tabName === 'bookmarks') {
         tabBookmarks.classList.add('active');
         contentBookmarks.classList.remove('hidden');
-        sidebarTitle.textContent = 'Bookmarks';
+        sidebarTitle.textContent = bookmarks.length > 0 ? `Bookmarks (${bookmarks.length})` : 'Bookmarks';
         renderBookmarks(); // re-render bookmarks
     }
 }
@@ -3314,6 +3326,11 @@ function renderSidebar() {
     const sidebarContent = document.getElementById('sidebar-content-comments');
     if (!sidebarContent) return;
     
+    if (sidebarTitle && tabComments.classList.contains('active')) {
+        sidebarTitle.textContent = highlights.length > 0 ? `Comments (${highlights.length})` : 'Comments';
+    }
+    
+    const prevScrollTop = sidebarContent.scrollTop;
     sidebarContent.innerHTML = '';
     
     if (highlights.length === 0) {
@@ -3333,56 +3350,55 @@ function renderSidebar() {
         const item = document.createElement('div');
         item.className = 'sidebar-item';
         
-        // Header (Page & Color)
+        // Header Row: Avatar + Author Info + Delete button
         const header = document.createElement('div');
         header.className = 'sidebar-item-header';
         
-        const pageSpan = document.createElement('span');
-        pageSpan.className = 'sidebar-item-page';
+        const authorInfo = document.createElement('div');
+        authorInfo.className = 'sidebar-item-author-info';
         
-        let typeIcon = viewerIconSvg('highlighter', 10);
-        if (hl.markupType === 'Underline') typeIcon = '<u>U</u>';
-        else if (hl.markupType === 'StrikeOut') typeIcon = '<s>S</s>';
+        // Avatar circle with tool glyph tinted with highlight color
+        const avatar = document.createElement('div');
+        avatar.className = 'sidebar-item-avatar';
+        avatar.style.borderColor = hl.color || 'var(--border-control)';
+        avatar.style.backgroundColor = hl.color ? `${hl.color}22` : 'var(--surface-inset)';
         
-        pageSpan.innerHTML = `Page ${hl.pageNumber} <span style="margin-left: 5px; font-size: 10px;">${typeIcon}</span>`;
-        
-        const colorSpan = document.createElement('span');
-        colorSpan.className = 'sidebar-item-color';
-        colorSpan.style.backgroundColor = hl.color;
-        
-        header.appendChild(pageSpan);
-        header.appendChild(colorSpan);
-        item.appendChild(header);
-        
-        // Highlighted text snippet
-        if (hl.text) {
-            const textDiv = document.createElement('div');
-            textDiv.className = 'sidebar-item-text';
-            textDiv.textContent = hl.text;
-            item.appendChild(textDiv);
+        let toolIconName = 'highlighter';
+        let typeLabel = 'Highlighted Text';
+        if (hl.markupType === 'Underline') {
+            toolIconName = 'edit';
+            typeLabel = 'Underline';
+        } else if (hl.markupType === 'StrikeOut') {
+            toolIconName = 'edit';
+            typeLabel = 'Strikethrough';
         }
+        avatar.innerHTML = viewerIconSvg(toolIconName, 13);
+        avatar.style.color = hl.color || 'var(--accent)';
         
-        // Note Input
-        const noteInput = document.createElement('textarea');
-        noteInput.className = 'sidebar-item-note-input';
-        noteInput.placeholder = 'Add a comment...';
-        noteInput.value = hl.note || '';
+        // Meta column: Author name + Subtitle (Type & Page)
+        const meta = document.createElement('div');
+        meta.className = 'sidebar-item-meta';
         
-        noteInput.addEventListener('change', () => {
-            hl.note = noteInput.value.trim() || null;
-            saveHighlights();
-            updateHighlightIndicatorsOnPage(hl);
-        });
+        const authorNameEl = document.createElement('span');
+        authorNameEl.className = 'sidebar-item-author';
+        authorNameEl.textContent = cachedPdfAuthorName || 'You';
         
-        item.appendChild(noteInput);
+        const subtitleEl = document.createElement('span');
+        subtitleEl.className = 'sidebar-item-subtitle';
+        subtitleEl.textContent = `${typeLabel} · Page ${hl.pageNumber}`;
         
-        // Actions (Delete)
-        const actions = document.createElement('div');
-        actions.className = 'sidebar-item-actions';
+        meta.appendChild(authorNameEl);
+        meta.appendChild(subtitleEl);
         
+        authorInfo.appendChild(avatar);
+        authorInfo.appendChild(meta);
+        header.appendChild(authorInfo);
+        
+        // Delete button
         const deleteBtn = document.createElement('button');
         deleteBtn.className = 'sidebar-item-delete';
-        deleteBtn.textContent = 'Delete';
+        deleteBtn.title = 'Delete comment';
+        deleteBtn.innerHTML = viewerIconSvg('trash', 14);
         deleteBtn.addEventListener('click', (e) => {
             e.stopPropagation(); // prevent clicking the item itself
 
@@ -3395,33 +3411,65 @@ function renderSidebar() {
             document.querySelectorAll(`.note-indicator[data-hl-id="${hl.id}"]`).forEach(el => el.remove());
 
             // If popups are anchored to the deleted highlight, close them
-            // now: otherwise a still-open note editor would silently drop
-            // its Save (the lookup guards against the missing record) and
-            // the .active class would linger. Same anchor-vanished rule
-            // adoptRemoteHighlights applies for cross-tab deletions;
-            // deleting an unrelated highlight leaves open popups alone.
             if (activeHighlightId === hl.id) hidePopups();
         });
         
-        actions.appendChild(deleteBtn);
-        item.appendChild(actions);
+        header.appendChild(deleteBtn);
+        item.appendChild(header);
+        
+        // Highlighted text snippet
+        if (hl.text) {
+            const textDiv = document.createElement('div');
+            textDiv.className = 'sidebar-item-text';
+            textDiv.style.borderLeftColor = hl.color || 'var(--accent)';
+            textDiv.textContent = hl.text;
+            item.appendChild(textDiv);
+        }
+        
+        // Note Input (Auto-growing textarea)
+        const noteInput = document.createElement('textarea');
+        noteInput.className = 'sidebar-item-note-input';
+        noteInput.placeholder = 'Add a comment...';
+        noteInput.value = hl.note || '';
+        
+        const autoResize = () => {
+            noteInput.style.height = 'auto';
+            noteInput.style.height = `${Math.max(38, noteInput.scrollHeight)}px`;
+        };
+        
+        noteInput.addEventListener('input', autoResize);
+        noteInput.addEventListener('change', () => {
+            hl.note = noteInput.value.trim() || null;
+            saveHighlights();
+            updateHighlightIndicatorsOnPage(hl);
+        });
+        
+        item.appendChild(noteInput);
         
         // Click to jump to highlight
         item.addEventListener('click', (e) => {
-            if (e.target.tagName.toLowerCase() === 'textarea' || e.target.tagName.toLowerCase() === 'button') {
+            if (e.target.tagName.toLowerCase() === 'textarea' || e.target.closest('button')) {
                 return; // Let user type or click button
             }
             scrollToHighlight(hl);
         });
         
         sidebarContent.appendChild(item);
+        autoResize();
     });
+
+    sidebarContent.scrollTop = prevScrollTop;
 }
 
 function renderBookmarks() {
     const sidebarContent = document.getElementById('sidebar-content-bookmarks');
     if (!sidebarContent) return;
     
+    if (sidebarTitle && tabBookmarks.classList.contains('active')) {
+        sidebarTitle.textContent = bookmarks.length > 0 ? `Bookmarks (${bookmarks.length})` : 'Bookmarks';
+    }
+    
+    const prevScrollTop = sidebarContent.scrollTop;
     sidebarContent.innerHTML = '';
     
     if (bookmarks.length === 0) {
@@ -3444,17 +3492,26 @@ function renderBookmarks() {
         pageSpan.innerHTML = `Page ${bk.pageNumber} <span style="margin-left: 5px; font-size: 10px; color: #888;">${viewerIconSvg('bookmark', 10)}</span>`;
         
         header.appendChild(pageSpan);
+        
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'sidebar-item-delete';
+        deleteBtn.title = 'Delete bookmark';
+        deleteBtn.innerHTML = viewerIconSvg('trash', 14);
+        deleteBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            bookmarks = bookmarks.filter(b => b.id !== bk.id);
+            saveBookmarks();
+        });
+        
+        header.appendChild(deleteBtn);
         item.appendChild(header);
         
         // Editable Title Input
         const titleInput = document.createElement('input');
         titleInput.type = 'text';
-        titleInput.className = 'sidebar-item-note-input'; // reusing styling
+        titleInput.className = 'sidebar-item-note-input';
         titleInput.placeholder = 'Name this bookmark...';
         titleInput.value = bk.title || '';
-        titleInput.style.marginTop = '5px';
-        titleInput.style.padding = '4px';
-        titleInput.style.width = 'calc(100% - 10px)';
         
         titleInput.addEventListener('change', () => {
             bk.title = titleInput.value.trim() || `Page ${bk.pageNumber}`;
@@ -3463,25 +3520,9 @@ function renderBookmarks() {
         
         item.appendChild(titleInput);
         
-        // Actions (Delete)
-        const actions = document.createElement('div');
-        actions.className = 'sidebar-item-actions';
-        
-        const deleteBtn = document.createElement('button');
-        deleteBtn.className = 'sidebar-item-delete';
-        deleteBtn.textContent = 'Delete';
-        deleteBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            bookmarks = bookmarks.filter(b => b.id !== bk.id);
-            saveBookmarks();
-        });
-        
-        actions.appendChild(deleteBtn);
-        item.appendChild(actions);
-        
         // Click to jump to bookmark
         item.addEventListener('click', (e) => {
-            if (e.target.tagName.toLowerCase() === 'input' || e.target.tagName.toLowerCase() === 'button') {
+            if (e.target.tagName.toLowerCase() === 'input' || e.target.closest('button')) {
                 return;
             }
             scrollToPage(bk.pageNumber);
@@ -3489,6 +3530,8 @@ function renderBookmarks() {
         
         sidebarContent.appendChild(item);
     });
+
+    sidebarContent.scrollTop = prevScrollTop;
 }
 
 

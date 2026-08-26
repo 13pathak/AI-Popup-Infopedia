@@ -22,19 +22,23 @@ async function fetchWithTimeout(url, options, timeoutMs = 30000) {
 }
 
 // Streaming twin of fetchWithTimeout for OpenAI-compatible chat endpoints.
-// The 30s cap in fetchWithTimeout is a total budget, which would cut off long
-// streamed answers mid-token; here the timer is re-armed on every chunk, so
-// the limit only fires when the stream genuinely stalls. Consumes the SSE
-// body and returns the SAME `data` shape as the non-streaming JSON response
-// (choices[0].message with reconstructed tool_calls), so the orchestrator
-// loop needs no branching. Falls back transparently when a provider ignores
-// stream:true and answers with plain JSON.
-async function streamChatWithTimeout(url, options, timeoutMs = 30000, onDelta) {
+// Two clocks guard the exchange: the 30s cap is re-armed on every chunk, so
+// it only fires when the stream genuinely stalls, and totalMs bounds the
+// WHOLE stream — without it, a provider that holds the connection open with
+// periodic keep-alive pings (or trickling tool-call fragments forever)
+// would re-arm the stall timer indefinitely and hang the caller. Consumes
+// the SSE body and returns the SAME `data` shape as the non-streaming JSON
+// response (choices[0].message with reconstructed tool_calls), so the
+// orchestrator loop needs no branching. Falls back transparently when a
+// provider ignores stream:true and answers with plain JSON.
+async function streamChatWithTimeout(url, options, timeoutMs = 30000, onDelta, totalMs = 120000) {
   const controller = new AbortController();
-  let timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  let abortReason = 'stall';
+  const totalId = setTimeout(() => { abortReason = 'total'; controller.abort(); }, totalMs);
+  let timeoutId = setTimeout(() => { abortReason = 'stall'; controller.abort(); }, timeoutMs);
   const rearm = () => {
     clearTimeout(timeoutId);
-    timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    timeoutId = setTimeout(() => { abortReason = 'stall'; controller.abort(); }, timeoutMs);
   };
 
   try {
@@ -94,11 +98,15 @@ async function streamChatWithTimeout(url, options, timeoutMs = 30000, onDelta) {
     };
   } catch (error) {
     if (error.name === 'AbortError') {
+      if (abortReason === 'total') {
+        throw new Error(`The response stream ran for over ${Math.round(totalMs / 1000)} seconds without finishing and was cut off. Please try again.`);
+      }
       throw new Error(`Request timed out after ${Math.round(timeoutMs / 1000)} seconds. Please try again.`);
     }
     throw error;
   } finally {
     clearTimeout(timeoutId);
+    clearTimeout(totalId);
   }
 }
 
@@ -206,8 +214,11 @@ chrome.commands.onCommand.addListener((command) => {
 // Chrome too old for storage.session keeps the legacy data: fallback.
 // tabs.create wrapper that consumes lastError and routes failures to a
 // caller-supplied fallback instead of leaving them unread in the void.
-function createTabChecked(url, onFailure) {
-  chrome.tabs.create({ url }, () => {
+function createTabChecked(url, onFailure, t0) {
+  chrome.tabs.create({ url }, (tab) => {
+    // Timing diagnostics for the Save→print-dialog path (service-worker
+    // console): attributes the wait between the click and the visible tab.
+    if (t0) console.log(`[AI Popup] print tab created ${Date.now() - t0}ms after the save click`);
     if (chrome.runtime.lastError) {
       const message = chrome.runtime.lastError.message || '';
       void chrome.runtime.lastError;
@@ -218,6 +229,7 @@ function createTabChecked(url, onFailure) {
 
 function openPrintTab(htmlContent) {
   if (typeof htmlContent !== 'string' || htmlContent.length === 0) return;
+  const t0 = Date.now();
   // Every transport below is checked: an unchecked tabs.create used to let
   // oversized transcripts die with zero feedback (session-storage quota ->
   // data: fallback -> ~2MB data: cap -> silent nothing). print.html renders
@@ -249,14 +261,25 @@ function openPrintTab(htmlContent) {
       }
       return;
     }
+    console.log(`[AI Popup] print payload staged in ${Date.now() - t0}ms`);
     createTabChecked(chrome.runtime.getURL('pdf/print.html') + '?k=' + encodeURIComponent(key),
-      () => showPrintFailure('tab'));
+      () => showPrintFailure('tab'), t0);
   });
 }
 
 
 // --- This listener now handles multiple message types ---
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+
+  // --- Case 0: Service-worker keepalive ---
+  // While any popup is open, the content script pings every 20s so this
+  // MV3 worker (idle-killed ~30s after its last event) stays warm for the
+  // popup's next message — most visibly the print view after Save, which
+  // otherwise pays a cold-start wake on the click.
+  if (request.type === "keepAlivePing") {
+    sendResponse({ ok: true });
+    return;
+  }
 
   // --- Case 1: Get a definition ---
   if (request.type === "getAiDefinition") {
@@ -279,35 +302,45 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
       // --- Streaming plumbing ---
       // sendResponse is one-shot, so live deltas travel on a separate
-      // tab-targeted message channel keyed by a requestId the popup chose.
-      // The final sendResponse below is unchanged, which keeps the popup's
+      // message channel keyed by a requestId the popup chose. Content
+      // scripts are addressed per-tab; extension pages (the built-in PDF
+      // viewer runs content.js as a page script) have no sender.tab and are
+      // reached via runtime.sendMessage instead — every listener keys on
+      // requestId and ignores foreign ones, so the broadcast is safe. The
+      // final sendResponse below is unchanged, which keeps the popup's
       // completed-state logic (save, verify, retry) byte-identical to the
-      // non-streaming era. Callers without a tab/requestId (none today)
-      // simply get no incremental updates.
+      // non-streaming era.
       const streamRequestId = typeof request.requestId === 'string' ? request.requestId : null;
       const streamTabId = sender && sender.tab && typeof sender.tab.id === 'number' ? sender.tab.id : null;
       let streamResetPending = false;
+      const emitToPopup = (message) => {
+        if (!streamRequestId) return;
+        if (streamTabId !== null) {
+          chrome.tabs.sendMessage(streamTabId, message, () => { void chrome.runtime.lastError; });
+        } else {
+          chrome.runtime.sendMessage(message, () => { void chrome.runtime.lastError; });
+        }
+      };
       const emitStreamDelta = (delta) => {
-        if (!streamRequestId || !streamTabId || typeof delta !== 'string' || !delta) return;
+        if (typeof delta !== 'string' || !delta) return;
         const message = { type: 'aiDefinitionDelta', requestId: streamRequestId, delta: delta };
         if (streamResetPending) {
           message.reset = true;
           streamResetPending = false;
         }
-        chrome.tabs.sendMessage(streamTabId, message, () => { void chrome.runtime.lastError; });
+        emitToPopup(message);
       };
 
       // Tells the popup a chain model just died so it can swap the (possibly
       // partial) streamed answer back into a "trying next model…" indicator
       // instead of showing a dead model's truncated text while we retry.
       const emitStreamStandby = (failedName) => {
-        if (!streamRequestId || !streamTabId) return;
-        chrome.tabs.sendMessage(streamTabId, {
+        emitToPopup({
           type: 'aiDefinitionDelta',
           requestId: streamRequestId,
           standby: true,
           failedName: typeof failedName === 'string' ? failedName : ''
-        }, () => { void chrome.runtime.lastError; });
+        });
       };
 
       // --- REVISED: Simplified prompt logic ---

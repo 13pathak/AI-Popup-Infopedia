@@ -2,6 +2,11 @@
 let activePopups = []; // Array of { container, popup, isInteracting, isClickInside }
 let baseZIndex = 2100000000;
 
+// Build marker: the DevTools console of any page shows which content.js
+// build the tab is running — tabs opened before an extension reload keep the
+// previous script until the page is refreshed.
+console.log('[AI Popup] content script build 2026-08-26.4');
+
 // --- Theme Cache & Management ---
 let currentUiTheme = 'dark';
 
@@ -1580,11 +1585,18 @@ function initiatePopupSequence(rect, selectedText, customPrompt, implicitContext
       return msgs.length > 0 ? msgs[msgs.length - 1] : null;
     });
 
+    const watchdog = createResponseWatchdog(() => {
+      if (!activePopups.includes(popupInstance)) return;
+      showRequestTimeoutError(popupInstance, () => performInitialFetch());
+    });
+
     const payload = { type: "getAiDefinition", word: selectedText, requestId: stream.requestId, context: popupInstance.implicitContext || undefined };
     if (customPrompt) payload.customPrompt = customPrompt;
 
     chrome.runtime.sendMessage(payload, (response) => {
+      watchdog.done();
       stream.done();
+      if (watchdog.fired()) return; // watchdog already took over the UI
       // Verify instance still exists (user might have closed it)
       if (!activePopups.includes(popupInstance)) {
         stopLoadingQuoteRotation(popupInstance);
@@ -1714,6 +1726,41 @@ document.addEventListener('keydown', (event) => {
   }
 });
 
+// Ctrl+S saves the top-most popup's conversation as a PDF — the same action
+// as the popup's Save-as-PDF button. While ANY popup is open the shortcut
+// belongs to the popup (even mid-answer, so the browser's Save-Page-As
+// dialog never surprises); with no popup open it falls through to the
+// browser. Bound on BOTH window and document in the capture phase so no
+// page-level handler can swallow it first; event.code (the physical key)
+// keeps it working on non-QWERTY layouts.
+function handlePopupSaveShortcut(event) {
+  if (!(event.ctrlKey || event.metaKey) || event.code !== 'KeyS') return;
+  if (event.repeat) return;
+  if (activePopups.length === 0) return;
+  const top = activePopups[activePopups.length - 1];
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  const hasAnswer = top.messages && top.messages.some(m => m.role === 'assistant' && !m.isThinking && !m.isError);
+  if (!hasAnswer) {
+    showPopupToast(top, 'Nothing to save yet — wait for the answer');
+    return;
+  }
+  saveConversationAsPdf(top);
+}
+window.addEventListener('keydown', handlePopupSaveShortcut, true);
+document.addEventListener('keydown', handlePopupSaveShortcut, true);
+
+// MV3 service workers are idle-killed ~30s after their last event. A popup
+// that outlives its answer (reading, follow-ups, then Save) would otherwise
+// pay a cold-start wake on its next message — most visibly the dead air
+// between clicking Save and the print dialog appearing. While any popup is
+// open, a tiny ping every 20s keeps the worker warm; with no popups the
+// interval is a no-op.
+setInterval(() => {
+  if (activePopups.length === 0) return;
+  chrome.runtime.sendMessage({ type: "keepAlivePing" }, () => { void chrome.runtime.lastError; });
+}, 20000);
+
 // --- Motivational Loading Quotes ---
 const LOADING_QUOTES = [
   "We're almost there...",
@@ -1802,6 +1849,76 @@ function stopLoadingQuoteRotation(instance) {
     clearInterval(instance.loadingQuoteTimer);
     instance.loadingQuoteTimer = null;
   }
+}
+
+// --- Response watchdogs ---
+// The background bounds every provider stream, but anything that leaves the
+// sendMessage callback uninvoked forever (a service worker dying mid-request,
+// a stuck pipeline) would spin the popup on loading quotes indefinitely.
+// Every AI fetch arms one watchdog: the callback settles it, and a fired
+// watchdog takes over the UI so a late real response is ignored. Deltas
+// intentionally do not reset the clock — the budget is sized for a full
+// fallback chain of slow-but-alive streams.
+const AI_REQUEST_WATCHDOG_MS = 180000;
+
+function createResponseWatchdog(onTimeout) {
+  let settled = false;
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    if (settled) return;
+    settled = true;
+    timedOut = true;
+    try {
+      onTimeout();
+    } catch (e) {
+      console.error('[AI Popup] watchdog handler failed:', e);
+    }
+  }, AI_REQUEST_WATCHDOG_MS);
+  return {
+    done: () => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+      }
+    },
+    // True only when the TIMEOUT took over the UI — never merely because
+    // the response arrived and settled the watchdog.
+    fired: () => timedOut
+  };
+}
+
+// Timeout twin of the flows' error branches: stop every loading affordance,
+// drop placeholder and stale error messages, and show an error line with a
+// retry button wired to retryFn.
+function showRequestTimeoutError(instance, retryFn) {
+  stopLoadingQuoteRotation(instance);
+  instance.isLoading = false;
+  if (instance.popup) {
+    const followupInput = instance.popup.querySelector('#ai-popup-followup-input');
+    const followupSend = instance.popup.querySelector('.ai-popup-followup-send');
+    if (followupInput) followupInput.disabled = false;
+    if (followupSend) followupSend.disabled = false;
+  }
+  const errorId = 'error-' + Date.now();
+  const errorHtml = `<span class="ai-popup-error-text">Error: The AI request timed out with no response — the provider or search pipeline may be stuck.</span> <button id="${errorId}-retry" class="ai-popup-retry-btn ai-popup-error-reload">Reload</button>`;
+  instance.messages = instance.messages.filter(m => !m.isThinking && !m.isStreaming && !m.isError);
+  instance.messages.push({ role: 'assistant', content: errorHtml, isError: true, errorId: errorId });
+  renderMessages(instance);
+  setTimeout(() => {
+    if (instance.popup) {
+      const retryBtn = instance.popup.querySelector(`#${errorId}-retry`);
+      if (retryBtn) {
+        retryBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          e.target.textContent = "Working...";
+          e.target.style.opacity = "0.7";
+          e.target.style.cursor = "wait";
+          setTimeout(() => retryFn(), 150);
+        });
+      }
+    }
+  }, 0);
 }
 
 // --- Streaming answer display ---
@@ -2306,7 +2423,9 @@ function renderMessages(instance) {
           ? msg.content
           : (typeof instance.quoteIndex === 'number' ? LOADING_QUOTES[instance.quoteIndex % LOADING_QUOTES.length] : initLoadingQuote(instance));
         contentWrapper.insertAdjacentHTML('beforeend', buildLoadingHtml(textToDisplay));
-        startLoadingQuoteRotation(instance);
+        // Static labels (e.g. "Hallucination detected — searching…") keep
+        // their text; ordinary thinking slots rotate quotes instead.
+        if (!msg.isStaticLabel) startLoadingQuoteRotation(instance);
         return;
       }
 
@@ -2454,10 +2573,21 @@ function retryMessage(instance, messageIndex) {
 
   const stream = trackAiStream(instance, () => instance.messages[messageIndex]);
 
+  // On timeout, rewrite the slot in place (the shared error helper would
+  // push at the end and shift messageIndex).
+  const watchdog = createResponseWatchdog(() => {
+    if (!activePopups.includes(instance)) return;
+    stopLoadingQuoteRotation(instance);
+    instance.messages[messageIndex] = { role: 'assistant', content: '<span class="ai-popup-error-text">Error: The retry request timed out with no response.</span>', isError: true };
+    renderMessages(instance);
+  });
+
   chrome.runtime.sendMessage(
     { type: "getAiDefinition", word: instance.sourceWord, modelId: modelId, messages: messagesContext, requestId: stream.requestId, context: instance.implicitContext || undefined },
     (response) => {
+      watchdog.done();
       stream.done();
+      if (watchdog.fired()) return; // watchdog already took over the UI
       if (!activePopups.includes(instance)) {
         stopLoadingQuoteRotation(instance);
         return;
@@ -2649,10 +2779,17 @@ function redefineWithModelAndPrompt(instance, word, modelId, promptContent) {
       return msgs.length > 0 ? msgs[msgs.length - 1] : null;
     });
 
+    const watchdog = createResponseWatchdog(() => {
+      if (!activePopups.includes(instance)) return;
+      showRequestTimeoutError(instance, () => performRedefineFetch());
+    });
+
     chrome.runtime.sendMessage(
       { type: "getAiDefinition", word: word, modelId: modelId, customPrompt: promptContent, requestId: stream.requestId, context: instance.implicitContext || undefined },
       (response) => {
+        watchdog.done();
         stream.done();
+        if (watchdog.fired()) return; // watchdog already took over the UI
         if (!activePopups.includes(instance)) {
           stopLoadingQuoteRotation(instance);
           return;
@@ -3266,10 +3403,17 @@ function createFollowupInput(instance, word) {
       return msgs.length > 0 ? msgs[msgs.length - 1] : null;
     });
 
+    const watchdog = createResponseWatchdog(() => {
+      if (!activePopups.includes(instance)) return;
+      showRequestTimeoutError(instance, () => performFetch());
+    });
+
     chrome.runtime.sendMessage(
       { type: "getAiDefinition", word: word, modelId: modelId, messages: instance.messages.filter(m => !m.isThinking && !m.isError && !m.isStreaming), requestId: stream.requestId, context: instance.implicitContext || undefined },
       (response) => {
+        watchdog.done();
         stream.done();
+        if (watchdog.fired()) return; // watchdog already took over the UI
         if (!activePopups.includes(instance)) {
           stopLoadingQuoteRotation(instance);
           return;
@@ -3469,6 +3613,9 @@ function adjustPopupPosition(instance, selectionRect) {
 
 // --- NEW: Save Conversation as PDF ---
 function saveConversationAsPdf(instance) {
+  // The print pipeline is asynchronous (worker → staged payload → new tab →
+  // print dialog); acknowledge the click immediately so it never feels dead.
+  showPopupToast(instance, 'Opening print view…');
   let html = `<!DOCTYPE html><html><head><title>Conversation Backup</title>
   <style>
     body { font-family: 'Google Sans', 'Google Sans Text', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 20px; max-width: 800px; margin: auto; line-height: 1.6; }
@@ -3644,11 +3791,25 @@ function regenerateWithGroundedSearch(popupInstance, flaggedMsg, retryInfo) {
     const actions = popupInstance.popup.querySelector('.ai-popup-actions');
     if (actions) actions.remove();
   }
-  msgs.splice(msgs.indexOf(flaggedMsg), 1, { role: 'assistant', content: 'Hallucination detected — searching the web for a grounded answer...', isThinking: true });
+  msgs.splice(msgs.indexOf(flaggedMsg), 1, { role: 'assistant', content: 'Hallucination detected — searching the web for a grounded answer...', isThinking: true, isStaticLabel: true });
   renderMessages(popupInstance);
-  return true;  const stream = trackAiStream(popupInstance, () => {
+
+  const stream = trackAiStream(popupInstance, () => {
     const current = popupInstance.messages;
     return current.length > 0 ? current[current.length - 1] : null;
+  });
+
+  // A forced-search pass runs several sequential provider calls (tool round,
+  // Tavily, answer round); if the whole thing never comes back, restore the
+  // flagged answer and offer a retry instead of spinning forever.
+  const watchdog = createResponseWatchdog(() => {
+    if (!activePopups.includes(popupInstance)) return;
+    popupInstance.messages = popupInstance.messages.filter(m => !m.isThinking && !m.isStreaming);
+    popupInstance.messages.push(flaggedMsg);
+    showRequestTimeoutError(popupInstance, () => {
+      popupInstance.messages = popupInstance.messages.filter(m => !m.isError);
+      regenerateWithGroundedSearch(popupInstance, flaggedMsg, retryInfo);
+    });
   });
 
   const payload = {
@@ -3662,7 +3823,9 @@ function regenerateWithGroundedSearch(popupInstance, flaggedMsg, retryInfo) {
   if (retryInfo.modelId) payload.modelId = retryInfo.modelId;
 
   chrome.runtime.sendMessage(payload, (response) => {
+    watchdog.done();
     stream.done();
+    if (watchdog.fired()) return; // watchdog already took over the UI
     if (!activePopups.includes(popupInstance)) {
       stopLoadingQuoteRotation(popupInstance);
       return;
@@ -3708,6 +3871,10 @@ function regenerateWithGroundedSearch(popupInstance, flaggedMsg, retryInfo) {
       }
     });
   });
+
+  // Handed over to the caller: the popup UI is ours now (it skipped its own
+  // re-render), and the request above is already in flight.
+  return true;
 }
 
 function appendVerificationBadge(container, verification) {
