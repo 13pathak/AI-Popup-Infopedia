@@ -2120,6 +2120,60 @@ function escapeCSV(str) {
 }
 
 // --- Export Function ---
+// --- History CSV shared by list export and full export ---
+// Base columns describe the vocabulary itself. The review-progress columns
+// carry the full FSRS memory state so a restored file resumes scheduling
+// exactly where it left off instead of falling back to migration defaults.
+const HISTORY_CSV_BASE_HEADERS = ['timestamp', 'word', 'definition', 'listName', 'modelName', 'promptName', 'sourceUrl', 'sourceTitle', 'favorite'];
+const HISTORY_CSV_REVIEW_HEADERS = ['nextReview', 'interval', 'lastReviewed', 'stability', 'difficulty', 'reps', 'lapses', 'learningSteps', 'state'];
+
+function buildHistoryCsvString(historyItems, listIdToNameMap, includeReview) {
+  const headers = includeReview
+    ? [...HISTORY_CSV_BASE_HEADERS, ...HISTORY_CSV_REVIEW_HEADERS]
+    : [...HISTORY_CSV_BASE_HEADERS];
+
+  const csvRows = [
+    headers.join(','),
+    ...historyItems.map(item => {
+      const cells = [
+        escapeCSV(item.timestamp),
+        escapeCSV(item.word),
+        escapeCSV(item.definition),
+        escapeCSV(listIdToNameMap[item.listId] || 'Unlisted'),
+        escapeCSV(item.modelName || ''),
+        escapeCSV(item.promptName || ''),
+        escapeCSV(item.sourceUrl || ''),
+        escapeCSV(item.sourceTitle || ''),
+        escapeCSV(item.favorite ? 'true' : 'false')
+      ];
+      if (includeReview) {
+        cells.push(
+          escapeCSV(item.nextReview || ''),
+          escapeCSV(item.interval || ''),
+          escapeCSV(item.lastReviewed || ''),
+          escapeCSV(item.stability || ''),
+          escapeCSV(item.difficulty || ''),
+          escapeCSV(item.reps || ''),
+          escapeCSV(item.lapses || ''),
+          escapeCSV(item.learningSteps || ''),
+          escapeCSV(item.state || '')
+        );
+      }
+      return cells.join(',');
+    })
+  ];
+
+  return csvRows.join('\n');
+}
+
+// Read whether review progress should be included in exports (the
+// "Flashcard Review Progress" backup setting; on by default).
+function withReviewExportPreference(callback) {
+  chrome.storage.sync.get({ backupInclude: DEFAULT_BACKUP_INCLUDE }, (syncData) => {
+    callback(syncData.backupInclude.review !== false);
+  });
+}
+
 function exportHistory() {
   const listSelect = document.getElementById('list-select');
   const selectedListId = listSelect.value;
@@ -2152,45 +2206,29 @@ function exportHistory() {
       return;
     }
 
-    // --- REVISED HEADERS: Include all fields including flashcard progress ---
-    const headers = ['timestamp', 'word', 'definition', 'listName', 'modelName', 'promptName', 'sourceUrl', 'sourceTitle', 'favorite', 'nextReview', 'interval', 'lastReviewed'];
-    const csvRows = [
-      headers.join(','),
-      ...historyToExport.map(item => [
-        escapeCSV(item.timestamp),
-        escapeCSV(item.word),
-        escapeCSV(item.definition),
-        escapeCSV(listIdToNameMap[item.listId] || 'Unlisted'),
-        escapeCSV(item.modelName || ''),
-        escapeCSV(item.promptName || ''),
-        escapeCSV(item.sourceUrl || ''),
-        escapeCSV(item.sourceTitle || ''),
-        escapeCSV(item.favorite ? 'true' : 'false'),
-        escapeCSV(item.nextReview || ''),
-        escapeCSV(item.interval || ''),
-        escapeCSV(item.lastReviewed || '')
-      ].join(','))
-    ];
+    // --- REVISED: Review-progress columns follow the backup setting ---
+    withReviewExportPreference((includeReview) => {
+      const csvString = buildHistoryCsvString(historyToExport, listIdToNameMap, includeReview);
+      // --- FIX: Add UTF-8 BOM for Excel compatibility ---
+      const blob = new Blob(['\uFEFF' + csvString], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const safeFilename = selectedListName.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+      const link = document.createElement('a');
 
-    const csvString = csvRows.join('\n');
-    // --- FIX: Add UTF-8 BOM for Excel compatibility ---
-    const blob = new Blob(['\uFEFF' + csvString], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const safeFilename = selectedListName.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `ai_infopedia_${safeFilename}.csv`; // --- REVISED: Dynamic filename ---
-    link.style.display = 'none';
+      link.href = url;
+      link.download = `ai_infopedia_${safeFilename}.csv`; // --- REVISED: Dynamic filename ---
+      link.style.display = 'none';
 
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
 
-    URL.revokeObjectURL(url);
-    updateIOStatus(`List "${selectedListName}" exported successfully!`, "success");
+      URL.revokeObjectURL(url);
+      updateIOStatus(`List "${selectedListName}" exported successfully!`, "success");
 
-    // --- NEW: Reset backup reminder ---
-    resetBackupReminder();
+      // --- NEW: Reset backup reminder ---
+      resetBackupReminder();
+    });
   });
 }
 
@@ -2212,44 +2250,28 @@ function exportAllHistory() {
       listIdToNameMap[list.id] = list.name;
     });
 
-    const headers = ['timestamp', 'word', 'definition', 'listName', 'modelName', 'promptName', 'sourceUrl', 'sourceTitle', 'favorite', 'nextReview', 'interval', 'lastReviewed'];
-    const csvRows = [
-      headers.join(','),
-      ...allHistory.map(item => [
-        escapeCSV(item.timestamp),
-        escapeCSV(item.word),
-        escapeCSV(item.definition),
-        escapeCSV(listIdToNameMap[item.listId] || 'Unlisted'),
-        escapeCSV(item.modelName || ''),
-        escapeCSV(item.promptName || ''),
-        escapeCSV(item.sourceUrl || ''),
-        escapeCSV(item.sourceTitle || ''),
-        escapeCSV(item.favorite ? 'true' : 'false'),
-        escapeCSV(item.nextReview || ''),
-        escapeCSV(item.interval || ''),
-        escapeCSV(item.lastReviewed || '')
-      ].join(','))
-    ];
+    // --- REVISED: Review-progress columns follow the backup setting ---
+    withReviewExportPreference((includeReview) => {
+      const csvString = buildHistoryCsvString(allHistory, listIdToNameMap, includeReview);
+      // --- FIX: Add UTF-8 BOM for Excel compatibility ---
+      const blob = new Blob(['\uFEFF' + csvString], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
 
-    const csvString = csvRows.join('\n');
-    // --- FIX: Add UTF-8 BOM for Excel compatibility ---
-    const blob = new Blob(['\uFEFF' + csvString], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `ai_infopedia_all_history.csv`; // Static filename for global export
+      link.style.display = 'none';
 
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `ai_infopedia_all_history.csv`; // Static filename for global export
-    link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
 
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      updateIOStatus(`All history exported successfully!`, "success");
 
-    URL.revokeObjectURL(url);
-    updateIOStatus(`All history exported successfully!`, "success");
-
-    // --- NEW: Reset backup reminder ---
-    resetBackupReminder();
+      // --- NEW: Reset backup reminder ---
+      resetBackupReminder();
+    });
   });
 }
 
@@ -2342,6 +2364,12 @@ function importHistory(event) {
     const nextReviewIndex = headers.indexOf('nextReview');
     const intervalIndex = headers.indexOf('interval');
     const lastReviewedIndex = headers.indexOf('lastReviewed');
+    const stabilityIndex = headers.indexOf('stability');
+    const difficultyIndex = headers.indexOf('difficulty');
+    const repsIndex = headers.indexOf('reps');
+    const lapsesIndex = headers.indexOf('lapses');
+    const learningStepsIndex = headers.indexOf('learningSteps');
+    const stateIndex = headers.indexOf('state');
 
     if (tsIndex === -1 || wordIndex === -1 || defIndex === -1) {
       updateIOStatus("File is missing required headers: timestamp, word, or definition.", "error");
@@ -2390,6 +2418,18 @@ function importHistory(event) {
         }
         if (lastReviewedIndex !== -1 && fields[lastReviewedIndex]) {
           newItem.lastReviewed = parseInt(fields[lastReviewedIndex]) || 0;
+        }
+        // FSRS memory-state fields. Applied only as a complete, valid block —
+        // partial rows fall back to the scheduler's interval-based migration.
+        const stability = parseFloat(fields[stabilityIndex]) || 0;
+        if (stability > 0 && stateIndex !== -1 &&
+            ['new', 'learning', 'review', 'relearning'].includes(fields[stateIndex])) {
+          newItem.stability = stability;
+          newItem.difficulty = Math.min(10, Math.max(1, parseFloat(fields[difficultyIndex]) || 5));
+          newItem.reps = parseInt(fields[repsIndex]) || 1;
+          newItem.lapses = parseInt(fields[lapsesIndex]) || 0;
+          newItem.learningSteps = parseInt(fields[learningStepsIndex]) || 0;
+          newItem.state = fields[stateIndex];
         }
 
         newItems.push(newItem);
@@ -2830,6 +2870,7 @@ async function handleSendToAnkiClick(event) {
 
 const BACKUP_INCLUDE_KEYS = {
   history: 'backup-include-history',
+  review: 'backup-include-review',
   models: 'backup-include-models',
   prompts: 'backup-include-prompts',
   apiKeys: 'backup-include-apikeys',
@@ -2841,6 +2882,7 @@ const BACKUP_INCLUDE_KEYS = {
 
 const DEFAULT_BACKUP_INCLUDE = {
   history: true,
+  review: true,
   models: true,
   prompts: true,
   apiKeys: true,

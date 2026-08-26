@@ -1045,6 +1045,7 @@ function sanitizeUrlSecrets(rawUrl) {
 
 const DEFAULT_BACKUP_INCLUDE = {
   history: true,
+  review: true,
   models: true,
   prompts: true,
   apiKeys: true,
@@ -1070,9 +1071,18 @@ function triggerBackup(type = "Auto", customBackupInclude = null) {
         version: "1.3"
       };
 
-      // 1. Vocabulary History & Lists
+      // 1. Vocabulary History & Lists. When review progress is excluded,
+      // the scheduling fields are stripped so the backup stays shareable.
       if (backupInclude.history) {
-        backupData.history = localData.history || [];
+        const stripReviewProgress = (item) => {
+          if (backupInclude.review) return item;
+          const {
+            nextReview, interval, lastReviewed, stability, difficulty,
+            reps, lapses, learningSteps, state, ...rest
+          } = item;
+          return rest;
+        };
+        backupData.history = (localData.history || []).map(stripReviewProgress);
         backupData.wordLists = localData.wordLists || [];
       }
 
