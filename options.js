@@ -4038,12 +4038,14 @@ function startFlashcardReview() {
     const now = Date.now();
     flashcardQueue = history.filter(item => {
       if (item.modelName === 'clip' && !item.definition) return false;
-      const nextReview = item.nextReview || 0;
-      return nextReview <= now;
+      return FSRS.isDue(item, now);
     });
 
-    // Shuffle the queue
-    flashcardQueue = flashcardQueue.sort(() => Math.random() - 0.5);
+    // Shuffle the queue (Fisher–Yates; a random-comparator sort is biased)
+    for (let i = flashcardQueue.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [flashcardQueue[i], flashcardQueue[j]] = [flashcardQueue[j], flashcardQueue[i]];
+    }
 
     currentCardIndex = 0;
     cardsReviewedCount = 0;
@@ -4109,38 +4111,11 @@ function showFlashcardAnswer() {
 
 function rateFlashcard(rating) {
   const card = flashcardQueue[currentCardIndex];
+  const now = Date.now();
 
-  // Simple spaced repetition: calculate next review time
-  // Rating: 1=Again (1min), 2=Hard (1day), 3=Good (3days), 4=Easy (7days)
-  const intervals = {
-    1: 1 * 60 * 1000,          // 1 minute
-    2: 1 * 24 * 60 * 60 * 1000, // 1 day
-    3: 3 * 24 * 60 * 60 * 1000, // 3 days
-    4: 7 * 24 * 60 * 60 * 1000  // 7 days
-  };
-
-  // Multiply by existing interval if card has been reviewed before
-  const currentInterval = card.interval || intervals[3];
-  let newInterval;
-
-  if (rating === 1) {
-    newInterval = intervals[1]; // Reset to 1 minute
-  } else if (rating === 2) {
-    newInterval = currentInterval * 0.8; // Decrease interval
-  } else if (rating === 3) {
-    newInterval = currentInterval * 1.5; // Increase by 50%
-  } else {
-    newInterval = currentInterval * 2.5; // More than double
-  }
-
-  // Clamp the interval so "Hard" can't decay toward zero (card stuck due
-  // forever) and "Easy" can't grow unbounded (card vanishes for years).
-  const MIN_INTERVAL = 1 * 60 * 1000;                 // 1 minute floor
-  const MAX_INTERVAL = 180 * 24 * 60 * 60 * 1000;     // ~6 months ceiling
-  if (newInterval < MIN_INTERVAL) newInterval = MIN_INTERVAL;
-  if (newInterval > MAX_INTERVAL) newInterval = MAX_INTERVAL;
-
-  const nextReview = Date.now() + newInterval;
+  // FSRS computes the next memory state and due date from the card's full
+  // review history (stability, difficulty, time since last review).
+  const patch = FSRS.rate(card, rating, now);
 
   // Update the card in storage
   chrome.storage.local.get(['history'], (result) => {
@@ -4150,17 +4125,27 @@ function rateFlashcard(rating) {
       if (histId(item) === histId(card)) {
         return {
           ...item,
-          nextReview: nextReview,
-          interval: newInterval,
-          lastReviewed: Date.now()
+          ...patch
         };
       }
       return item;
     });
 
     chrome.storage.local.set({ history: history }, () => {
+      // Keep the queued copy current so an in-session re-test schedules
+      // from the updated memory state.
+      Object.assign(card, patch);
+
       cardsReviewedCount++;
       document.getElementById('cards-reviewed').textContent = `Reviewed: ${cardsReviewedCount}`;
+
+      // A sub-day interval means the card only moved within its learning
+      // steps (1m/10m, or relearning after a lapse). Requeue it instead of
+      // letting it come due a few minutes after the session ends.
+      if (patch.interval < 24 * 60 * 60 * 1000) {
+        flashcardQueue.push(card);
+        document.getElementById('total-cards-num').textContent = flashcardQueue.length;
+      }
 
       currentCardIndex++;
       showCurrentCard();
@@ -4218,7 +4203,7 @@ function loadStats() {
     const now = Date.now();
     const dueCards = history.filter(item => {
       if (item.modelName === 'clip' && !item.definition) return false;
-      return (item.nextReview || 0) <= now;
+      return FSRS.isDue(item, now);
     }).length;
 
     // Estimate total reviews (if we don't have exact counts, we can estimate based on intervals)
