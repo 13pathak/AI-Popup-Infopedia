@@ -174,7 +174,7 @@ function cleanImplicitContext(context) {
 // actually carry the web_search tool (the fallback chain can mix grounded
 // and ungrounded models). Without it, models read the context sentence as a
 // knowledge source and skip the web_search they would otherwise have made.
-const IMPLICIT_CONTEXT_SEARCH_ADDENDUM = ' The page context is not a source of knowledge about the selected term: seeing the term in a sentence does not mean you know it. If you are not already familiar with the selected term from your own knowledge, or it may be newer than your training data, call the web_search tool before answering instead of explaining from the page context.';
+const IMPLICIT_CONTEXT_SEARCH_ADDENDUM = ' The page context is not a source of knowledge about the selected term: seeing the term in a sentence does not mean you know it. Do not guess what a term means from its parts (version numbers, series names, or suffixes like "Flash", "Pro", or "Next") — that is fabrication, not knowledge. Unless you can recall specific, concrete facts about this exact term, or the term may be newer than your training data, call the web_search tool before answering instead of explaining from the page context or the name itself.';
 
 // --- NEW: Listen for keyboard shortcuts (commands) ---
 chrome.commands.onCommand.addListener((command) => {
@@ -419,6 +419,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               content: implicitContextMessage.content + IMPLICIT_CONTEXT_SEARCH_ADDENDUM
             };
           }
+
+          // Guard-flagged answers are regenerated with the search forced:
+          // "required" makes the model call web_search before answering,
+          // sidestepping its miscalibrated "I can explain this name" urge.
+          // The orchestrator relaxes this to "auto" once results return.
+          // Gated on the Tavily key so we never force a call that would
+          // immediately error out.
+          if (request.forceSearch && tavilyApiKey) {
+            payload.tool_choice = "required";
+          }
         }
 
         // --- THIS IS THE OPTIONAL FIX (HEADERS) ---
@@ -558,9 +568,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 content: searchResultsText
               });
               
+              // The forced first call has served its purpose; let the model
+              // answer with the results instead of being forced to search
+              // again on every orchestrator loop.
+              if (request.forceSearch) {
+                payload.tool_choice = "auto";
+              }
+
               // If we are about to hit max loops, force the AI to answer by removing tools
               if (loopCount === maxLoops - 1) {
                 delete payload.tools;
+                delete payload.tool_choice;
               }
               
               // Re-fetch with the updated payload
@@ -675,6 +693,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         // popup can label saves and notify instead of crediting a dead model.
         usedModelId: usedModel.id,
         usedModelName: usedModel.name || usedModel.modelName,
+        // Whether a guard-flagged answer can be auto-regenerated with a
+        // forced web search (the answering model is grounded + Tavily key
+        // is configured).
+        searchGroundingAvailable: !!(usedModel.enableSearchGrounding && tavilyApiKey),
         fallbackFailedModels: failures.map(f => f.name),
         usedPrompt: prompt, models: models, defaultModelId: defaultModelId, customPrompts: customPrompts || [], defaultPromptId: defaultPromptId, promptName: promptName
       });

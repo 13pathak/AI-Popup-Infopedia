@@ -1657,7 +1657,12 @@ function initiatePopupSequence(rect, selectedText, customPrompt, implicitContext
             if (response && response.usedWebSearch) {
               showSearchGroundedIndicator(popupInstance);
             } else {
-              triggerVerification(popupInstance, selectedText, definitionText);
+              triggerVerification(popupInstance, selectedText, definitionText, {
+                modelId: null,
+                word: selectedText,
+                refreshActions: true,
+                searchGroundingAvailable: !!(response && response.searchGroundingAvailable)
+              });
             }
           }
         });
@@ -2739,7 +2744,12 @@ function redefineWithModelAndPrompt(instance, word, modelId, promptContent) {
               if (response && response.usedWebSearch) {
                 showSearchGroundedIndicator(instance);
               } else {
-                triggerVerification(instance, word, definitionText);
+                triggerVerification(instance, word, definitionText, {
+                  modelId: modelId,
+                  word: word,
+                  refreshActions: true,
+                  searchGroundingAvailable: !!(response && response.searchGroundingAvailable)
+                });
               }
             }
           });
@@ -3284,7 +3294,12 @@ function createFollowupInput(instance, word) {
               } else {
                 const userMsgs = instance.messages.filter(m => m.role === 'user');
                 const lastUserMsg = userMsgs.length > 0 ? userMsgs[userMsgs.length - 1].content : word;
-                triggerVerification(instance, lastUserMsg, response.definition);
+                triggerVerification(instance, lastUserMsg, response.definition, {
+                  modelId: modelId,
+                  word: word,
+                  refreshActions: false,
+                  searchGroundingAvailable: !!(response && response.searchGroundingAvailable)
+                });
               }
             }
           });
@@ -3553,7 +3568,7 @@ function escapeVerifyText(str) {
     .replace(/'/g, '&#039;');
 }
 
-function triggerVerification(popupInstance, originalPrompt, aiResponse) {
+function triggerVerification(popupInstance, originalPrompt, aiResponse, retryInfo) {
   if (!popupInstance || !popupInstance.popup) return;
   const msg = lastAssistantMessage(popupInstance);
   if (!msg) return;
@@ -3583,8 +3598,115 @@ function triggerVerification(popupInstance, originalPrompt, aiResponse) {
         reasoning: (response.result && response.result.reasoning) || '',
         corrections: Array.isArray(response.result && response.result.corrections) ? response.result.corrections.map(String) : []
       };
+      // Auto-recovery: the guard just proved the term sits outside the
+      // model's knowledge — exactly the case where a grounded search is
+      // needed but the model didn't feel uncertain enough to make one.
+      // When regenerate declines (stale message, no user turn), fall
+      // through and paint the badge as before.
+      if (msg.verification.state === 'hallucination' && retryInfo && retryInfo.searchGroundingAvailable
+          && regenerateWithGroundedSearch(popupInstance, msg, retryInfo)) {
+        return;
+      }
     }
     renderMessages(popupInstance);
+  });
+}
+
+// Re-asks a guard-flagged answer with the web_search tool forced. The
+// popup's conversation (minus the flagged reply) is replayed verbatim, so
+// initial lookups, redefines, and follow-ups all regenerate correctly —
+// the first user message already carries the templated/custom prompt. The
+// replacement answer is either search-grounded (badge) or verified again
+// with no retryInfo, so a second hallucination cannot loop. Returns true
+// when it took over the popup (caller skips its own re-render).
+function regenerateWithGroundedSearch(popupInstance, flaggedMsg, retryInfo) {
+  // Only regenerate when the flagged answer is still the live last message;
+  // a follow-up typed during verification makes it stale.
+  const msgs = popupInstance.messages;
+  if (!msgs.length || msgs[msgs.length - 1] !== flaggedMsg) return false;
+  const convo = msgs.filter(m => !m.isThinking && !m.isError && !m.isStreaming && m !== flaggedMsg);
+  if (!convo.some(m => m.role === 'user')) return false;
+
+  const setFollowupDisabled = (disabled) => {
+    if (!popupInstance.popup) return;
+    const followupInput = popupInstance.popup.querySelector('#ai-popup-followup-input');
+    const followupSend = popupInstance.popup.querySelector('.ai-popup-followup-send');
+    if (followupInput) followupInput.disabled = disabled;
+    if (followupSend) followupSend.disabled = disabled;
+  };
+
+  popupInstance.isLoading = true;
+  setFollowupDisabled(true);
+
+  // Retire the save actions bound to the hallucinated text, then swap the
+  // flagged answer for a thinking slot the retry streams into.
+  if (popupInstance.popup) {
+    const actions = popupInstance.popup.querySelector('.ai-popup-actions');
+    if (actions) actions.remove();
+  }
+  msgs.splice(msgs.indexOf(flaggedMsg), 1, { role: 'assistant', content: 'Hallucination detected — searching the web for a grounded answer...', isThinking: true });
+  renderMessages(popupInstance);
+  return true;  const stream = trackAiStream(popupInstance, () => {
+    const current = popupInstance.messages;
+    return current.length > 0 ? current[current.length - 1] : null;
+  });
+
+  const payload = {
+    type: "getAiDefinition",
+    word: retryInfo.word,
+    requestId: stream.requestId,
+    context: popupInstance.implicitContext || undefined,
+    messages: convo,
+    forceSearch: true
+  };
+  if (retryInfo.modelId) payload.modelId = retryInfo.modelId;
+
+  chrome.runtime.sendMessage(payload, (response) => {
+    stream.done();
+    if (!activePopups.includes(popupInstance)) {
+      stopLoadingQuoteRotation(popupInstance);
+      return;
+    }
+    popupInstance.isLoading = false;
+    setFollowupDisabled(false);
+
+    // Remove the thinking placeholder or streamed partial answer
+    popupInstance.messages = popupInstance.messages.filter(m => !m.isThinking && !m.isStreaming);
+
+    if (chrome.runtime.lastError) {
+      response = { error: chrome.runtime.lastError.message };
+    }
+
+    if (!response || response.error) {
+      // Put the flagged answer (with its badge) back rather than leaving
+      // the popup empty.
+      popupInstance.messages.push(flaggedMsg);
+      renderMessages(popupInstance);
+      return;
+    }
+
+    const definitionText = response.definition;
+    popupInstance.messages.push({ role: 'assistant', content: definitionText, citations: response.citations || [] });
+    renderMessages(popupInstance);
+    notifyModelFallback(popupInstance, response);
+
+    if (retryInfo.refreshActions) {
+      const modelName = (response && response.usedModelName) || 'Unknown Model';
+      createActionButtons(popupInstance, retryInfo.word, definitionText, modelName, response.promptName, response.citations || []);
+    }
+
+    chrome.storage.sync.get(['enableHallucinationGuard'], (guardData) => {
+      if (!guardData.enableHallucinationGuard) return;
+      if (response.usedWebSearch) {
+        showSearchGroundedIndicator(popupInstance);
+      } else {
+        // A fallback model answered without searching; verify normally.
+        // No retryInfo here — at most one auto-regeneration per answer.
+        const userMsgs = popupInstance.messages.filter(m => m.role === 'user');
+        const lastUserMsg = userMsgs.length > 0 ? userMsgs[userMsgs.length - 1].content : retryInfo.word;
+        triggerVerification(popupInstance, lastUserMsg, definitionText, null);
+      }
+    });
   });
 }
 
