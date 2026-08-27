@@ -5,7 +5,7 @@ let baseZIndex = 2100000000;
 // Build marker: the DevTools console of any page shows which content.js
 // build the tab is running — tabs opened before an extension reload keep the
 // previous script until the page is refreshed.
-console.log('[AI Popup] content script build 2026-08-26.4');
+console.log('[AI Popup] content script build 2026-08-27.1');
 
 // --- Theme Cache & Management ---
 let currentUiTheme = 'dark';
