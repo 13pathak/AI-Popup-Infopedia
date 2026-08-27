@@ -214,11 +214,8 @@ chrome.commands.onCommand.addListener((command) => {
 // Chrome too old for storage.session keeps the legacy data: fallback.
 // tabs.create wrapper that consumes lastError and routes failures to a
 // caller-supplied fallback instead of leaving them unread in the void.
-function createTabChecked(url, onFailure, t0) {
-  chrome.tabs.create({ url }, (tab) => {
-    // Timing diagnostics for the Save→print-dialog path (service-worker
-    // console): attributes the wait between the click and the visible tab.
-    if (t0) console.log(`[AI Popup] print tab created ${Date.now() - t0}ms after the save click`);
+function createTabChecked(url, onFailure) {
+  chrome.tabs.create({ url }, () => {
     if (chrome.runtime.lastError) {
       const message = chrome.runtime.lastError.message || '';
       void chrome.runtime.lastError;
@@ -229,7 +226,6 @@ function createTabChecked(url, onFailure, t0) {
 
 function openPrintTab(htmlContent) {
   if (typeof htmlContent !== 'string' || htmlContent.length === 0) return;
-  const t0 = Date.now();
   // Every transport below is checked: an unchecked tabs.create used to let
   // oversized transcripts die with zero feedback (session-storage quota ->
   // data: fallback -> ~2MB data: cap -> silent nothing). print.html renders
@@ -261,9 +257,8 @@ function openPrintTab(htmlContent) {
       }
       return;
     }
-    console.log(`[AI Popup] print payload staged in ${Date.now() - t0}ms`);
     createTabChecked(chrome.runtime.getURL('pdf/print.html') + '?k=' + encodeURIComponent(key),
-      () => showPrintFailure('tab'), t0);
+      () => showPrintFailure('tab'));
   });
 }
 
