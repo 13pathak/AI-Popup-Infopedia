@@ -1380,6 +1380,27 @@ window.addEventListener('keydown', (e) => {
     }
 });
 
+// Route Ctrl+S to the PDF viewer's Save button (saving highlights / document)
+window.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S' || e.code === 'KeyS')) {
+        // If an active AI popup is open, let its own handler save the AI conversation
+        if (typeof activePopups !== 'undefined' && Array.isArray(activePopups) && activePopups.length > 0) {
+            return;
+        }
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        // Commit any pending open note editor before saving
+        const notePopup = document.getElementById('note-editor-popup');
+        if (notePopup && !notePopup.classList.contains('hidden')) {
+            document.getElementById('note-btn-save')?.click();
+        }
+        const saveBtn = document.getElementById('save_pdf');
+        if (saveBtn && !saveBtn.disabled) {
+            saveBtn.click();
+        }
+    }
+}, true);
+
 // The ⋮ menu and File→Print open the preview directly — no keydown to
 // intercept — and beforeprint is the only hook they fire. The pipeline
 // above can't run from here: rendering is async and the preview snapshots
