@@ -1740,6 +1740,16 @@
             </label>
         </div>
 
+        <div id="local-secrets-container" class="settings-section">
+            <h3 class="section-title">API Key Storage & Privacy</h3>
+            <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer;">
+                <input type="checkbox" id="enable-local-secrets" style="margin-top: 4px;">
+                <span><strong>Store API keys locally on this device only</strong><br>
+                    <small>When enabled, your AI model configs (including API keys), search keys, and voice keys are stored in this browser's local storage (<code>chrome.storage.local</code>) and removed from Google Chrome Sync. This prevents your paid keys from uploading to Google servers or syncing to other devices.<br><em>Note: Local storage keeps keys on your machine, but is not encrypted at rest.</em></small></span>
+            </label>
+            <div id="local-secrets-status" style="margin-top: 10px; font-weight: bold; min-height: 1em;"></div>
+        </div>
+
         <div id="status"></div>
     </div>
 

@@ -263,6 +263,44 @@ function openPrintTab(htmlContent) {
 }
 
 
+// --- UNIFIED SECRET STORAGE ACCESSOR (Issue #32) ---
+// Secret-bearing keys: 'models', 'defaultModelId', 'verificationModelId', 'tavilyApiKey', 'sttApiKey', 'sttCustomHeaders'
+// Non-secret settings live in sync; when secretsLocalOnly is true, secrets live in local.
+const SECRET_STORAGE_KEYS = new Set(['models', 'defaultModelId', 'verificationModelId', 'tavilyApiKey', 'sttApiKey', 'sttCustomHeaders']);
+
+function getSecretStorageConfig(requestedKeys, defaults = {}) {
+  return new Promise((resolve) => {
+    chrome.storage.sync.get({ secretsLocalOnly: false }, (syncFlagData) => {
+      const isLocalOnly = Boolean(syncFlagData.secretsLocalOnly);
+      const syncKeys = [];
+      const localKeys = [];
+
+      const keysList = Array.isArray(requestedKeys)
+        ? requestedKeys
+        : (typeof requestedKeys === 'object' && requestedKeys !== null ? Object.keys(requestedKeys) : []);
+
+      keysList.forEach(k => {
+        if (SECRET_STORAGE_KEYS.has(k)) {
+          if (isLocalOnly) localKeys.push(k);
+          else syncKeys.push(k);
+        } else {
+          syncKeys.push(k);
+        }
+      });
+
+      chrome.storage.sync.get(syncKeys, (syncRes) => {
+        if (localKeys.length === 0) {
+          resolve({ ...defaults, ...syncRes, secretsLocalOnly: isLocalOnly });
+          return;
+        }
+        chrome.storage.local.get(localKeys, (localRes) => {
+          resolve({ ...defaults, ...syncRes, ...localRes, secretsLocalOnly: isLocalOnly });
+        });
+      });
+    });
+  });
+}
+
 // --- This listener now handles multiple message types ---
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
@@ -279,8 +317,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // --- Case 1: Get a definition ---
   if (request.type === "getAiDefinition") {
 
-    // Get all saved models and the ID of the default one
-    chrome.storage.sync.get({ 'models': [], 'defaultModelId': null, 'customPrompts': [], 'defaultPromptId': null, 'tavilyApiKey': '', 'enableModelFallback': true, 'enableImplicitContext': true }, async (data) => {
+    // Get all saved models and the ID of the default one (routed through secret storage accessor)
+    getSecretStorageConfig(['models', 'defaultModelId', 'customPrompts', 'defaultPromptId', 'tavilyApiKey', 'enableModelFallback', 'enableImplicitContext'], {
+      models: [],
+      defaultModelId: null,
+      customPrompts: [],
+      defaultPromptId: null,
+      tavilyApiKey: '',
+      enableModelFallback: true,
+      enableImplicitContext: true
+    }).then(async (data) => {
       const { models, defaultModelId, customPrompts, defaultPromptId, tavilyApiKey, enableModelFallback, enableImplicitContext } = data;
 
       if (!models || models.length === 0 || !defaultModelId) {
@@ -925,7 +971,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   // --- Case 7: Verify AI Response ---
   if (request.type === "verifyAiResponse") {
-    chrome.storage.sync.get(['models', 'verificationModelId', 'enableImplicitContext'], async (data) => {
+    getSecretStorageConfig(['models', 'verificationModelId', 'enableImplicitContext']).then(async (data) => {
       const { models, verificationModelId } = data;
       if (!models || !verificationModelId) {
         sendResponse({ error: "Verification model not configured." });
@@ -1216,12 +1262,18 @@ function triggerBackup(type = "Auto", customBackupInclude = null) {
         ...(customBackupInclude || syncData.backupInclude || {})
       };
 
+      const isLocalSecrets = Boolean(syncData.secretsLocalOnly);
+      const secretsSource = isLocalSecrets ? localData : syncData;
+
       const backupData = {
         exportedAt: new Date().toISOString(),
         backupType: type,
         backupInclude: backupInclude,
         version: "1.3"
       };
+      if (syncData.secretsLocalOnly !== undefined) {
+        backupData.secretsLocalOnly = syncData.secretsLocalOnly;
+      }
 
       // 1. Vocabulary History & Lists. When review progress is excluded,
       // the scheduling fields are stripped so the backup stays shareable.
@@ -1240,7 +1292,7 @@ function triggerBackup(type = "Auto", customBackupInclude = null) {
 
       // 2. AI Models Configuration
       if (backupInclude.models) {
-        let modelsList = (syncData.models || []).map(m => ({ ...m }));
+        let modelsList = (secretsSource.models || []).map(m => ({ ...m }));
         if (!backupInclude.apiKeys) {
           modelsList = modelsList.map(m => {
             const sanitized = { ...m };
@@ -1252,8 +1304,10 @@ function triggerBackup(type = "Auto", customBackupInclude = null) {
           });
         }
         backupData.models = modelsList;
-        if (syncData.defaultModelId !== undefined) backupData.defaultModelId = syncData.defaultModelId;
-        if (syncData.verificationModelId !== undefined) backupData.verificationModelId = syncData.verificationModelId;
+        const defId = secretsSource.defaultModelId !== undefined ? secretsSource.defaultModelId : syncData.defaultModelId;
+        if (defId !== undefined) backupData.defaultModelId = defId;
+        const verId = secretsSource.verificationModelId !== undefined ? secretsSource.verificationModelId : syncData.verificationModelId;
+        if (verId !== undefined) backupData.verificationModelId = verId;
         if (syncData.enableHallucinationGuard !== undefined) backupData.enableHallucinationGuard = syncData.enableHallucinationGuard;
         if (syncData.enableModelFallback !== undefined) backupData.enableModelFallback = syncData.enableModelFallback;
         if (syncData.enableImplicitContext !== undefined) backupData.enableImplicitContext = syncData.enableImplicitContext;
@@ -1267,9 +1321,12 @@ function triggerBackup(type = "Auto", customBackupInclude = null) {
 
       // 4. API Keys & Secrets (Tavily, STT, etc.)
       if (backupInclude.apiKeys) {
-        if (syncData.tavilyApiKey !== undefined) backupData.tavilyApiKey = syncData.tavilyApiKey;
-        if (syncData.sttApiKey !== undefined) backupData.sttApiKey = syncData.sttApiKey;
-        if (syncData.sttCustomHeaders !== undefined) backupData.sttCustomHeaders = syncData.sttCustomHeaders;
+        const tavily = secretsSource.tavilyApiKey !== undefined ? secretsSource.tavilyApiKey : syncData.tavilyApiKey;
+        if (tavily !== undefined) backupData.tavilyApiKey = tavily;
+        const sttKey = secretsSource.sttApiKey !== undefined ? secretsSource.sttApiKey : syncData.sttApiKey;
+        if (sttKey !== undefined) backupData.sttApiKey = sttKey;
+        const sttHdr = secretsSource.sttCustomHeaders !== undefined ? secretsSource.sttCustomHeaders : syncData.sttCustomHeaders;
+        if (sttHdr !== undefined) backupData.sttCustomHeaders = sttHdr;
       }
 
       // 5. Anki Settings
@@ -1657,9 +1714,7 @@ chrome.webRequest.onHeadersReceived.addListener(
 // --- Diagnostic Test Connection Handler ---
 async function handleTestConnection(request, sendResponse) {
   try {
-    const data = await new Promise(resolve => {
-      chrome.storage.sync.get(['models', 'defaultModelId', 'tavilyApiKey'], resolve);
-    });
+    const data = await getSecretStorageConfig(['models', 'defaultModelId', 'tavilyApiKey']);
 
     const { models = [], defaultModelId, tavilyApiKey } = data;
     let modelToTest = null;

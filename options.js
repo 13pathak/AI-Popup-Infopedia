@@ -158,6 +158,7 @@ document.addEventListener('DOMContentLoaded', () => {
   loadImplicitContextSetting(); // Load implicit context toggle
   loadHallucinationGuardSettings(); // Load Hallucination Guard settings
   loadSearchApiSettings(); // Load Search API settings
+  loadLocalSecretsSetting(); // Load Local-only API-key mode setting
   loadPdfAuthorName(); // Load Custom Author Name
   loadPdfViewerToggle(); // Load PDF interception toggle
 
@@ -242,6 +243,7 @@ document.addEventListener('DOMContentLoaded', () => {
         : 'Disabled: Your questions will be hidden in the popup chat history.', 'success');
     });
   });
+  safeAddListener('enable-local-secrets', 'change', handleLocalSecretsToggle);
   safeAddListener('save-model-btn', 'click', saveModel);
   safeAddListener('provider-preset-select', 'change', applyProviderPreset);
   safeAddListener('endpoint', 'input', updateApiKeyGuidance);
@@ -935,7 +937,246 @@ function hideModelForm() {
   updateApiKeyGuidance();
 }
 
-function saveModel() {
+// --- UNIFIED SECRET STORAGE ACCESSORS (Issue #32) ---
+// Secret-bearing keys: 'models', 'defaultModelId', 'verificationModelId', 'tavilyApiKey', 'sttApiKey', 'sttCustomHeaders'
+// When secretsLocalOnly is true, these reside in chrome.storage.local; otherwise in chrome.storage.sync.
+const SECRET_STORAGE_KEYS = new Set(['models', 'defaultModelId', 'verificationModelId', 'tavilyApiKey', 'sttApiKey', 'sttCustomHeaders']);
+
+function isSecretsLocalOnly() {
+  return new Promise((resolve) => {
+    chrome.storage.sync.get({ secretsLocalOnly: false }, (data) => {
+      resolve(Boolean(data.secretsLocalOnly));
+    });
+  });
+}
+
+function getSecretStorage(requestedKeys, defaults = {}) {
+  return new Promise((resolve) => {
+    chrome.storage.sync.get({ secretsLocalOnly: false }, (syncFlag) => {
+      const isLocalOnly = Boolean(syncFlag.secretsLocalOnly);
+      const syncKeys = [];
+      const localKeys = [];
+
+      const keysList = Array.isArray(requestedKeys)
+        ? requestedKeys
+        : (typeof requestedKeys === 'object' && requestedKeys !== null ? Object.keys(requestedKeys) : []);
+
+      keysList.forEach(k => {
+        if (SECRET_STORAGE_KEYS.has(k)) {
+          if (isLocalOnly) localKeys.push(k);
+          else syncKeys.push(k);
+        } else {
+          syncKeys.push(k);
+        }
+      });
+
+      chrome.storage.sync.get(syncKeys, (syncRes) => {
+        if (localKeys.length === 0) {
+          resolve({ ...defaults, ...syncRes, secretsLocalOnly: isLocalOnly });
+          return;
+        }
+        chrome.storage.local.get(localKeys, (localRes) => {
+          resolve({ ...defaults, ...syncRes, ...localRes, secretsLocalOnly: isLocalOnly });
+        });
+      });
+    });
+  });
+}
+
+function setSecretStorage(items) {
+  return new Promise((resolve, reject) => {
+    chrome.storage.sync.get({ secretsLocalOnly: false }, (syncFlag) => {
+      const isLocalOnly = Boolean(syncFlag.secretsLocalOnly);
+      const syncItems = {};
+      const localItems = {};
+
+      Object.entries(items).forEach(([k, v]) => {
+        if (SECRET_STORAGE_KEYS.has(k)) {
+          if (isLocalOnly) localItems[k] = v;
+          else syncItems[k] = v;
+        } else {
+          syncItems[k] = v;
+        }
+      });
+
+      const promises = [];
+      if (Object.keys(syncItems).length > 0) {
+        promises.push(new Promise((res, rej) => {
+          chrome.storage.sync.set(syncItems, () => {
+            if (chrome.runtime.lastError) rej(new Error(chrome.runtime.lastError.message));
+            else res();
+          });
+        }));
+      }
+      if (Object.keys(localItems).length > 0) {
+        promises.push(new Promise((res, rej) => {
+          chrome.storage.local.set(localItems, () => {
+            if (chrome.runtime.lastError) rej(new Error(chrome.runtime.lastError.message));
+            else res();
+          });
+        }));
+      }
+
+      Promise.all(promises).then(() => resolve()).catch(reject);
+    });
+  });
+}
+
+function removeSecretStorage(keys) {
+  return new Promise((resolve, reject) => {
+    chrome.storage.sync.get({ secretsLocalOnly: false }, (syncFlag) => {
+      const isLocalOnly = Boolean(syncFlag.secretsLocalOnly);
+      const syncKeys = [];
+      const localKeys = [];
+
+      keys.forEach(k => {
+        if (SECRET_STORAGE_KEYS.has(k)) {
+          if (isLocalOnly) localKeys.push(k);
+          else syncKeys.push(k);
+        } else {
+          syncKeys.push(k);
+        }
+      });
+
+      const promises = [];
+      if (syncKeys.length > 0) {
+        promises.push(new Promise((res, rej) => {
+          chrome.storage.sync.remove(syncKeys, () => {
+            if (chrome.runtime.lastError) rej(new Error(chrome.runtime.lastError.message));
+            else res();
+          });
+        }));
+      }
+      if (localKeys.length > 0) {
+        promises.push(new Promise((res, rej) => {
+          chrome.storage.local.remove(localKeys, () => {
+            if (chrome.runtime.lastError) rej(new Error(chrome.runtime.lastError.message));
+            else res();
+          });
+        }));
+      }
+
+      Promise.all(promises).then(() => resolve()).catch(reject);
+    });
+  });
+}
+
+function loadLocalSecretsSetting() {
+  chrome.storage.sync.get({ secretsLocalOnly: false }, (data) => {
+    const checkbox = document.getElementById('enable-local-secrets');
+    if (checkbox) {
+      checkbox.checked = Boolean(data.secretsLocalOnly);
+    }
+  });
+}
+
+async function handleLocalSecretsToggle(e) {
+  const checkbox = e.target;
+  const wantLocal = checkbox.checked;
+  const statusEl = document.getElementById('local-secrets-status');
+
+  const updateLocalStatus = (msg, isError = false) => {
+    if (!statusEl) return;
+    statusEl.textContent = msg;
+    statusEl.style.color = isError ? 'var(--danger-color, #d9534f)' : 'var(--secondary-color, #10B981)';
+    setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 4000);
+  };
+
+  if (wantLocal) {
+    const confirmed = confirm(
+      "Enable Local-Only API Key Mode?\n\n" +
+      "Your AI model configurations (including API keys), search keys, and voice keys will be moved to this browser's local storage and removed from Google Chrome Sync.\n\n" +
+      "They will no longer sync to other computers or devices signed in with your Google account."
+    );
+    if (!confirmed) {
+      checkbox.checked = false;
+      return;
+    }
+
+    try {
+      const secretKeys = ['models', 'defaultModelId', 'verificationModelId', 'tavilyApiKey', 'sttApiKey', 'sttCustomHeaders'];
+      const syncData = await new Promise(resolve => chrome.storage.sync.get(secretKeys, resolve));
+      
+      const toLocal = {};
+      secretKeys.forEach(k => {
+        if (syncData[k] !== undefined) toLocal[k] = syncData[k];
+      });
+      if (Object.keys(toLocal).length > 0) {
+        await new Promise((resolve, reject) => {
+          chrome.storage.local.set(toLocal, () => {
+            if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+            else resolve();
+          });
+        });
+      }
+
+      await new Promise((resolve, reject) => {
+        chrome.storage.sync.remove(secretKeys, () => {
+          if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+          else resolve();
+        });
+      });
+      await new Promise((resolve, reject) => {
+        chrome.storage.sync.set({ secretsLocalOnly: true }, () => {
+          if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+          else resolve();
+        });
+      });
+
+      updateLocalStatus('✓ Local-only mode enabled. Secrets are stored locally on this machine.');
+      loadModels();
+      loadHallucinationGuardSettings();
+      loadSearchApiSettings();
+      loadSTTSettings();
+    } catch (err) {
+      console.error("Failed to enable local secrets mode:", err);
+      checkbox.checked = false;
+      updateLocalStatus(`Error enabling local-only mode: ${err.message}`, true);
+    }
+  } else {
+    const confirmed = confirm(
+      "Disable Local-Only API Key Mode?\n\n" +
+      "Your AI model configurations (including API keys), search keys, and voice keys will be uploaded to Google Chrome Sync.\n\n" +
+      "They will roam to all devices signed in with your Google account."
+    );
+    if (!confirmed) {
+      checkbox.checked = true;
+      return;
+    }
+
+    try {
+      const secretKeys = ['models', 'defaultModelId', 'verificationModelId', 'tavilyApiKey', 'sttApiKey', 'sttCustomHeaders'];
+      const localData = await new Promise(resolve => chrome.storage.local.get(secretKeys, resolve));
+
+      const toSync = { secretsLocalOnly: false };
+      secretKeys.forEach(k => {
+        if (localData[k] !== undefined) toSync[k] = localData[k];
+      });
+      await new Promise((resolve, reject) => {
+        chrome.storage.sync.set(toSync, () => {
+          if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+          else resolve();
+        });
+      });
+
+      await new Promise((resolve) => {
+        chrome.storage.local.remove(secretKeys, resolve);
+      });
+
+      updateLocalStatus('✓ Local-only mode disabled. Secrets will now sync via Google Chrome Sync.');
+      loadModels();
+      loadHallucinationGuardSettings();
+      loadSearchApiSettings();
+      loadSTTSettings();
+    } catch (err) {
+      console.error("Failed to disable local secrets mode:", err);
+      checkbox.checked = true;
+      updateLocalStatus(`Error disabling local-only mode: ${err.message}`, true);
+    }
+  }
+}
+
+async function saveModel() {
   const modelId = document.getElementById('model-id').value;
   const newModelConfig = {
     id: modelId || `model_${new Date().getTime()}`,
@@ -951,7 +1192,8 @@ function saveModel() {
     return;
   }
 
-  chrome.storage.sync.get(['models', 'defaultModelId'], (data) => {
+  try {
+    const data = await getSecretStorage(['models', 'defaultModelId']);
     let models = data.models || [];
     if (modelId) { // Editing existing
       models = models.map(m => m.id === modelId ? newModelConfig : m);
@@ -965,26 +1207,27 @@ function saveModel() {
       defaultModelId = models[0].id;
     }
 
-    chrome.storage.sync.set({ models, defaultModelId }, () => {
-      if (chrome.runtime.lastError) {
-        console.error("Error saving model:", chrome.runtime.lastError);
-        updateStatus(`Error saving model: ${chrome.runtime.lastError.message}`, 'error');
-        return;
-      }
-      const isLocal = newModelConfig.endpointUrl.includes('localhost') || newModelConfig.endpointUrl.includes('127.0.0.1');
-      if (!newModelConfig.apiKey && !isLocal) {
-        updateStatus('Model saved! Note: Cloud providers usually require an API key to work.', 'success');
-      } else {
-        updateStatus('Model saved successfully!', 'success');
-      }
-      hideModelForm();
-      loadModels();
-    });
-  });
+    await setSecretStorage({ models, defaultModelId });
+    const isLocal = newModelConfig.endpointUrl.includes('localhost') || newModelConfig.endpointUrl.includes('127.0.0.1');
+    if (!newModelConfig.apiKey && !isLocal) {
+      updateStatus('Model saved! Note: Cloud providers usually require an API key to work.', 'success');
+    } else {
+      updateStatus('Model saved successfully!', 'success');
+    }
+    hideModelForm();
+    loadModels();
+  } catch (err) {
+    console.error("Error saving model:", err);
+    updateStatus(`Error saving model: ${err.message}`, 'error');
+  }
 }
 
-function loadModels() {
-  chrome.storage.sync.get({ 'models': [], 'defaultModelId': null, 'enableModelFallback': true }, (data) => {
+async function loadModels() {
+  try {
+    const [data, syncData] = await Promise.all([
+      getSecretStorage(['models', 'defaultModelId']),
+      new Promise(resolve => chrome.storage.sync.get({ enableModelFallback: true }, resolve))
+    ]);
     const models = data.models || [];
     const defaultModelId = data.defaultModelId;
     const selectEl = document.getElementById('model-select');
@@ -993,22 +1236,23 @@ function loadModels() {
     const deleteModelBtn = document.getElementById('delete-model-btn');
     const reorderBtn = document.getElementById('reorder-models-btn');
     const fallbackToggle = document.getElementById('enable-model-fallback');
+    if (!selectEl) return;
     selectEl.innerHTML = '';
 
     // Absent flag means enabled: the fallback chain is the default behavior.
-    if (fallbackToggle) fallbackToggle.checked = data.enableModelFallback !== false;
+    if (fallbackToggle) fallbackToggle.checked = syncData.enableModelFallback !== false;
 
     if (models.length === 0) {
-      noModelsMsg.style.display = 'block';
+      if (noModelsMsg) noModelsMsg.style.display = 'block';
       selectEl.style.display = 'none'; // Hide the select dropdown
-      editModelBtn.style.display = 'none'; // Hide edit button
-      deleteModelBtn.style.display = 'none'; // Hide delete button
+      if (editModelBtn) editModelBtn.style.display = 'none'; // Hide edit button
+      if (deleteModelBtn) deleteModelBtn.style.display = 'none'; // Hide delete button
       if (reorderBtn) reorderBtn.style.display = 'none';
     } else {
-      noModelsMsg.style.display = 'none';
+      if (noModelsMsg) noModelsMsg.style.display = 'none';
       selectEl.style.display = 'block'; // Show the select dropdown
-      editModelBtn.style.display = 'inline-block'; // Show edit button
-      deleteModelBtn.style.display = 'inline-block'; // Show delete button
+      if (editModelBtn) editModelBtn.style.display = 'inline-block'; // Show edit button
+      if (deleteModelBtn) deleteModelBtn.style.display = 'inline-block'; // Show delete button
       if (reorderBtn) reorderBtn.style.display = models.length > 1 ? 'inline-block' : 'none';
 
       models.forEach(model => {
@@ -1022,18 +1266,26 @@ function loadModels() {
       });
     }
     refreshOnboarding(); // any model add/delete/import re-runs the checklist
-  });
+  } catch (err) {
+    console.error("Error loading models:", err);
+  }
 }
 
-function loadHallucinationGuardSettings() {
-  chrome.storage.sync.get(['enableHallucinationGuard', 'verificationModelId', 'models'], (data) => {
-    const enableGuard = data.enableHallucinationGuard || false;
-    const verificationModelId = data.verificationModelId;
-    const models = data.models || [];
+async function loadHallucinationGuardSettings() {
+  try {
+    const [secretData, syncData] = await Promise.all([
+      getSecretStorage(['models', 'verificationModelId']),
+      new Promise(resolve => chrome.storage.sync.get({ enableHallucinationGuard: false }, resolve))
+    ]);
+    const enableGuard = syncData.enableHallucinationGuard || false;
+    const verificationModelId = secretData.verificationModelId;
+    const models = secretData.models || [];
     
-    document.getElementById('enable-hallucination-guard').checked = enableGuard;
+    const guardCheckbox = document.getElementById('enable-hallucination-guard');
+    if (guardCheckbox) guardCheckbox.checked = enableGuard;
     
     const verificationSelect = document.getElementById('verification-model-select');
+    if (!verificationSelect) return;
     verificationSelect.innerHTML = '';
     
     if (models.length === 0) {
@@ -1059,43 +1311,53 @@ function loadHallucinationGuardSettings() {
         saveHallucinationGuardSettings();
       }
     }
-  });
+  } catch (err) {
+    console.error("Error loading hallucination guard settings:", err);
+  }
 }
 
-function saveHallucinationGuardSettings() {
-  const enableGuard = document.getElementById('enable-hallucination-guard').checked;
-  const verificationModelId = document.getElementById('verification-model-select').value;
+async function saveHallucinationGuardSettings() {
+  const enableGuard = document.getElementById('enable-hallucination-guard')?.checked || false;
+  const verificationModelId = document.getElementById('verification-model-select')?.value || '';
   
-  chrome.storage.sync.set({ 
-    enableHallucinationGuard: enableGuard,
-    verificationModelId: verificationModelId
-  });
+  try {
+    await Promise.all([
+      new Promise(resolve => chrome.storage.sync.set({ enableHallucinationGuard: enableGuard }, resolve)),
+      setSecretStorage({ verificationModelId: verificationModelId })
+    ]);
+  } catch (err) {
+    console.error("Error saving hallucination guard settings:", err);
+  }
 }
 
-function editSelectedModel() {
-  const selectedId = document.getElementById('model-select').value;
+async function editSelectedModel() {
+  const selectedId = document.getElementById('model-select')?.value;
   if (!selectedId) {
     alert("No model selected to edit.");
     return;
   }
-  chrome.storage.sync.get(['models'], (data) => {
+  try {
+    const data = await getSecretStorage(['models']);
     const modelToEdit = (data.models || []).find(m => m.id === selectedId);
     if (modelToEdit) {
       showModelForm(true, modelToEdit);
     }
-  });
+  } catch (err) {
+    console.error("Error editing selected model:", err);
+  }
 }
 
-function deleteSelectedModel() {
-  const modelIdToDelete = document.getElementById('model-select').value;
+async function deleteSelectedModel() {
+  const modelIdToDelete = document.getElementById('model-select')?.value;
   if (!modelIdToDelete) {
     alert("No model selected to delete.");
     return;
   }
 
-  if (!confirm('Are you sure you want to delete the selected model configuration?')) return;
+  if (!confirm('Are_you sure you want to delete the selected model configuration?'.replace(/_/g, ' '))) return;
 
-  chrome.storage.sync.get(['models', 'defaultModelId', 'verificationModelId'], (data) => {
+  try {
+    const data = await getSecretStorage(['models', 'defaultModelId', 'verificationModelId']);
     let models = data.models || [];
     let defaultModelId = data.defaultModelId;
     let verificationModelId = data.verificationModelId;
@@ -1106,35 +1368,39 @@ function deleteSelectedModel() {
     if (defaultModelId === modelIdToDelete) {
       defaultModelId = models.length > 0 ? models[0].id : null;
     }
-    // Same for the Hallucination Guard's verifier: a dangling id makes
-    // every guarded answer error ("Verification model not found") while
-    // the guard settings still show a healthy-looking selection.
+    // Same for the Hallucination Guard's verifier
     if (verificationModelId === modelIdToDelete) {
       verificationModelId = models.length > 0 ? models[0].id : null;
     }
 
-    chrome.storage.sync.set({ models, defaultModelId, verificationModelId }, () => {
-      updateStatus('Model deleted.', 'success');
-      loadModels();
-    });
-  });
+    await setSecretStorage({ models, defaultModelId, verificationModelId });
+    updateStatus('Model deleted.', 'success');
+    loadModels();
+  } catch (err) {
+    console.error("Error deleting model:", err);
+    updateStatus(`Error deleting model: ${err.message}`, 'error');
+  }
 }
 
-function setDefaultModel(modelId) {
-  chrome.storage.sync.set({ defaultModelId: modelId }, () => {
+async function setDefaultModel(modelId) {
+  try {
+    await setSecretStorage({ defaultModelId: modelId });
     updateStatus('Default model updated.', 'success');
     loadModels();
-  });
+  } catch (err) {
+    console.error("Error setting default model:", err);
+  }
 }
 
 // --- Drag and Drop Reordering Modal for Models ---
 let reorderCurrentModels = [];
 let dragModelSrcEl = null;
 
-function openReorderModelsModal() {
+async function openReorderModelsModal() {
   const modal = document.getElementById('reorder-models-modal');
   if (!modal) return;
-  chrome.storage.sync.get({ models: [] }, (data) => {
+  try {
+    const data = await getSecretStorage(['models']);
     reorderCurrentModels = [...(data.models || [])];
     if (reorderCurrentModels.length < 2) {
       updateStatus('You need at least 2 models to reorder fallback priority.');
@@ -1142,7 +1408,9 @@ function openReorderModelsModal() {
     }
     renderReorderModels();
     modal.style.display = 'flex';
-  });
+  } catch (err) {
+    console.error("Error opening reorder modal:", err);
+  }
 }
 
 function renderReorderModels() {
@@ -1242,13 +1510,16 @@ function handleModelDragEnd(e) {
   items.forEach(item => item.classList.remove('over'));
 }
 
-function saveReorderedModels() {
-  chrome.storage.sync.set({ models: reorderCurrentModels }, () => {
+async function saveReorderedModels() {
+  try {
+    await setSecretStorage({ models: reorderCurrentModels });
     const modal = document.getElementById('reorder-models-modal');
     if (modal) modal.style.display = 'none';
     loadModels();
     updateStatus('Fallback order updated successfully.', 'success');
-  });
+  } catch (err) {
+    console.error("Error saving reordered models:", err);
+  }
 }
 
 function loadPdfAuthorName() {
@@ -1376,23 +1647,32 @@ function loadImplicitContextSetting() {
   });
 }
 
-function loadSearchApiSettings() {
-  chrome.storage.sync.get(['tavilyApiKey'], (data) => {
-    if (data.tavilyApiKey !== undefined) {
-      document.getElementById('tavily-api-key').value = data.tavilyApiKey;
+async function loadSearchApiSettings() {
+  try {
+    const data = await getSecretStorage(['tavilyApiKey']);
+    const input = document.getElementById('tavily-api-key');
+    if (input && data.tavilyApiKey !== undefined) {
+      input.value = data.tavilyApiKey;
     }
-  });
+  } catch (err) {
+    console.error("Error loading search API settings:", err);
+  }
 }
 
-function saveSearchApiSettings() {
-  const apiKey = document.getElementById('tavily-api-key').value.trim();
-  chrome.storage.sync.set({ tavilyApiKey: apiKey }, () => {
+async function saveSearchApiSettings() {
+  const apiKey = (document.getElementById('tavily-api-key')?.value || '').trim();
+  try {
+    await setSecretStorage({ tavilyApiKey: apiKey });
     const statusEl = document.getElementById('tavily-status');
-    statusEl.textContent = 'Search API key saved successfully!';
-    setTimeout(() => {
-      statusEl.textContent = '';
-    }, 3000);
-  });
+    if (statusEl) {
+      statusEl.textContent = 'Search API key saved successfully!';
+      setTimeout(() => {
+        if (statusEl) statusEl.textContent = '';
+      }, 3000);
+    }
+  } catch (err) {
+    console.error("Error saving search API settings:", err);
+  }
 }
 
 function loadDefaultPromptSelect() {
@@ -1459,11 +1739,23 @@ function updateStatus(message, type = 'info') {
 
 async function exportAllSettings() {
   try {
-    // 1. Get all data from sync storage (models, prompts)
+    // 1. Get all data from sync storage (models, prompts, settings)
     const syncData = await new Promise(resolve => chrome.storage.sync.get(null, resolve));
 
-    // --- NEW: Exclude Anki settings from this export ---
+    // Exclude Anki settings from this export
     delete syncData.ankiSettings;
+
+    // Pull secret keys from active secret storage area (sync or local)
+    const secretKeys = ['models', 'defaultModelId', 'verificationModelId', 'tavilyApiKey', 'sttApiKey', 'sttCustomHeaders'];
+    const secretData = await getSecretStorage(secretKeys);
+    secretKeys.forEach(k => {
+      if (secretData[k] !== undefined) {
+        syncData[k] = secretData[k];
+      }
+    });
+    if (secretData.secretsLocalOnly !== undefined) {
+      syncData.secretsLocalOnly = secretData.secretsLocalOnly;
+    }
 
     // syncData includes live secrets (each model's apiKey, tavilyApiKey,
     // sttApiKey/sttCustomHeaders) so the file is self-contained for restore.
@@ -1520,13 +1812,13 @@ function importAllSettings(event) {
         return;
       }
 
-      // --- NEW: Get Anki settings to preserve them ---
+      // Get Anki settings to preserve them
       const ankiSettings = await new Promise(resolve => chrome.storage.sync.get('ankiSettings', resolve));
 
       // storage.set callbacks fire even on failure (quota etc.) unless
       // runtime.lastError is inspected — wrap so failures actually reject.
-      const storageSet = (items) => new Promise((resolve, reject) => {
-        chrome.storage.sync.set(items, () => {
+      const storageSet = (area, items) => new Promise((resolve, reject) => {
+        chrome.storage[area].set(items, () => {
           if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
           else resolve();
         });
@@ -1534,7 +1826,8 @@ function importAllSettings(event) {
 
       // Snapshot everything before the destructive clear so a failed import
       // (e.g. sync's per-item quota rejecting the new data) can be rolled back.
-      const snapshot = await new Promise(resolve => chrome.storage.sync.get(null, resolve));
+      const syncSnapshot = await new Promise(resolve => chrome.storage.sync.get(null, resolve));
+      const localSnapshot = await new Promise(resolve => chrome.storage.local.get(['models', 'defaultModelId', 'verificationModelId', 'tavilyApiKey', 'sttApiKey', 'sttCustomHeaders'], resolve));
 
       try {
         // Clear existing sync storage before importing
@@ -1545,8 +1838,27 @@ function importAllSettings(event) {
           });
         });
 
-        // Import new data into sync storage
-        await storageSet(settings.syncData);
+        const incomingSync = { ...settings.syncData };
+        const secretKeys = ['models', 'defaultModelId', 'verificationModelId', 'tavilyApiKey', 'sttApiKey', 'sttCustomHeaders'];
+        const isLocalOnly = Boolean(incomingSync.secretsLocalOnly);
+
+        if (isLocalOnly) {
+          const localSecrets = {};
+          secretKeys.forEach(k => {
+            if (incomingSync[k] !== undefined) {
+              localSecrets[k] = incomingSync[k];
+              delete incomingSync[k];
+            }
+          });
+          incomingSync.secretsLocalOnly = true;
+          await storageSet('sync', incomingSync);
+          if (Object.keys(localSecrets).length > 0) {
+            await storageSet('local', localSecrets);
+          }
+        } else {
+          await storageSet('sync', incomingSync);
+          await new Promise(resolve => chrome.storage.local.remove(secretKeys, resolve));
+        }
 
         // Backups never carry per-document theme keys, so any mirrors on
         // disk now describe settings that no longer exist; the global
@@ -1556,25 +1868,24 @@ function importAllSettings(event) {
         // Storage was already cleared (or the import was rejected) — put the
         // previous contents back before reporting the failure.
         try {
-          await storageSet(snapshot);
+          await storageSet('sync', syncSnapshot);
+          if (Object.keys(localSnapshot).length > 0) {
+            await storageSet('local', localSnapshot);
+          }
         } catch (restoreErr) {
-          console.error("Failed to restore previous sync settings after failed import:", restoreErr);
+          console.error("Failed to restore previous settings after failed import:", restoreErr);
         }
         throw writeErr;
       }
 
-      // --- NEW: Restore Anki settings ---
+      // Restore Anki settings
       if (ankiSettings.ankiSettings) {
-        await storageSet(ankiSettings);
+        await storageSet('sync', ankiSettings);
       }
 
       updateGlobalIOStatus('Settings imported successfully! Reloading...', 'success');
 
-      // The import cleared and replaced sync storage wholesale, so
-      // refreshing individual selects leaves every other section showing
-      // the values read at startup. Reload the page (as restoreBackup
-      // does) — DOMContentLoaded re-populates everything from the
-      // imported data.
+      // The import cleared and replaced storage wholesale, so reload the page
       setTimeout(() => location.reload(), 1000);
 
     } catch (error) {
@@ -3381,92 +3692,111 @@ function restoreBackup() {
         if (pdfAnnotationCount > 0) restoredCount++;
       }
 
-      // Fetch currently stored sync data so we can merge models preserving existing API keys
+      // Fetch currently stored data so we can merge models preserving existing API keys
       chrome.storage.sync.get(null, (existingSyncData) => {
-        const syncKeys = [
-          'models', 'customPrompts', 'defaultModelId', 'defaultPromptId',
-          'tavilyApiKey', 'enableHallucinationGuard', 'verificationModelId',
-          'enableModelFallback', 'enableImplicitContext',
-          'ttsSettings', 'ankiSettings', 'backupReminderFrequency', 'backupSubfolder',
-          'backupInclude', 'followupCustomMessage', 'showUserQuestions',
-          'sttEngine', 'sttApiKey', 'sttApiUrl', 'sttModel', 'sttCustomHeaders',
-          'sttCustomFormData', 'pdfViewerEnabled', 'uiTheme',
-          'customFsrsWeights', 'customFsrsWeightsMeta'
-        ];
-        const syncData = {};
-        let syncCount = 0;
-        for (const key of syncKeys) {
-          if (backupData[key] !== undefined) {
-            syncData[key] = backupData[key];
-            syncCount++;
-          }
-        }
+        chrome.storage.local.get(['models', 'defaultModelId', 'verificationModelId', 'tavilyApiKey', 'sttApiKey', 'sttCustomHeaders'], (existingLocalSecrets) => {
+          const isLocalSecrets = Boolean(existingSyncData.secretsLocalOnly || backupData.secretsLocalOnly);
+          const currentSecrets = isLocalSecrets ? existingLocalSecrets : existingSyncData;
 
-        // Intelligently merge models so blank API keys in sanitized backup don't wipe existing live keys
-        if (Array.isArray(backupData.models)) {
-          const currentModels = existingSyncData.models || [];
-          const currentModelMap = new Map();
-          currentModels.forEach(m => {
-            if (m.id) currentModelMap.set(m.id, m);
-          });
-
-          syncData.models = backupData.models.map(incoming => {
-            const hasIncomingKey = typeof incoming.apiKey === 'string' && incoming.apiKey.trim().length > 0;
-            if (!hasIncomingKey) {
-              const existing = currentModelMap.get(incoming.id) || currentModels.find(m => m.name === incoming.name && m.endpointUrl === incoming.endpointUrl);
-              if (existing && typeof existing.apiKey === 'string' && existing.apiKey.trim().length > 0) {
-                return { ...incoming, apiKey: existing.apiKey };
-              }
+          const syncKeys = [
+            'models', 'customPrompts', 'defaultModelId', 'defaultPromptId',
+            'tavilyApiKey', 'enableHallucinationGuard', 'verificationModelId',
+            'enableModelFallback', 'enableImplicitContext',
+            'ttsSettings', 'ankiSettings', 'backupReminderFrequency', 'backupSubfolder',
+            'backupInclude', 'followupCustomMessage', 'showUserQuestions',
+            'sttEngine', 'sttApiKey', 'sttApiUrl', 'sttModel', 'sttCustomHeaders',
+            'sttCustomFormData', 'pdfViewerEnabled', 'uiTheme',
+            'customFsrsWeights', 'customFsrsWeightsMeta', 'secretsLocalOnly'
+          ];
+          const syncData = {};
+          let syncCount = 0;
+          for (const key of syncKeys) {
+            if (backupData[key] !== undefined) {
+              syncData[key] = backupData[key];
+              syncCount++;
             }
-            return { ...incoming };
-          });
-        }
+          }
 
-        // Preserve existing individual credentials if incoming values are empty strings (sanitized backup)
-        if (syncData.tavilyApiKey === "" && existingSyncData.tavilyApiKey) {
-          syncData.tavilyApiKey = existingSyncData.tavilyApiKey;
-        }
-        if (syncData.sttApiKey === "" && existingSyncData.sttApiKey) {
-          syncData.sttApiKey = existingSyncData.sttApiKey;
-        }
-        if (syncData.sttCustomHeaders === "" && existingSyncData.sttCustomHeaders) {
-          syncData.sttCustomHeaders = existingSyncData.sttCustomHeaders;
-        }
+          // Intelligently merge models so blank API keys in sanitized backup don't wipe existing live keys
+          if (Array.isArray(backupData.models)) {
+            const currentModels = currentSecrets.models || [];
+            const currentModelMap = new Map();
+            currentModels.forEach(m => {
+              if (m.id) currentModelMap.set(m.id, m);
+            });
 
-        if (restoredCount > 0 || syncCount > 0) {
-          const parts = [];
-          if (dataToSave.history && Array.isArray(dataToSave.history)) parts.push(`${dataToSave.history.length} history items`);
-          if (dataToSave.wordLists && Array.isArray(dataToSave.wordLists)) parts.push(`${dataToSave.wordLists.length} lists`);
-          if (pdfAnnotationCount > 0) parts.push(`${pdfAnnotationCount} PDF items`);
-          if (syncData.models && Array.isArray(syncData.models)) parts.push(`${syncData.models.length} models`);
-          if (syncData.customPrompts && Array.isArray(syncData.customPrompts)) parts.push(`${syncData.customPrompts.length} prompts`);
-          if (syncData.ankiSettings) parts.push('Anki settings');
-          if (syncData.ttsSettings || syncData.sttEngine) parts.push('Voice settings');
-          if (syncData.tavilyApiKey) parts.push('Tavily API key');
-          if (syncCount > 0 && parts.length === 0) parts.push(`${syncCount} settings`);
+            syncData.models = backupData.models.map(incoming => {
+              const hasIncomingKey = typeof incoming.apiKey === 'string' && incoming.apiKey.trim().length > 0;
+              if (!hasIncomingKey) {
+                const existing = currentModelMap.get(incoming.id) || currentModels.find(m => m.name === incoming.name && m.endpointUrl === incoming.endpointUrl);
+                if (existing && typeof existing.apiKey === 'string' && existing.apiKey.trim().length > 0) {
+                  return { ...incoming, apiKey: existing.apiKey };
+                }
+              }
+              return { ...incoming };
+            });
+          }
 
-          const summaryMsg = `Restored: ${parts.join(', ')}. Reloading...`;
+          // Preserve existing individual credentials if incoming values are empty strings (sanitized backup)
+          if (syncData.tavilyApiKey === "" && currentSecrets.tavilyApiKey) {
+            syncData.tavilyApiKey = currentSecrets.tavilyApiKey;
+          }
+          if (syncData.sttApiKey === "" && currentSecrets.sttApiKey) {
+            syncData.sttApiKey = currentSecrets.sttApiKey;
+          }
+          if (syncData.sttCustomHeaders === "" && currentSecrets.sttCustomHeaders) {
+            syncData.sttCustomHeaders = currentSecrets.sttCustomHeaders;
+          }
 
-          const applySync = () => {
-            if (syncCount > 0) {
-              chrome.storage.sync.set(syncData, () => {
+          const secretKeysList = ['models', 'defaultModelId', 'verificationModelId', 'tavilyApiKey', 'sttApiKey', 'sttCustomHeaders'];
+          if (isLocalSecrets) {
+            syncData.secretsLocalOnly = true;
+            secretKeysList.forEach(k => {
+              if (syncData[k] !== undefined) {
+                dataToSave[k] = syncData[k];
+                delete syncData[k];
+              }
+            });
+          } else {
+            syncData.secretsLocalOnly = false;
+          }
+
+          if (restoredCount > 0 || syncCount > 0 || Object.keys(dataToSave).length > 0) {
+            const parts = [];
+            if (dataToSave.history && Array.isArray(dataToSave.history)) parts.push(`${dataToSave.history.length} history items`);
+            if (dataToSave.wordLists && Array.isArray(dataToSave.wordLists)) parts.push(`${dataToSave.wordLists.length} lists`);
+            if (pdfAnnotationCount > 0) parts.push(`${pdfAnnotationCount} PDF items`);
+            const restoredModels = isLocalSecrets ? dataToSave.models : syncData.models;
+            if (restoredModels && Array.isArray(restoredModels)) parts.push(`${restoredModels.length} models`);
+            if (syncData.customPrompts && Array.isArray(syncData.customPrompts)) parts.push(`${syncData.customPrompts.length} prompts`);
+            if (syncData.ankiSettings) parts.push('Anki settings');
+            if (syncData.ttsSettings || syncData.sttEngine) parts.push('Voice settings');
+            if (syncData.tavilyApiKey || dataToSave.tavilyApiKey) parts.push('Tavily API key');
+            if (syncCount > 0 && parts.length === 0) parts.push(`${syncCount} settings`);
+
+            const summaryMsg = `Restored: ${parts.join(', ')}. Reloading...`;
+
+            const applySync = () => {
+              if (Object.keys(syncData).length > 0) {
+                chrome.storage.sync.set(syncData, () => {
+                  updateRestoreStatus(summaryMsg, 'success');
+                  setTimeout(() => location.reload(), 2000);
+                });
+              } else {
                 updateRestoreStatus(summaryMsg, 'success');
                 setTimeout(() => location.reload(), 2000);
-              });
-            } else {
-              updateRestoreStatus(summaryMsg, 'success');
-              setTimeout(() => location.reload(), 2000);
-            }
-          };
+              }
+            };
 
-          if (Object.keys(dataToSave).length > 0) {
-            chrome.storage.local.set(dataToSave, applySync);
+            if (Object.keys(dataToSave).length > 0) {
+              chrome.storage.local.set(dataToSave, applySync);
+            } else {
+              applySync();
+            }
           } else {
-            applySync();
+            updateRestoreStatus('Invalid backup file format or no recognized data found.', 'error');
           }
-        } else {
-          updateRestoreStatus('Invalid backup file format or no recognized data found.', 'error');
-        }
+        });
       });
 
     } catch (err) {
@@ -5135,39 +5465,43 @@ function initMemoryModelSection() {
 }
 
 // --- STT Settings ---
-function loadSTTSettings() {
-  chrome.storage.sync.get({
-    sttEngine: 'native',
-    sttApiKey: '',
-    sttApiUrl: 'https://api.openai.com/v1/audio/transcriptions',
-    sttModel: 'whisper-1',
-    sttCustomHeaders: '',
-    sttCustomFormData: ''
-  }, (items) => {
+async function loadSTTSettings() {
+  try {
+    const [secretData, syncData] = await Promise.all([
+      getSecretStorage(['sttApiKey', 'sttCustomHeaders']),
+      new Promise(resolve => chrome.storage.sync.get({
+        sttEngine: 'native',
+        sttApiUrl: 'https://api.openai.com/v1/audio/transcriptions',
+        sttModel: 'whisper-1',
+        sttCustomFormData: ''
+      }, resolve))
+    ]);
+
     const engineSelect = document.getElementById('stt-engine-select');
     if (engineSelect) {
-      engineSelect.value = items.sttEngine;
-      // Trigger change to update visibility
+      engineSelect.value = syncData.sttEngine;
       engineSelect.dispatchEvent(new Event('change'));
     }
     const apiKeyInput = document.getElementById('stt-api-key');
-    if (apiKeyInput) apiKeyInput.value = items.sttApiKey;
+    if (apiKeyInput) apiKeyInput.value = secretData.sttApiKey || '';
 
     const apiUrlInput = document.getElementById('stt-api-url');
-    if (apiUrlInput) apiUrlInput.value = items.sttApiUrl;
+    if (apiUrlInput) apiUrlInput.value = syncData.sttApiUrl || '';
 
     const modelInput = document.getElementById('stt-model');
-    if (modelInput) modelInput.value = items.sttModel;
+    if (modelInput) modelInput.value = syncData.sttModel || '';
     
     const headersInput = document.getElementById('stt-custom-headers');
-    if (headersInput) headersInput.value = items.sttCustomHeaders;
+    if (headersInput) headersInput.value = secretData.sttCustomHeaders || '';
 
     const formDataInput = document.getElementById('stt-custom-formdata');
-    if (formDataInput) formDataInput.value = items.sttCustomFormData;
-  });
+    if (formDataInput) formDataInput.value = syncData.sttCustomFormData || '';
+  } catch (err) {
+    console.error("Error loading STT settings:", err);
+  }
 }
 
-function saveSTTSettings() {
+async function saveSTTSettings() {
   const engine = document.getElementById('stt-engine-select')?.value || 'native';
   const apiKey = document.getElementById('stt-api-key')?.value || '';
   const apiUrl = document.getElementById('stt-api-url')?.value || '';
@@ -5189,21 +5523,34 @@ function saveSTTSettings() {
     return; // Don't save if invalid JSON
   }
 
-  chrome.storage.sync.set({
-    sttEngine: engine,
-    sttApiKey: apiKey,
-    sttApiUrl: apiUrl,
-    sttModel: model,
-    sttCustomHeaders: customHeaders,
-    sttCustomFormData: customFormData
-  }, () => {
+  try {
+    await Promise.all([
+      new Promise((resolve, reject) => {
+        chrome.storage.sync.set({
+          sttEngine: engine,
+          sttApiUrl: apiUrl,
+          sttModel: model,
+          sttCustomFormData: customFormData
+        }, () => {
+          if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+          else resolve();
+        });
+      }),
+      setSecretStorage({
+        sttApiKey: apiKey,
+        sttCustomHeaders: customHeaders
+      })
+    ]);
+
     const statusEl = document.getElementById('stt-status');
     if (statusEl) {
       statusEl.textContent = 'Settings saved successfully!';
       statusEl.style.color = 'var(--secondary-color)';
       setTimeout(() => { statusEl.textContent = ''; }, 3000);
     }
-  });
+  } catch (err) {
+    console.error("Error saving STT settings:", err);
+  }
 }
 
 // --- DIAGNOSTIC CONNECTION & SETUP TEST ---
@@ -5412,9 +5759,9 @@ function refreshOnboarding() {
   const card = document.getElementById('onboarding-card');
   if (!card) return;
   chrome.storage.local.get(['onboardingDismissed', 'onboardingTestPassed', 'history'], (local) => {
-    chrome.storage.sync.get(['models'], (sync) => {
+    getSecretStorage(['models']).then((secretData) => {
       const steps = [
-        (sync.models || []).length > 0,
+        (secretData.models || []).length > 0,
         !!local.onboardingTestPassed,
         Array.isArray(local.history) && local.history.length > 0
       ];
@@ -5574,7 +5921,7 @@ function loadSupportDiagnosticInfo() {
   if (diagOs) diagOs.textContent = osStr;
 
   // Active Model & Setup Status
-  chrome.storage.sync.get(['models', 'defaultModelId', 'tavilyApiKey'], (data) => {
+  getSecretStorage(['models', 'defaultModelId', 'tavilyApiKey']).then((data) => {
     const models = data.models || [];
     const defaultModelId = data.defaultModelId;
     const activeModel = models.find(m => m.id === defaultModelId) || (models.length > 0 ? models[0] : null);
@@ -5606,7 +5953,7 @@ function copyDiagnosticInfo() {
   const model = document.getElementById('diag-active-model')?.textContent || 'None';
   const status = document.getElementById('diag-setup-status')?.textContent || 'Unknown';
 
-  chrome.storage.sync.get(['models', 'defaultModelId', 'tavilyApiKey'], (data) => {
+  getSecretStorage(['models', 'defaultModelId', 'tavilyApiKey']).then((data) => {
     const models = data.models || [];
     const activeModel = models.find(m => m.id === data.defaultModelId) || (models.length > 0 ? models[0] : null);
     let endpointHost = 'None';

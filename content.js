@@ -1384,27 +1384,41 @@ function initiateEmptyPopupSequence() {
   popupInstance.sourceText = ""; 
   popupInstance.sourceWord = "Custom Question";
 
-  chrome.storage.sync.get(['models', 'defaultModelId', 'customPrompts', 'defaultPromptId'], (data) => {
+  chrome.storage.sync.get({ 'secretsLocalOnly': false, 'models': [], 'defaultModelId': null, 'customPrompts': [], 'defaultPromptId': null }, (syncData) => {
     if (!activePopups.includes(popupInstance)) return;
     
-    popupInstance.messages = [
-      { role: 'assistant', content: "Hi! What would you like to ask?" }
-    ];
-    renderMessages(popupInstance);
-    
-    if (data.models && data.models.length > 0) {
-      createSelectors(popupInstance, data.models, data.customPrompts, data.defaultModelId, null, "Custom Question", data.defaultPromptId);
+    const finalize = (models, defaultModelId) => {
+      const customPrompts = syncData.customPrompts || [];
+      const defaultPromptId = syncData.defaultPromptId || null;
+
+      popupInstance.messages = [
+        { role: 'assistant', content: "Hi! What would you like to ask?" }
+      ];
+      renderMessages(popupInstance);
+      
+      if (models && models.length > 0) {
+        createSelectors(popupInstance, models, customPrompts, defaultModelId, null, "Custom Question", defaultPromptId);
+      }
+      
+      const defaultModelName = models ? (models.find(m => m.id === defaultModelId)?.name || 'Unknown Model') : 'Unknown Model';
+      createActionButtons(popupInstance, "Custom Question", "Conversation started from hotkey.", defaultModelName, "Default");
+      
+      adjustPopupPosition(popupInstance, null);
+      
+      setTimeout(() => {
+        const input = popupInstance.popup.querySelector('#ai-popup-followup-input');
+        if (input) input.focus();
+      }, 100);
+    };
+
+    if (syncData.secretsLocalOnly) {
+      chrome.storage.local.get(['models', 'defaultModelId'], (localData) => {
+        if (!activePopups.includes(popupInstance)) return;
+        finalize(localData.models || [], localData.defaultModelId || null);
+      });
+    } else {
+      finalize(syncData.models || [], syncData.defaultModelId || null);
     }
-    
-    const defaultModelName = data.models ? (data.models.find(m => m.id === data.defaultModelId)?.name || 'Unknown Model') : 'Unknown Model';
-    createActionButtons(popupInstance, "Custom Question", "Conversation started from hotkey.", defaultModelName, "Default");
-    
-    adjustPopupPosition(popupInstance, null);
-    
-    setTimeout(() => {
-      const input = popupInstance.popup.querySelector('#ai-popup-followup-input');
-      if (input) input.focus();
-    }, 100);
   });
 }
 
