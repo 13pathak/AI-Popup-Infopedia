@@ -301,6 +301,115 @@ function getSecretStorageConfig(requestedKeys, defaults = {}) {
   });
 }
 
+// --- LOOKUP CACHE (Issue #29) ---
+// LRU + TTL cache for completed AI lookups in chrome.storage.session: repeat
+// lookups of the same word/prompt/model return instantly and cost no API
+// quota. Session storage is device-local, in-memory, and wiped when the
+// browser closes — nothing persisted, nothing synced. On legacy Chrome
+// without storage.session every entry point below degrades to a no-op and
+// lookups run live exactly as before.
+const LOOKUP_CACHE_TTL_MS = 15 * 60 * 1000;
+const LOOKUP_CACHE_CAPACITY = 30;
+const LOOKUP_CACHE_STORAGE_KEY = 'lookupCache';
+const LOOKUP_CACHE_MAX_ENTRY_BYTES = 64 * 1024;
+
+// Mirror of the persisted cache: { order: [key…MRU-last], entries: {key: {t, data}} }.
+// MV3 kills the worker within seconds of idle, so the mirror starts null and
+// hydrates from session storage on first use (same pattern as the PDF
+// redirect-dedupe map below).
+let lookupCacheMem = null;
+
+function lookupCacheArea() {
+  return (chrome.storage && chrome.storage.session) ? chrome.storage.session : null;
+}
+
+function hydrateLookupCache() {
+  const area = lookupCacheArea();
+  if (!area) return Promise.resolve();
+  return new Promise((resolve) => {
+    area.get(LOOKUP_CACHE_STORAGE_KEY, (stored) => {
+      const raw = stored && stored[LOOKUP_CACHE_STORAGE_KEY];
+      lookupCacheMem = (raw && Array.isArray(raw.order) && raw.entries && typeof raw.entries === 'object')
+        ? { order: raw.order.slice(), entries: raw.entries }
+        : { order: [], entries: {} };
+      resolve();
+    });
+  });
+}
+
+function persistLookupCache() {
+  const area = lookupCacheArea();
+  if (!area || !lookupCacheMem) return;
+  area.set({ [LOOKUP_CACHE_STORAGE_KEY]: { order: lookupCacheMem.order, entries: lookupCacheMem.entries } }, () => {
+    void chrome.runtime.lastError;
+  });
+}
+
+// Drop expired entries (and any order/entries desync). Caller ensures the
+// mirror is hydrated.
+function sweepExpiredLookupCache(now) {
+  lookupCacheMem.order = lookupCacheMem.order.filter(k => {
+    const entry = lookupCacheMem.entries[k];
+    if (!entry || now - entry.t > LOOKUP_CACHE_TTL_MS) {
+      delete lookupCacheMem.entries[k];
+      return false;
+    }
+    return true;
+  });
+}
+
+async function lookupCacheGet(key) {
+  if (!lookupCacheArea()) return undefined;
+  if (!lookupCacheMem) await hydrateLookupCache();
+  const entry = lookupCacheMem.entries[key];
+  if (!entry) return undefined;
+  if (Date.now() - entry.t > LOOKUP_CACHE_TTL_MS) {
+    delete lookupCacheMem.entries[key];
+    lookupCacheMem.order = lookupCacheMem.order.filter(k => k !== key);
+    persistLookupCache();
+    return undefined;
+  }
+  // LRU touch: requeue as most recently used.
+  lookupCacheMem.order = lookupCacheMem.order.filter(k => k !== key);
+  lookupCacheMem.order.push(key);
+  persistLookupCache();
+  return entry.data;
+}
+
+async function lookupCacheSet(key, data) {
+  if (!lookupCacheArea()) return;
+  if (!lookupCacheMem) await hydrateLookupCache();
+  sweepExpiredLookupCache(Date.now());
+  let serialized;
+  try {
+    serialized = JSON.stringify(data);
+  } catch (e) {
+    return; // non-JSON-safe payloads are simply not cached
+  }
+  if (!serialized || serialized.length > LOOKUP_CACHE_MAX_ENTRY_BYTES) return;
+  if (lookupCacheMem.entries[key]) {
+    lookupCacheMem.order = lookupCacheMem.order.filter(k => k !== key);
+  }
+  lookupCacheMem.entries[key] = { t: Date.now(), data: data };
+  lookupCacheMem.order.push(key);
+  while (lookupCacheMem.order.length > LOOKUP_CACHE_CAPACITY) {
+    delete lookupCacheMem.entries[lookupCacheMem.order.shift()];
+  }
+  persistLookupCache();
+}
+
+// Everything that changes the answer must be in the key: the term, the
+// requested model (a fallback answer is keyed under the requested model and
+// stays valid for the TTL — long enough to mask a recovered primary, so keep
+// the TTL modest), the RESOLVED prompt template (not the prompt id, so
+// editing a prompt's text can never serve stale answers), and the cleaned
+// implicit context (same word on different pages is a different question).
+function buildLookupCacheKey(word, modelId, promptTemplate, cleanContext) {
+  const normalized = String(word).trim().replace(/\s+/g, ' ');
+  const contextPart = cleanContext ? JSON.stringify([cleanContext.pageTitle || '', cleanContext.sentence || '']) : '';
+  return JSON.stringify([normalized, modelId, promptTemplate, contextPart]);
+}
+
 // --- This listener now handles multiple message types ---
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
@@ -442,6 +551,40 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           parts.push('Use this context ONLY to decide which meaning of the selected term applies (for example, "bank" as a riverbank versus a financial institution). Explain the term itself. Do NOT mention, quote, refer to, or summarize the page, its title, or the surrounding sentence in your answer.');
           implicitContextMessage = { role: 'system', content: parts.join(' ') };
           safeMessagesText.unshift(implicitContextMessage);
+        }
+      }
+
+      // --- Lookup cache read (Issue #29) ---
+      // Only the initial lookup is cacheable: conversation requests carry a
+      // full message array, and forceSearch explicitly wants a fresh
+      // web-grounded answer — both always run live. On a hit the cached
+      // ANSWER fields are merged with the live model/prompt config read
+      // above, so the popup's selectors never receive stale settings.
+      const cacheableLookup = !request.messages && !request.forceSearch;
+      let lookupCacheKey = null;
+      if (cacheableLookup) {
+        const contextForCacheKey = (enableImplicitContext !== false && request.context && typeof request.context === 'object')
+          ? cleanImplicitContext(request.context)
+          : null;
+        lookupCacheKey = buildLookupCacheKey(word, primaryModel.id, promptTemplate, contextForCacheKey);
+        const cachedAnswer = await lookupCacheGet(lookupCacheKey);
+        if (cachedAnswer) {
+          // Recompute grounding availability against the CURRENT model
+          // config and Tavily key rather than trusting cache time.
+          const liveUsedModel = models.find(m => m.id === cachedAnswer.usedModelId);
+          sendResponse({
+            definition: cachedAnswer.definition,
+            usedWebSearch: cachedAnswer.usedWebSearch,
+            citations: cachedAnswer.citations || [],
+            usedModelId: cachedAnswer.usedModelId,
+            usedModelName: cachedAnswer.usedModelName,
+            searchGroundingAvailable: !!(liveUsedModel && liveUsedModel.enableSearchGrounding && tavilyApiKey),
+            fallbackFailedModels: cachedAnswer.fallbackFailedModels || [],
+            fromCache: true,
+            usedPrompt: cachedAnswer.usedPrompt,
+            models: models, defaultModelId: defaultModelId, customPrompts: customPrompts || [], defaultPromptId: defaultPromptId, promptName: promptName
+          });
+          return;
         }
       }
 
@@ -756,6 +899,23 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           : `Failed to fetch definition: all ${failures.length} models in the fallback chain failed — ${failures.map(f => `${f.name}: ${f.message}`).join(' | ')}`;
         sendResponse({ error: detail, models: models, defaultModelId: defaultModelId, customPrompts: customPrompts || [], defaultPromptId: defaultPromptId });
         return;
+      }
+
+      // --- Lookup cache write (Issue #29) ---
+      // Store only the answer-derived fields; live config (models, prompts,
+      // grounding availability) is re-read and re-merged on every hit.
+      // Fire-and-forget: a cache that fails to persist must never block or
+      // fail the response.
+      if (lookupCacheKey) {
+        void lookupCacheSet(lookupCacheKey, {
+          definition: answer.definition,
+          usedWebSearch: answer.usedWebSearch,
+          citations: answer.citations,
+          usedModelId: usedModel.id,
+          usedModelName: usedModel.name || usedModel.modelName,
+          fallbackFailedModels: failures.map(f => f.name),
+          usedPrompt: prompt
+        });
       }
 
       sendResponse({
