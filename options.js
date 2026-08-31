@@ -1017,7 +1017,13 @@ function setSecretStorage(items) {
         }));
       }
 
-      Promise.all(promises).then(() => resolve()).catch(reject);
+      Promise.all(promises).then(() => {
+        // Keep a single source of truth: the inactive area must never hold
+        // secret copies, so sweep it after every save. Normally a no-op; it
+        // heals strays left behind by failed migrations or older restores.
+        const inactiveArea = isLocalOnly ? chrome.storage.sync : chrome.storage.local;
+        inactiveArea.remove([...SECRET_STORAGE_KEYS], () => resolve());
+      }).catch(reject);
     });
   });
 }
@@ -1110,14 +1116,18 @@ async function handleLocalSecretsToggle(e) {
         });
       }
 
+      // Order matters: copy first, flip the flag second, strip sync last.
+      // At every intermediate step the secrets are readable from exactly one
+      // area, so a failure mid-way never leaves the user's keys unreachable.
+      // (A failed strip merely leaves a stray sync copy that later saves sweep.)
       await new Promise((resolve, reject) => {
-        chrome.storage.sync.remove(secretKeys, () => {
+        chrome.storage.sync.set({ secretsLocalOnly: true }, () => {
           if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
           else resolve();
         });
       });
       await new Promise((resolve, reject) => {
-        chrome.storage.sync.set({ secretsLocalOnly: true }, () => {
+        chrome.storage.sync.remove(secretKeys, () => {
           if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
           else resolve();
         });
@@ -1354,7 +1364,7 @@ async function deleteSelectedModel() {
     return;
   }
 
-  if (!confirm('Are_you sure you want to delete the selected model configuration?'.replace(/_/g, ' '))) return;
+  if (!confirm('Are you sure you want to delete the selected model configuration?')) return;
 
   try {
     const data = await getSecretStorage(['models', 'defaultModelId', 'verificationModelId']);
@@ -1368,7 +1378,9 @@ async function deleteSelectedModel() {
     if (defaultModelId === modelIdToDelete) {
       defaultModelId = models.length > 0 ? models[0].id : null;
     }
-    // Same for the Hallucination Guard's verifier
+    // Same for the Hallucination Guard's verifier: a dangling id makes
+    // every guarded answer error ("Verification model not found") while
+    // the guard settings still show a healthy-looking selection.
     if (verificationModelId === modelIdToDelete) {
       verificationModelId = models.length > 0 ? models[0].id : null;
     }
@@ -1840,7 +1852,10 @@ function importAllSettings(event) {
 
         const incomingSync = { ...settings.syncData };
         const secretKeys = ['models', 'defaultModelId', 'verificationModelId', 'tavilyApiKey', 'sttApiKey', 'sttCustomHeaders'];
-        const isLocalOnly = Boolean(incomingSync.secretsLocalOnly);
+        // This device's own storage mode wins. An export created in the other
+        // mode must not silently flip where this device keeps its keys — mode
+        // changes belong to the guarded toggle only (Issue #32).
+        const isLocalOnly = Boolean(syncSnapshot.secretsLocalOnly);
 
         if (isLocalOnly) {
           const localSecrets = {};
@@ -1856,6 +1871,9 @@ function importAllSettings(event) {
             await storageSet('local', localSecrets);
           }
         } else {
+          // Never carry a foreign local-only flag into sync — it would flip
+          // this device's mode without the guarded confirmation.
+          incomingSync.secretsLocalOnly = false;
           await storageSet('sync', incomingSync);
           await new Promise(resolve => chrome.storage.local.remove(secretKeys, resolve));
         }
@@ -3695,7 +3713,10 @@ function restoreBackup() {
       // Fetch currently stored data so we can merge models preserving existing API keys
       chrome.storage.sync.get(null, (existingSyncData) => {
         chrome.storage.local.get(['models', 'defaultModelId', 'verificationModelId', 'tavilyApiKey', 'sttApiKey', 'sttCustomHeaders'], (existingLocalSecrets) => {
-          const isLocalSecrets = Boolean(existingSyncData.secretsLocalOnly || backupData.secretsLocalOnly);
+          // This device's own storage mode wins. A backup created in the other
+          // mode must not silently re-route (or re-roam) this device's keys —
+          // mode changes belong to the guarded toggle only (Issue #32).
+          const isLocalSecrets = Boolean(existingSyncData.secretsLocalOnly);
           const currentSecrets = isLocalSecrets ? existingLocalSecrets : existingSyncData;
 
           const syncKeys = [
@@ -3757,8 +3778,13 @@ function restoreBackup() {
                 delete syncData[k];
               }
             });
+            // Local-only mode must leave nothing readable behind in sync
+            // (also heals stray copies left by older restores).
+            chrome.storage.sync.remove(secretKeysList);
           } else {
             syncData.secretsLocalOnly = false;
+            // Mirror of the above: sync mode keeps a single source of truth.
+            chrome.storage.local.remove(secretKeysList);
           }
 
           if (restoredCount > 0 || syncCount > 0 || Object.keys(dataToSave).length > 0) {

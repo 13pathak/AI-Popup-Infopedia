@@ -3119,6 +3119,30 @@ function createActionButtons(instance, word, definition, modelName, promptName, 
   createFollowupInput(instance, word);
 }
 
+// STT credentials (sttApiKey, sttCustomHeaders) are secret-bearing keys that
+// live in chrome.storage.local while local-only API-key mode is on (Issue #32).
+// Fetch them from whichever area currently owns them, merged with the
+// non-secret STT fields that always stay in sync.
+function getSttSettingsWithSecrets(callback) {
+  chrome.storage.sync.get({
+    sttApiUrl: 'https://api.openai.com/v1/audio/transcriptions',
+    sttModel: 'whisper-1',
+    sttCustomFormData: '',
+    secretsLocalOnly: false
+  }, (base) => {
+    const secretsArea = base.secretsLocalOnly ? chrome.storage.local : chrome.storage.sync;
+    secretsArea.get({ sttApiKey: '', sttCustomHeaders: '' }, (secrets) => {
+      callback({
+        sttApiUrl: base.sttApiUrl,
+        sttModel: base.sttModel,
+        sttCustomFormData: base.sttCustomFormData,
+        sttApiKey: secrets.sttApiKey,
+        sttCustomHeaders: secrets.sttCustomHeaders
+      });
+    });
+  });
+}
+
 // --- NEW Function to construct the follow-up input container ---
 function createFollowupInput(instance, word) {
   const popup = instance.popup;
@@ -3261,14 +3285,8 @@ function createFollowupInput(instance, word) {
         // Stop all tracks to release mic
         stream.getTracks().forEach(track => track.stop());
         
-        // Fetch settings and process
-        chrome.storage.sync.get({
-          sttApiKey: '',
-          sttApiUrl: 'https://api.openai.com/v1/audio/transcriptions',
-          sttModel: 'whisper-1',
-          sttCustomHeaders: '',
-          sttCustomFormData: ''
-        }, async (settings) => {
+        // Fetch settings and process (secrets may live in local storage — Issue #32)
+        getSttSettingsWithSecrets(async (settings) => {
           // If custom headers are provided, we don't strictly require sttApiKey 
           // because the API key might be inside the custom JSON.
           if (!settings.sttApiKey && !settings.sttCustomHeaders) {
