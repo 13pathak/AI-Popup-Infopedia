@@ -94,7 +94,7 @@ async function streamChatWithTimeout(url, options, timeoutMs = 30000, onDelta, t
     if (acc.toolCalls.length > 0) message.tool_calls = acc.toolCalls;
     return {
       ok: true,
-      data: { choices: [{ message: message, finish_reason: acc.finishReason || 'stop' }] }
+      data: { choices: [{ message: message, finish_reason: acc.finishReason || 'stop' }], usage: acc.usage || undefined }
     };
   } catch (error) {
     if (error.name === 'AbortError') {
@@ -125,6 +125,15 @@ function consumeSseLine(line, acc, onDelta) {
     return;
   }
 
+  // Token usage must be read BEFORE the choice check: OpenAI-compatible
+  // providers that honor stream_options.include_usage attach the usage
+  // object to a terminal chunk whose choices array is empty, which the
+  // guard below would otherwise discard. Groq nests it under x_groq.
+  const chunkUsage = chunk.usage || (chunk.x_groq && chunk.x_groq.usage);
+  if (chunkUsage && typeof chunkUsage === 'object') {
+    acc.usage = chunkUsage;
+  }
+
   const choice = chunk.choices && chunk.choices[0];
   if (!choice) return;
   const delta = choice.delta || choice.message || {};
@@ -151,6 +160,18 @@ function consumeSseLine(line, acc, onDelta) {
   }
 }
 
+// Peeks at a 400 error body (through a clone, leaving the original response
+// untouched for the caller's own error handling) to tell whether a provider
+// rejected the stream_options field rather than the request itself.
+async function bodyRejectsStreamOptions(response) {
+  try {
+    const text = await response.clone().text();
+    return /stream_options|include_usage/i.test(text);
+  } catch (e) {
+    return false;
+  }
+}
+
 // Parses a fully-buffered SSE document (the non-event-stream fallback above).
 function parseSseChatText(rawText, onDelta) {
   const acc = { content: '', toolCalls: [], finishReason: null };
@@ -159,7 +180,142 @@ function parseSseChatText(rawText, onDelta) {
   }
   const message = { role: 'assistant', content: acc.content };
   if (acc.toolCalls.length > 0) message.tool_calls = acc.toolCalls;
-  return { choices: [{ message: message, finish_reason: acc.finishReason || 'stop' }] };
+  return { choices: [{ message: message, finish_reason: acc.finishReason || 'stop' }], usage: acc.usage || undefined };
+}
+
+// --- AI usage & token tracking (Issue #28) ---
+// OpenAI-compatible endpoints report prompt/completion/total tokens on every
+// chat completion. Aggregates are kept in chrome.storage.local (never synced —
+// no secrets, but also no reason to consume a user's sync quota) under a
+// single key, grouped per model, per prompt template, and per calendar day.
+// Writes are serialized on one promise chain (same pattern as the history
+// save queue): concurrent lookups finishing at the same time must not lose
+// each other's read-modify-write cycles.
+const AI_USAGE_STATS_KEY = 'aiUsageStats';
+const AI_USAGE_DAY_RETENTION_DAYS = 180;
+
+function blankUsageBucket() {
+  return { requests: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+}
+
+function ensureUsageBucket(map, key) {
+  if (!map[key] || typeof map[key] !== 'object') map[key] = blankUsageBucket();
+  return map[key];
+}
+
+function emptyAiUsageStats() {
+  return {
+    version: 1,
+    updatedAt: 0,
+    totals: blankUsageBucket(),
+    byKind: {},
+    byModel: {},
+    byPrompt: {},
+    byDay: {}
+  };
+}
+
+// Local-timezone calendar day key, matching the FSRS day-boundary convention.
+function localDayKey(ts) {
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function hostFromEndpoint(endpointUrl) {
+  try {
+    return new URL(endpointUrl).hostname;
+  } catch (e) {
+    return '';
+  }
+}
+
+// Pulls the standard OpenAI usage fields into plain numbers, or null when the
+// provider sent nothing usable. total_tokens is derived when absent. The
+// input_tokens/output_tokens aliases cover Anthropic-style payloads, which
+// the verifier's lenient response parsing already tolerates.
+function extractUsageNumbers(usage) {
+  if (!usage || typeof usage !== 'object') return null;
+  const pt = Number(usage.prompt_tokens ?? usage.input_tokens) || 0;
+  const ct = Number(usage.completion_tokens ?? usage.output_tokens) || 0;
+  const tt = Number(usage.total_tokens) || (pt + ct);
+  if (!pt && !ct && !tt) return null;
+  return { promptTokens: pt, completionTokens: ct, totalTokens: tt };
+}
+
+let aiUsageWriteChain = Promise.resolve();
+
+// Entries: { modelKey, modelName, host, promptName, kind, usage }.
+// Resolves when the write has been flushed; never throws.
+function recordAiUsage(entries) {
+  if (!Array.isArray(entries) || entries.length === 0) return Promise.resolve();
+  const run = async () => {
+    try {
+      const store = await chrome.storage.local.get(AI_USAGE_STATS_KEY);
+      const stats = store[AI_USAGE_STATS_KEY] || emptyAiUsageStats();
+      for (const part of ['totals', 'byKind', 'byModel', 'byPrompt', 'byDay']) {
+        if (!stats[part] || typeof stats[part] !== 'object') stats[part] = part === 'totals' ? blankUsageBucket() : {};
+      }
+      const now = Date.now();
+      const nowDay = localDayKey(now);
+
+      for (const entry of entries) {
+        const n = extractUsageNumbers(entry.usage);
+        if (!n) continue;
+
+        const targets = [stats.totals, ensureUsageBucket(stats.byKind, entry.kind || 'lookup')];
+        const modelBucket = entry.modelKey ? ensureUsageBucket(stats.byModel, entry.modelKey) : null;
+        if (modelBucket) {
+          if (!modelBucket.name && entry.modelName) modelBucket.name = entry.modelName;
+          if (entry.host && !modelBucket.host) modelBucket.host = entry.host;
+          modelBucket.lastUsed = now;
+          targets.push(modelBucket);
+        }
+        const promptBucket = entry.promptName ? ensureUsageBucket(stats.byPrompt, entry.promptName) : null;
+        if (promptBucket) {
+          if (!promptBucket.name) promptBucket.name = entry.promptName;
+          promptBucket.lastUsed = now;
+          targets.push(promptBucket);
+        }
+        const dayBucket = ensureUsageBucket(stats.byDay, nowDay);
+        dayBucket.lastUsed = now;
+        targets.push(dayBucket);
+
+        for (const t of targets) {
+          t.requests += 1;
+          t.promptTokens += n.promptTokens;
+          t.completionTokens += n.completionTokens;
+          t.totalTokens += n.totalTokens;
+        }
+      }
+
+      // Prune day buckets beyond the retention window so the key stays small.
+      const cutoffDay = localDayKey(now - AI_USAGE_DAY_RETENTION_DAYS * 86400000);
+      for (const day of Object.keys(stats.byDay)) {
+        if (day < cutoffDay) delete stats.byDay[day];
+      }
+
+      stats.updatedAt = now;
+      await chrome.storage.local.set({ [AI_USAGE_STATS_KEY]: stats });
+    } catch (err) {
+      console.warn('Failed to record AI usage stats:', err);
+    }
+  };
+  aiUsageWriteChain = aiUsageWriteChain.then(run, run);
+  return aiUsageWriteChain;
+}
+
+// Reset all counters. Rides the same chain so a clear cannot be interleaved
+// with (and later overwritten by) an in-flight lookup's write.
+function clearAiUsageStats() {
+  const run = async () => {
+    try {
+      await chrome.storage.local.set({ [AI_USAGE_STATS_KEY]: emptyAiUsageStats() });
+    } catch (err) {
+      console.warn('Failed to clear AI usage stats:', err);
+    }
+  };
+  aiUsageWriteChain = aiUsageWriteChain.then(run, run);
+  return aiUsageWriteChain;
 }
 
 // --- Implicit lookup context ---
@@ -660,12 +816,46 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
         // --- END OPTIONAL FIX ---
 
+        // Ask OpenAI-compatible providers to attach the token usage object to
+        // the terminal SSE chunk (Issue #28). Servers that reject the field
+        // outright get one clean retry without it, further below.
+        payload.stream_options = { include_usage: true };
+
+        // Every HTTP round-trip this attempt makes (initial call, search
+        // passes, fallback pass) bills tokens independently, so each response
+        // carrying a usage object is logged as its own usage entry.
+        const noteUsage = (data) => {
+          if (!data || !data.usage) return;
+          void recordAiUsage([{
+            modelKey: modelConfig.id || ('unsaved:' + (modelConfig.name || modelConfig.modelName)),
+            modelName: modelConfig.name || modelConfig.modelName,
+            host: hostFromEndpoint(endpointUrl),
+            promptName: promptName,
+            kind: 'lookup',
+            usage: data.usage
+          }]);
+        };
+
         streamResetPending = true;
-        const result = await streamChatWithTimeout(endpointUrl, {
+        let result = await streamChatWithTimeout(endpointUrl, {
           method: 'POST',
           headers: headers, // Use the new headers object
           body: JSON.stringify(payload)
         }, 30000, emitStreamDelta);
+
+        // Some strict OpenAI-compatible servers 400 on stream_options instead
+        // of ignoring it. Peek at the error (through a clone, so the regular
+        // error handling below can still read the original body) and retry
+        // once without the field — usage tracking must never break a lookup.
+        if (!result.ok && result.response.status === 400 && await bodyRejectsStreamOptions(result.response)) {
+          delete payload.stream_options;
+          streamResetPending = true;
+          result = await streamChatWithTimeout(endpointUrl, {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify(payload)
+          }, 30000, emitStreamDelta);
+        }
 
         if (!result.ok) {
           const response = result.response;
@@ -688,6 +878,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         let data = result.data;
+        noteUsage(data);
         let aiText = "";
         let loopCount = 0;
         let usedWebSearch = false;
@@ -850,6 +1041,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                } else {
                  data = nextResult.data;
                }
+               noteUsage(data);
                loopCount++;
                usedWebSearch = true;
             } else if (toolCall.function.name === "web_search" && !tavilyApiKey) {
@@ -1072,6 +1264,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true; // async
   }
 
+  // --- Issue #28: reset the usage/token counters (Options page dashboard) ---
+  if (request.type === "clearAiUsageStats") {
+    clearAiUsageStats().then(() => {
+      sendResponse({ status: "cleared" });
+    });
+    return true; // async
+  }
+
   // --- Case 2.9: Open Options Page Tab (e.g. support-content) ---
   if (request.type === "openOptionsTab") {
     const targetTab = request.tab || 'support-content';
@@ -1184,6 +1384,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
         
         const result = await response.json();
+
+        // The verifier is a real billed completion — log its tokens too
+        // (Issue #28), flushed before the channel closes.
+        await recordAiUsage([{
+          modelKey: modelToUse.id || ('unsaved:' + (modelToUse.name || modelToUse.modelName)),
+          modelName: modelToUse.name || modelToUse.modelName,
+          host: hostFromEndpoint(endpointUrl),
+          promptName: 'Hallucination Guard',
+          kind: 'verification',
+          usage: result.usage
+        }]);
+
         let content = '';
         
         if (result.choices && result.choices.length > 0 && result.choices[0].message) {
@@ -2056,6 +2268,17 @@ async function handleTestConnection(request, sendResponse) {
       } catch (e) {
         // Non-JSON response
       }
+
+      // Diagnostic calls are tiny but billed — count them so the dashboard
+      // reflects true provider usage (Issue #28).
+      await recordAiUsage([{
+        modelKey: modelToTest.id || ('unsaved:' + (configName || modelName.trim())),
+        modelName: configName || modelName.trim(),
+        host: parsedUrl.hostname,
+        promptName: 'Connection Test',
+        kind: 'test',
+        usage: responseBody && responseBody.usage
+      }]);
 
       steps.push({
         id: "auth",

@@ -920,6 +920,111 @@
         .heatmap-cell[data-level="3"] { background-color: #26a641; }
         .heatmap-cell[data-level="4"] { background-color: #39d353; }
 
+        /* --- USAGE & TOKEN TRACKING (Model Settings tab) --- */
+        .usage-chart {
+            display: flex;
+            align-items: flex-end;
+            gap: 5px;
+            height: 72px;
+            margin-top: 14px;
+            margin-bottom: var(--spacing-unit);
+        }
+
+        .usage-chart-col {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-end;
+            height: 100%;
+            min-width: 0;
+            cursor: default;
+        }
+
+        .usage-chart-bar {
+            width: 100%;
+            border-radius: 3px 3px 0 0;
+            background-color: var(--primary-color);
+            opacity: 0.8;
+            min-height: 2px;
+            transition: opacity 0.15s;
+        }
+
+        .usage-chart-col:hover .usage-chart-bar { opacity: 1; }
+        .usage-chart-col.is-empty .usage-chart-bar { background-color: var(--button-bg); }
+
+        .usage-table-wrap {
+            overflow-x: auto;
+            margin-top: 10px;
+        }
+
+        .usage-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.88em;
+        }
+
+        .usage-table th {
+            text-align: right;
+            color: var(--text-muted);
+            font-weight: 500;
+            font-size: 0.82em;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            padding: 8px 10px;
+            border-bottom: 1px solid var(--border-color);
+            white-space: nowrap;
+        }
+
+        .usage-table th:first-child,
+        .usage-table td:first-child {
+            text-align: left;
+        }
+
+        .usage-table td {
+            padding: 8px 10px;
+            border-bottom: 1px solid var(--border-color);
+            text-align: right;
+            white-space: nowrap;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .usage-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .usage-model-host {
+            display: block;
+            font-size: 0.85em;
+            color: var(--text-muted);
+            font-weight: 400;
+        }
+
+        .usage-share-track {
+            display: inline-block;
+            vertical-align: middle;
+            width: 90px;
+            height: 6px;
+            border-radius: 3px;
+            background-color: var(--button-bg);
+            overflow: hidden;
+        }
+
+        .usage-share-fill {
+            display: block;
+            height: 100%;
+            border-radius: 3px;
+            background-color: var(--secondary-color);
+        }
+
+        .usage-footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-top: 16px;
+        }
+
         .icon-btn,
         .delete-item-btn,
         .edit-item-btn,
@@ -1608,6 +1713,71 @@
         </div>
         <p id="no-models-message" style="display: none; margin-top: 10px;">No models configured. Click '+' to add one.
         </p>
+        </div>
+
+        <div id="usage-dashboard-container" class="settings-section">
+            <h3 class="section-title">Usage &amp; Token Tracking</h3>
+            <p style="margin-bottom: calc(var(--spacing-unit) * 2);">Token usage reported by your providers for every AI
+                call — pop-up lookups, follow-up questions, Hallucination Guard verifications, and connection tests.
+                Cached lookups are answered locally and cost no tokens. All data stays on this device.</p>
+
+            <div id="usage-empty-state" class="empty-state" style="display: none;">
+                <div class="empty-state-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg></div>
+                <div class="empty-state-title">No usage recorded yet</div>
+                <p>Look up a word with the pop-up — token counts appear here as soon as your provider reports them.</p>
+            </div>
+
+            <div id="usage-dashboard-body">
+                <div class="dashboard-grid">
+                    <div class="stat-card"><div class="stat-value" id="usage-total-requests">0</div><div class="stat-label">API Calls</div></div>
+                    <div class="stat-card"><div class="stat-value" id="usage-prompt-tokens">0</div><div class="stat-label">Prompt Tokens</div></div>
+                    <div class="stat-card"><div class="stat-value" id="usage-completion-tokens">0</div><div class="stat-label">Completion Tokens</div></div>
+                    <div class="stat-card"><div class="stat-value" id="usage-total-tokens">0</div><div class="stat-label">Total Tokens</div></div>
+                </div>
+
+                <h4>Last 14 Days <small style="color: var(--text-muted); font-weight: 400;">(total tokens per day)</small></h4>
+                <div id="usage-chart" class="usage-chart" role="img" aria-label="Daily token usage for the last 14 days"></div>
+
+                <h4>By Model</h4>
+                <div class="usage-table-wrap">
+                    <table class="usage-table" id="usage-model-table">
+                        <thead>
+                            <tr>
+                                <th>Model</th>
+                                <th>Calls</th>
+                                <th>Prompt</th>
+                                <th>Completion</th>
+                                <th>Total</th>
+                                <th>Share</th>
+                                <th>Last Used</th>
+                            </tr>
+                        </thead>
+                        <tbody id="usage-model-tbody"></tbody>
+                    </table>
+                </div>
+
+                <h4>By Prompt</h4>
+                <div class="usage-table-wrap">
+                    <table class="usage-table" id="usage-prompt-table">
+                        <thead>
+                            <tr>
+                                <th>Prompt</th>
+                                <th>Calls</th>
+                                <th>Prompt</th>
+                                <th>Completion</th>
+                                <th>Total</th>
+                                <th>Last Used</th>
+                            </tr>
+                        </thead>
+                        <tbody id="usage-prompt-tbody"></tbody>
+                    </table>
+                </div>
+
+                <div class="usage-footer">
+                    <small id="usage-meta-line">Never updated</small>
+                    <button id="clear-usage-btn" style="background-color: var(--danger-color);">Clear Usage Data</button>
+                </div>
+            </div>
         </div>
 
         <div id="model-fallback-container" class="settings-section">

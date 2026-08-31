@@ -158,6 +158,7 @@ document.addEventListener('DOMContentLoaded', () => {
   loadImplicitContextSetting(); // Load implicit context toggle
   loadHallucinationGuardSettings(); // Load Hallucination Guard settings
   loadSearchApiSettings(); // Load Search API settings
+  loadUsageDashboard(); // Load usage & token tracking dashboard (Issue #28)
   loadLocalSecretsSetting(); // Load Local-only API-key mode setting
   loadPdfAuthorName(); // Load Custom Author Name
   loadPdfViewerToggle(); // Load PDF interception toggle
@@ -192,6 +193,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (area === 'local' && changes.activeOptionsTab && changes.activeOptionsTab.newValue) {
       activateRequestedTab(changes.activeOptionsTab.newValue);
+    }
+    if (area === 'local' && changes.aiUsageStats) {
+      loadUsageDashboard(); // live-refresh while lookups happen elsewhere
     }
   });
 
@@ -236,6 +240,7 @@ document.addEventListener('DOMContentLoaded', () => {
         : 'Implicit context disabled — only the selected text is sent.', 'success');
     });
   });
+  safeAddListener('clear-usage-btn', 'click', clearUsageData);
   safeAddListener('show-user-questions-checkbox', 'change', (e) => {
     chrome.storage.sync.set({ showUserQuestions: e.target.checked }, () => {
       updateStatus(e.target.checked
@@ -1338,6 +1343,227 @@ async function saveHallucinationGuardSettings() {
   } catch (err) {
     console.error("Error saving hallucination guard settings:", err);
   }
+}
+
+// --- Usage & Token Tracking dashboard (Issue #28) ---
+// Renders the aiUsageStats aggregates the background worker records for every
+// OpenAI-compatible chat completion (lookups, verifications, test calls).
+const USAGE_STATS_KEY = 'aiUsageStats';
+const USAGE_CHART_DAYS = 14;
+
+// Must stay byte-compatible with localDayKey() in background.js: day buckets
+// are written there and only read here.
+function usageDayKey(ts) {
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function formatUsageCount(n) {
+  const v = Number(n) || 0;
+  if (v >= 1000000) return (v / 1000000).toFixed(v >= 10000000 ? 0 : 1) + 'M';
+  if (v >= 1000) return (v / 1000).toFixed(v >= 10000 ? 0 : 1) + 'K';
+  return String(v);
+}
+
+function formatUsageDate(ts) {
+  if (!ts) return '—';
+  const d = new Date(ts);
+  if (d.toDateString() === new Date().toDateString()) {
+    return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  }
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+function usageBucketEntries(map) {
+  return Object.entries(map || {}).filter(([, v]) => v && typeof v === 'object' && (v.requests > 0 || v.totalTokens > 0));
+}
+
+async function loadUsageDashboard() {
+  try {
+    const store = await chrome.storage.local.get(USAGE_STATS_KEY);
+    renderUsageDashboard(store[USAGE_STATS_KEY]);
+  } catch (err) {
+    console.error('Error loading usage stats:', err);
+  }
+}
+
+function renderUsageDashboard(stats) {
+  const emptyEl = document.getElementById('usage-empty-state');
+  const bodyEl = document.getElementById('usage-dashboard-body');
+  if (!emptyEl || !bodyEl) return;
+
+  const totals = (stats && stats.totals) || { requests: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+  const hasData = totals.requests > 0 || totals.totalTokens > 0;
+
+  emptyEl.style.display = hasData ? 'none' : 'block';
+  bodyEl.style.display = hasData ? 'block' : 'none';
+  if (!hasData) return;
+
+  const setStat = (id, compact, full) => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.textContent = compact;
+      el.title = full;
+    }
+  };
+  setStat('usage-total-requests', totals.requests.toLocaleString(), `${totals.requests.toLocaleString()} API calls`);
+  setStat('usage-prompt-tokens', formatUsageCount(totals.promptTokens), `${totals.promptTokens.toLocaleString()} prompt (input) tokens`);
+  setStat('usage-completion-tokens', formatUsageCount(totals.completionTokens), `${totals.completionTokens.toLocaleString()} completion (output) tokens`);
+  setStat('usage-total-tokens', formatUsageCount(totals.totalTokens), `${totals.totalTokens.toLocaleString()} total tokens`);
+
+  renderUsageChart(stats.byDay || {});
+  renderUsageModelTable(stats);
+  renderUsagePromptTable(stats);
+  renderUsageMetaLine(stats);
+}
+
+function renderUsageChart(byDay) {
+  const chartEl = document.getElementById('usage-chart');
+  if (!chartEl) return;
+  chartEl.innerHTML = '';
+
+  const today = new Date();
+  const dayKeys = [];
+  for (let i = USAGE_CHART_DAYS - 1; i >= 0; i--) {
+    const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - i);
+    dayKeys.push(usageDayKey(d.getTime()));
+  }
+
+  let max = 0;
+  for (const key of dayKeys) {
+    max = Math.max(max, (byDay[key] && byDay[key].totalTokens) || 0);
+  }
+
+  for (const key of dayKeys) {
+    const bucket = byDay[key] || {};
+    const tokens = bucket.totalTokens || 0;
+    const col = document.createElement('div');
+    col.className = 'usage-chart-col' + (tokens ? '' : ' is-empty');
+    const bar = document.createElement('div');
+    bar.className = 'usage-chart-bar';
+    // Tiny floors keep non-zero days visible next to a spike day and give
+    // zero days a flat baseline stub.
+    bar.style.height = (tokens > 0 && max > 0 ? Math.max(4, Math.round((tokens / max) * 100)) : 2) + '%';
+    const label = new Date(key + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+    const calls = bucket.requests || 0;
+    col.title = `${label}: ${tokens.toLocaleString()} tokens` + (calls ? ` · ${calls} call${calls === 1 ? '' : 's'}` : '');
+    col.appendChild(bar);
+    chartEl.appendChild(col);
+  }
+}
+
+function makeUsageCell(content, title) {
+  const td = document.createElement('td');
+  if (content instanceof Node) {
+    td.appendChild(content);
+  } else {
+    td.textContent = content;
+  }
+  if (title) td.title = title;
+  return td;
+}
+
+function makeUsageShareCell(tokens, grandTotal) {
+  const wrap = document.createDocumentFragment();
+  const track = document.createElement('span');
+  track.className = 'usage-share-track';
+  const fill = document.createElement('span');
+  fill.className = 'usage-share-fill';
+  const pct = grandTotal > 0 ? Math.max(tokens > 0 ? 1 : 0, Math.round((tokens / grandTotal) * 100)) : 0;
+  fill.style.width = pct + '%';
+  track.appendChild(fill);
+  wrap.appendChild(track);
+  const label = document.createElement('small');
+  label.style.color = 'var(--text-muted)';
+  label.style.marginLeft = '6px';
+  label.textContent = pct + '%';
+  wrap.appendChild(label);
+  return wrap;
+}
+
+function renderUsageModelTable(stats) {
+  const tbody = document.getElementById('usage-model-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+
+  const grandTotal = stats.totals.totalTokens || 0;
+  const rows = usageBucketEntries(stats.byModel).sort((a, b) => (b[1].totalTokens || 0) - (a[1].totalTokens || 0));
+
+  for (const [, bucket] of rows) {
+    const tr = document.createElement('tr');
+
+    const nameDiv = document.createElement('div');
+    nameDiv.style.marginBottom = '0';
+    nameDiv.textContent = bucket.name || 'Unknown model';
+    if (bucket.host) {
+      const hostSpan = document.createElement('span');
+      hostSpan.className = 'usage-model-host';
+      hostSpan.textContent = bucket.host;
+      nameDiv.appendChild(hostSpan);
+    }
+    tr.appendChild(makeUsageCell(nameDiv));
+
+    tr.appendChild(makeUsageCell((bucket.requests || 0).toLocaleString()));
+    tr.appendChild(makeUsageCell(formatUsageCount(bucket.promptTokens), `${(bucket.promptTokens || 0).toLocaleString()} prompt tokens`));
+    tr.appendChild(makeUsageCell(formatUsageCount(bucket.completionTokens), `${(bucket.completionTokens || 0).toLocaleString()} completion tokens`));
+    tr.appendChild(makeUsageCell(formatUsageCount(bucket.totalTokens), `${(bucket.totalTokens || 0).toLocaleString()} total tokens`));
+    tr.appendChild(makeUsageCell(makeUsageShareCell(bucket.totalTokens || 0, grandTotal)));
+    const lastUsed = formatUsageDate(bucket.lastUsed);
+    tr.appendChild(makeUsageCell(lastUsed, bucket.lastUsed ? new Date(bucket.lastUsed).toLocaleString() : ''));
+
+    tbody.appendChild(tr);
+  }
+}
+
+function renderUsagePromptTable(stats) {
+  const tbody = document.getElementById('usage-prompt-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+
+  const rows = usageBucketEntries(stats.byPrompt).sort((a, b) => (b[1].totalTokens || 0) - (a[1].totalTokens || 0));
+
+  for (const [, bucket] of rows) {
+    const tr = document.createElement('tr');
+
+    const nameDiv = document.createElement('div');
+    nameDiv.style.marginBottom = '0';
+    nameDiv.textContent = bucket.name || 'Unknown prompt';
+    tr.appendChild(makeUsageCell(nameDiv));
+
+    tr.appendChild(makeUsageCell((bucket.requests || 0).toLocaleString()));
+    tr.appendChild(makeUsageCell(formatUsageCount(bucket.promptTokens), `${(bucket.promptTokens || 0).toLocaleString()} prompt tokens`));
+    tr.appendChild(makeUsageCell(formatUsageCount(bucket.completionTokens), `${(bucket.completionTokens || 0).toLocaleString()} completion tokens`));
+    tr.appendChild(makeUsageCell(formatUsageCount(bucket.totalTokens), `${(bucket.totalTokens || 0).toLocaleString()} total tokens`));
+    const lastUsed = formatUsageDate(bucket.lastUsed);
+    tr.appendChild(makeUsageCell(lastUsed, bucket.lastUsed ? new Date(bucket.lastUsed).toLocaleString() : ''));
+
+    tbody.appendChild(tr);
+  }
+}
+
+function renderUsageMetaLine(stats) {
+  const metaEl = document.getElementById('usage-meta-line');
+  if (!metaEl) return;
+
+  const parts = [];
+  if (stats.updatedAt) {
+    parts.push(`Last updated ${new Date(stats.updatedAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`);
+  }
+  const kinds = stats.byKind || {};
+  const verificationCalls = (kinds.verification && kinds.verification.requests) || 0;
+  const testCalls = (kinds.test && kinds.test.requests) || 0;
+  if (verificationCalls || testCalls) {
+    parts.push(`includes ${verificationCalls} verification and ${testCalls} test calls`);
+  }
+  metaEl.textContent = parts.join(' · ') || 'Never updated';
+}
+
+function clearUsageData() {
+  if (!confirm('Clear all recorded usage and token statistics? This cannot be undone.')) return;
+  chrome.runtime.sendMessage({ type: 'clearAiUsageStats' }, () => {
+    void chrome.runtime.lastError;
+    loadUsageDashboard();
+  });
 }
 
 async function editSelectedModel() {
