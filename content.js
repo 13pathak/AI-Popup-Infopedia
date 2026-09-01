@@ -940,6 +940,16 @@ const popupStyles = `
   }
   .ai-compare-body p { margin-top: 0; margin-bottom: 8px; }
   .ai-compare-body p:last-child { margin-bottom: 0; }
+  /* Stacked conversation turns: follow-up answers land below earlier ones,
+     separated by a hairline so the thread reads clearly. */
+  .ai-compare-turn + .ai-compare-turn,
+  .ai-compare-turn + .ai-chat-row,
+  .ai-chat-row + .ai-compare-turn {
+    border-top: 1px solid var(--popup-border);
+    margin-top: 10px;
+    padding-top: 10px;
+  }
+  .ai-compare-turn .ai-popup-loading { padding: 2px 0; }
   .ai-compare-idle {
     color: var(--popup-text-muted);
     font-size: 12.5px;
@@ -1067,8 +1077,7 @@ const POPUP_ICON_PATHS = {
   chevronRight: '<polyline points="9 18 15 12 9 6"/>',
   chevronLeft: '<polyline points="15 18 9 12 15 6"/>',
   sparkles: '<path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/>',
-  bookmark: '<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>',
-  columns: '<rect x="3" y="4" width="7.5" height="16" rx="1.5"/><rect x="13.5" y="4" width="7.5" height="16" rx="1.5"/>'
+  bookmark: '<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>'
 };
 
 function iconSvg(name, size = 16) {
@@ -2917,10 +2926,12 @@ function startCompareLookup(instance, word, customPrompt) {
   if (followupInput) followupInput.disabled = true;
   if (followupSend) followupSend.disabled = true;
 
-  if (allModels.length > COMPARE_MODEL_CAP) {
-    showPopupToast(instance, `Comparing the first ${COMPARE_MODEL_CAP} of ${allModels.length} models`);
+  if (models.length === 1) {
+    // One card, nothing to swipe to — no toast, the card is just the answer.
+  } else if (allModels.length > COMPARE_MODEL_CAP) {
+    showPopupToast(instance, `Comparing the first ${COMPARE_MODEL_CAP} of ${allModels.length} models — swipe for more`);
   } else {
-    showPopupToast(instance, `Asking ${Math.min(2, models.length)} models — swipe for more`);
+    showPopupToast(instance, `Asking 2 models — swipe to compare more`);
   }
 
   // Lazy fan-out: the default model and the one after it answer immediately.
@@ -2980,7 +2991,12 @@ function runCompareFollowup(instance, promptToSend, displayText) {
   }
 
   const activeSlots = instance.compareSlots.filter(s => s.started);
-  if (activeSlots.length === 0) return;
+  if (activeSlots.length === 0) {
+    // Unreachable in practice (slot creation always starts the first two),
+    // but if it ever happens the box must unlock rather than stick disabled.
+    updateCompareFollowupState(instance, false);
+    return;
+  }
 
   instance.isLoading = true;
   startLoadingQuoteRotation(instance);
@@ -3120,6 +3136,14 @@ function renderCompareView(instance) {
   if (!contentWrapper.classList.contains('ai-compare-mode')) {
     contentWrapper.classList.add('ai-compare-mode');
   }
+  // Stream renders rebuild the card bodies every ~80ms; carry each card's
+  // scroll offset across the rebuild so a reader scrolled up is never yanked.
+  const oldBodies = contentWrapper.querySelectorAll('.ai-compare-card .ai-compare-body');
+  if (oldBodies.length && instance.compareSlots) {
+    instance.compareSlots.forEach((s, i) => {
+      if (oldBodies[i]) s.bodyScrollTop = oldBodies[i].scrollTop;
+    });
+  }
   contentWrapper.innerHTML = '';
 
   // The shared action toolbar is created once and lives outside the wiped
@@ -3194,14 +3218,35 @@ function buildCompareCard(instance, card, slot) {
     return;
   }
 
-  const lastMsg = slot.messages.length ? slot.messages[slot.messages.length - 1] : null;
+  // --- Card body: the model's whole conversation, oldest first ---
+  // Follow-up answers stack BELOW earlier ones; they never replace them.
+  // The answer in progress (loading or streaming) renders at the end, and
+  // a failure keeps the prior turns visible above its Retry row.
+  const body = document.createElement('div');
+  body.className = 'ai-compare-body';
+  body.addEventListener('scroll', () => {
+    // Stop auto-following new tokens once the reader deliberately scrolled
+    // up, and remember the offset so re-renders do not yank them to the top.
+    slot.bodyScrollTop = body.scrollTop;
+    slot.bodyPinned = body.scrollHeight - body.scrollTop - body.clientHeight < 24;
+  });
+
+  appendCompareConversation(instance, body, slot);
 
   if (slot.status === 'error') {
     const err = document.createElement('div');
     err.className = 'ai-compare-error';
     err.textContent = slot.errorText || 'Something went wrong.';
-    card.appendChild(err);
+    body.appendChild(err);
+  }
+  if (slot.bodyPinned !== false) {
+    body.scrollTop = body.scrollHeight;
+  } else if (typeof slot.bodyScrollTop === 'number') {
+    body.scrollTop = slot.bodyScrollTop;
+  }
+  card.appendChild(body);
 
+  if (slot.status === 'error') {
     const retryRow = document.createElement('div');
     retryRow.className = 'ai-compare-actions';
     const retryBtn = document.createElement('button');
@@ -3216,34 +3261,45 @@ function buildCompareCard(instance, card, slot) {
     card.appendChild(retryRow);
     return;
   }
+}
 
-  // --- Card body: the answer, scrollable inside the card ---
-  const body = document.createElement('div');
-  body.className = 'ai-compare-body';
-  body.addEventListener('scroll', () => {
-    // Stop auto-following new tokens once the reader deliberately scrolled up.
-    slot.bodyPinned = body.scrollHeight - body.scrollTop - body.clientHeight < 24;
-  });
+// Renders one model's conversation inside its card body: completed answers as
+// separated turns, the live answer streaming at the end, the user's own
+// questions only when the "Show your own questions" setting is on (echoing
+// the same question on every card would be noise), and per-turn citations.
+function appendCompareConversation(instance, body, slot) {
+  let drewAny = false;
+  slot.messages.forEach(msg => {
+    if (!msg || msg.isError) return;
 
-  if (lastMsg && (lastMsg.isThinking || lastMsg.isStatus)) {
-    body.insertAdjacentHTML('beforeend', buildLoadingHtml(lastMsg.content));
-  } else if (lastMsg && lastMsg.isStreaming) {
-    body.innerHTML = renderMarkdownHtml(String(lastMsg.content || ''));
-  } else {
-    const answer = latestCompareAnswer(slot);
-    if (answer) {
-      body.innerHTML = renderMarkdownHtml(String(answer.content || ''));
-    } else {
-      body.insertAdjacentHTML('beforeend', buildLoadingHtml('Thinking...'));
+    if (msg.role === 'user') {
+      if (!instance.showUserQuestions) return;
+      const row = document.createElement('div');
+      row.className = 'ai-chat-row ai-chat-row-user';
+      const bubble = document.createElement('div');
+      bubble.className = 'ai-chat-bubble';
+      bubble.innerHTML = escapeHtmlText(String(msg.displayContent || msg.content || '')).replace(/\n/g, '<br>');
+      row.appendChild(bubble);
+      body.appendChild(row);
+      drewAny = true;
+      return;
     }
-  }
-  if (slot.bodyPinned !== false) body.scrollTop = body.scrollHeight;
-  card.appendChild(body);
+    if (msg.role !== 'assistant') return;
 
-  const answer = latestCompareAnswer(slot);
-  if (answer && Array.isArray(answer.citations) && answer.citations.length > 0) {
-    appendCitations(card, answer.citations);
-  }
+    const turn = document.createElement('div');
+    turn.className = 'ai-compare-turn' + (msg.isStreaming ? ' ai-compare-turn-live' : '');
+    if (msg.isThinking || msg.isStatus) {
+      turn.innerHTML = buildLoadingHtml(msg.content);
+    } else {
+      turn.innerHTML = renderMarkdownHtml(String(msg.content || ''));
+      if (!msg.isStreaming && Array.isArray(msg.citations) && msg.citations.length > 0) {
+        appendCitations(turn, msg.citations);
+      }
+    }
+    body.appendChild(turn);
+    drewAny = true;
+  });
+  if (!drewAny) body.insertAdjacentHTML('beforeend', buildLoadingHtml('Thinking...'));
 }
 
 // Arrows + one dot per model; the dot doubles as that model's status light.
@@ -3355,6 +3411,15 @@ function makeCompareSlider(instance, wrapper) {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     // Drags start on the card itself, never on its buttons and links.
     if (e.target.closest('button, a, input, textarea, .ai-compare-actions')) return;
+    // Mouse drags begin on the card CHROME (header, nav, idle/error areas)
+    // only: the answer body must keep native text selection, because
+    // selecting a word inside an answer to look it up again is a core flow.
+    // Touch and pen swipes — where selection is long-press based — may start
+    // anywhere on the card.
+    if (e.pointerType === 'mouse' &&
+        !e.target.closest('.ai-compare-header, .ai-compare-nav, .ai-compare-idle, .ai-compare-error')) {
+      return;
+    }
     const viewport = wrapper.querySelector('.ai-compare-viewport');
     const track = wrapper.querySelector('.ai-compare-track');
     if (!viewport || !track) return;
@@ -3370,7 +3435,7 @@ function makeCompareSlider(instance, wrapper) {
     };
   });
 
-  window.addEventListener('pointermove', (e) => {
+  const onMove = (e) => {
     if (!drag) return;
     if (!activePopups.includes(instance)) { drag = null; instance.compareDragActive = false; return; }
     const dx = e.clientX - drag.startX;
@@ -3387,7 +3452,8 @@ function makeCompareSlider(instance, wrapper) {
     if (t < min) t = min + (t - min) * 0.35;
     drag.track.style.transform = `translateX(${t}px)`;
     if (e.cancelable) e.preventDefault();
-  }, { passive: false });
+  };
+  window.addEventListener('pointermove', onMove, { passive: false });
 
   const endDrag = () => {
     if (!drag) return;
@@ -3410,6 +3476,15 @@ function makeCompareSlider(instance, wrapper) {
   };
   window.addEventListener('pointerup', endDrag);
   window.addEventListener('pointercancel', endDrag);
+
+  // The window-level listeners outlive the popup's DOM; drop them when the
+  // popup is destroyed so closed popups cannot accumulate in memory.
+  instance.compareSliderCleanup = () => {
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', endDrag);
+    window.removeEventListener('pointercancel', endDrag);
+    drag = null;
+  };
 
   wrapper.addEventListener('click', (e) => {
     if (Date.now() < (instance.compareSuppressClickUntil || 0)) {
@@ -4579,6 +4654,7 @@ function removePopupInstance(instance) {
     activePopups.splice(index, 1);
     stopLoadingQuoteRotation(instance);
     cleanupStreamHandlersFor(instance);
+    if (instance.compareSliderCleanup) instance.compareSliderCleanup();
     if (instance.stopMic) instance.stopMic();
     if (instance.container) instance.container.remove();
   }
