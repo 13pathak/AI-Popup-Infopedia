@@ -747,10 +747,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       // --- Model fallback chain ---
       // The primary model goes first; on any failure (HTTP error, timeout,
       // network) the next configured model in saved list order is tried.
+      // enableModelFallback === false disables the chain globally, and a
+      // request.disableFallback flag disables it per request — the popup's
+      // compare mode (Issue #27) fans one question out to every model and
+      // must see each model's OWN answer (or failure), never a silent
+      // fallback that would mislabel who said what.
       // One chain attempt runs the full web-search orchestrator below, and
       // everything it mutates (payload, citations, streamed partials) is
       // rebuilt per attempt so models cannot leak state into each other.
-      const modelChain = enableModelFallback === false
+      const modelChain = (enableModelFallback === false || request.disableFallback)
         ? [primaryModel]
         : [primaryModel, ...models.filter(m => m.id !== primaryModel.id)];
 

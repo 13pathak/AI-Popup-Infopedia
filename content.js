@@ -854,10 +854,184 @@ const popupStyles = `
     border-left: 3px solid rgba(var(--popup-accent-rgb), 0.9);
   }
 
+  /* --- Multi-model compare (Issue #27): horizontal card slider ---
+     One card fills the popup; the row of cards is dragged/swiped/scrolled
+     sideways, snapping to the nearest model. Compare is the popup's normal
+     answering mode — no toggle, the slider is simply how answers appear. */
+  #ai-popup-content.ai-compare-mode {
+    overflow: hidden;
+    padding: 2px 0 0 0;
+  }
+  .ai-compare-viewport {
+    overflow: hidden;
+    position: relative;
+    touch-action: pan-y; /* vertical answer scrolling stays native; horizontal is ours */
+  }
+  .ai-compare-track {
+    display: flex;
+    align-items: stretch;
+    width: 100%;
+    will-change: transform;
+  }
+  .ai-compare-track.animating { transition: transform 200ms ease-out; }
+  .ai-compare-card {
+    flex: 0 0 100%;
+    min-width: 100%;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--popup-border);
+    background: var(--popup-card-bg);
+    border-radius: 10px;
+    padding: 10px 12px;
+  }
+  .ai-compare-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    min-width: 0;
+  }
+  .ai-compare-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--popup-text-muted);
+    flex-shrink: 0;
+  }
+  .ai-compare-dot.streaming {
+    background: rgba(var(--popup-accent-rgb), 1);
+    animation: ai-popup-dot-bounce 1.2s ease-in-out infinite;
+  }
+  .ai-compare-dot.done { background: rgba(52, 211, 153, 1); }
+  .ai-compare-dot.error { background: var(--popup-error-text); }
+  .ai-compare-model {
+    font-weight: 700;
+    font-size: 13px;
+    color: var(--popup-text-header);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ai-compare-status {
+    margin-left: auto;
+    font-size: 11.5px;
+    color: var(--popup-text-muted);
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    flex-shrink: 0;
+  }
+  .ai-compare-status svg { opacity: 0.9; flex-shrink: 0; }
+  .ai-compare-body {
+    font-size: 13.5px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    max-height: 38vh;
+    min-height: 96px;
+    padding-right: 4px;
+    overflow-wrap: break-word;
+  }
+  .ai-compare-body::-webkit-scrollbar { width: 8px; }
+  .ai-compare-body::-webkit-scrollbar-track { background: transparent; }
+  .ai-compare-body::-webkit-scrollbar-thumb {
+    background: rgba(var(--popup-accent-rgb), 0.4);
+    border-radius: 8px;
+  }
+  .ai-compare-body p { margin-top: 0; margin-bottom: 8px; }
+  .ai-compare-body p:last-child { margin-bottom: 0; }
+  .ai-compare-idle {
+    color: var(--popup-text-muted);
+    font-size: 12.5px;
+    line-height: 1.55;
+    padding: 14px 4px;
+    text-align: center;
+  }
+  .ai-compare-error {
+    color: var(--popup-error-text);
+    font-size: 13px;
+    margin-bottom: 8px;
+    overflow-wrap: break-word;
+  }
+  .ai-compare-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 9px;
+  }
+  .ai-compare-actions button {
+    flex: 1;
+    padding: 6px 8px;
+    border-radius: 7px;
+    border: 1px solid var(--popup-field-border);
+    background: var(--popup-field-bg);
+    color: var(--popup-text);
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .ai-compare-actions button:hover:not(:disabled) {
+    border-color: rgba(var(--popup-accent-rgb), 0.6);
+  }
+  .ai-compare-actions button:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+  /* Slider navigation: arrows for anyone who cannot drag, dots that double as
+     per-model status lights, and a plain "1 / 3" position counter. */
+  .ai-compare-nav {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 9px 0 2px 0;
+    user-select: none;
+  }
+  .ai-compare-nav-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    border: 1px solid var(--popup-field-border);
+    background: var(--popup-field-bg);
+    color: var(--popup-text);
+    cursor: pointer;
+    padding: 0;
+  }
+  .ai-compare-nav-btn:disabled { opacity: 0.35; cursor: default; }
+  .ai-compare-nav-btn:not(:disabled):hover {
+    border-color: rgba(var(--popup-accent-rgb), 0.6);
+  }
+  .ai-compare-dots {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+  }
+  .ai-compare-dotnav {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    border: 1px solid var(--popup-field-border);
+    background: var(--popup-field-bg);
+    padding: 0;
+    cursor: pointer;
+  }
+  .ai-compare-dotnav.done { border-color: rgba(52, 211, 153, 0.8); }
+  .ai-compare-dotnav.error { border-color: var(--popup-error-text); }
+  .ai-compare-dotnav.active {
+    width: 22px;
+    border-radius: 5px;
+    background: rgba(var(--popup-accent-rgb), 0.9);
+    border-color: transparent;
+  }
+
   /* --- Reduced motion: show elements at rest, no enter/bounce/pulse --- */
   @media (prefers-reduced-motion: reduce) {
     #ai-definition-popup,
     .ai-popup-loading-dot,
+    .ai-compare-dot.streaming,
     .ai-popup-toast,
     .ai-popup-followup-mic.recording,
     .ai-feedback-banner,
@@ -891,8 +1065,10 @@ const POPUP_ICON_PATHS = {
   checkCircle: '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>',
   chevronDown: '<polyline points="6 9 12 15 18 9"/>',
   chevronRight: '<polyline points="9 18 15 12 9 6"/>',
+  chevronLeft: '<polyline points="15 18 9 12 15 6"/>',
   sparkles: '<path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/>',
-  bookmark: '<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>'
+  bookmark: '<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>',
+  columns: '<rect x="3" y="4" width="7.5" height="16" rx="1.5"/><rect x="13.5" y="4" width="7.5" height="16" rx="1.5"/>'
 };
 
 function iconSvg(name, size = 16) {
@@ -1386,7 +1562,7 @@ function initiateEmptyPopupSequence() {
 
   chrome.storage.sync.get({ 'secretsLocalOnly': false, 'models': [], 'defaultModelId': null, 'customPrompts': [], 'defaultPromptId': null }, (syncData) => {
     if (!activePopups.includes(popupInstance)) return;
-    
+
     const finalize = (models, defaultModelId) => {
       const customPrompts = syncData.customPrompts || [];
       const defaultPromptId = syncData.defaultPromptId || null;
@@ -1395,16 +1571,23 @@ function initiateEmptyPopupSequence() {
         { role: 'assistant', content: "Hi! What would you like to ask?" }
       ];
       renderMessages(popupInstance);
-      
+
       if (models && models.length > 0) {
+        popupInstance.models = models;
         createSelectors(popupInstance, models, customPrompts, defaultModelId, null, "Custom Question", defaultPromptId);
+        // The typed question fans out through the compare slider; only the
+        // follow-up box (with its mic) is needed up front.
+        createFollowupInput(popupInstance, "Custom Question");
+      } else {
+        // No models: fall back to the legacy single flow, which surfaces the
+        // configuration error and keeps the full action row available.
+        popupInstance.compareEnabled = false;
+        const defaultModelName = 'Unknown Model';
+        createActionButtons(popupInstance, "Custom Question", "Conversation started from hotkey.", defaultModelName, "Default");
       }
-      
-      const defaultModelName = models ? (models.find(m => m.id === defaultModelId)?.name || 'Unknown Model') : 'Unknown Model';
-      createActionButtons(popupInstance, "Custom Question", "Conversation started from hotkey.", defaultModelName, "Default");
-      
+
       adjustPopupPosition(popupInstance, null);
-      
+
       setTimeout(() => {
         const input = popupInstance.popup.querySelector('#ai-popup-followup-input');
         if (input) input.focus();
@@ -1700,7 +1883,36 @@ function initiatePopupSequence(rect, selectedText, customPrompt, implicitContext
     });
   }
 
-  performInitialFetch();
+  // --- Always-on compare (Issue #27) ---
+  // Every lookup answers through the horizontal compare slider: the default
+  // model and the one after it respond immediately, further models join when
+  // their card is slid to. Models live in sync storage, or in local storage
+  // while the local-only API-key mode is on — the same split the empty
+  // hotkey popup uses. With no models configured the legacy single-answer
+  // flow runs, because it renders the helpful configuration error.
+  chrome.storage.sync.get({ secretsLocalOnly: false, models: [], defaultModelId: null, customPrompts: [], defaultPromptId: null }, (syncData) => {
+    if (!activePopups.includes(popupInstance)) return;
+    const begin = (models, prompts, defaultModelId) => {
+      if (!activePopups.includes(popupInstance)) return;
+      if (models.length > 0) {
+        popupInstance.models = models;
+        createSelectors(popupInstance, models, prompts, defaultModelId, null, selectedText, syncData.defaultPromptId || null);
+        startCompareLookup(popupInstance, selectedText, null);
+        adjustPopupPosition(popupInstance, rect);
+      } else {
+        popupInstance.compareEnabled = false;
+        performInitialFetch();
+      }
+    };
+    if (syncData.secretsLocalOnly) {
+      chrome.storage.local.get(['models', 'defaultModelId', 'customPrompts'], (localData) => {
+        if (!activePopups.includes(popupInstance)) return;
+        begin(localData.models || [], localData.customPrompts || [], localData.defaultModelId || null);
+      });
+    } else {
+      begin(syncData.models || [], syncData.customPrompts || [], syncData.defaultModelId || null);
+    }
+  });
 }
 
 
@@ -1754,6 +1966,17 @@ function handlePopupSaveShortcut(event) {
   const top = activePopups[activePopups.length - 1];
   event.preventDefault();
   event.stopImmediatePropagation();
+  // Compare popups keep no single conversation: export the card on screen.
+  if (top.compareSlots && top.compareSlots.length > 0) {
+    const slot = top.compareSlots[top.compareIndex || 0];
+    const answer = slot && latestCompareAnswer(slot);
+    if (!answer) {
+      showPopupToast(top, 'Nothing to save yet — wait for the answer');
+      return;
+    }
+    saveConversationAsPdf(top, slot.messages, slot.answerModelName || slot.modelName);
+    return;
+  }
   const hasAnswer = top.messages && top.messages.some(m => m.role === 'assistant' && !m.isThinking && !m.isError);
   if (!hasAnswer) {
     showPopupToast(top, 'Nothing to save yet — wait for the answer');
@@ -1945,7 +2168,9 @@ function showRequestTimeoutError(instance, retryFn) {
 // authoritatively, which also cleans up any half-rendered markdown.
 const activeStreamHandlers = new Map();
 
-function trackAiStream(instance, locateStreamingSlot) {
+// Optional renderFn: compare mode (Issue #27) runs several streams at once and
+// repaints its own sectioned view instead of the linear conversation.
+function trackAiStream(instance, locateStreamingSlot, renderFn) {
   const requestId = 'sr_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
   let renderScheduled = false;
 
@@ -1991,7 +2216,7 @@ function trackAiStream(instance, locateStreamingSlot) {
       setTimeout(() => {
         renderScheduled = false;
         if (activePopups.includes(instance)) {
-          try { renderMessages(instance); } catch (e) { console.error('crash in stream render', e); }
+          try { (renderFn || renderMessages)(instance); } catch (e) { console.error('crash in stream render', e); }
         }
       }, 80);
     }
@@ -2077,7 +2302,20 @@ function showPopup(x, y, content) {
     isInteracting: false,
     isClickInside: false,
     messages: [],
-    showUserQuestions: false // Default to false
+    showUserQuestions: false, // Default to false
+    // --- Multi-model compare state (Issue #27) ---
+    // Compare is the popup's normal answering mode — the horizontal card
+    // slider IS the answer view. compareEnabled only flips false when no
+    // models are configured, so the legacy single-answer flow can surface
+    // the configuration error.
+    compareEnabled: true,
+    compareSlots: null,      // one answer card per model while comparing
+    compareGen: 0,           // fan-out generation; stale responses are dropped
+    compareIndex: 0,         // which model's card is on screen
+    compareWord: null,       // the word the current compare cards answer
+    comparePrompt: null,     // prompt content chosen when the compare started
+    compareFirstMessages: null, // opening turn for custom-question compares
+    models: []               // configured models (filled by createSelectors / init)
   };
 
   chrome.storage.sync.get({ showUserQuestions: false }, (data) => {
@@ -2626,6 +2864,753 @@ function retryMessage(instance, messageIndex) {
   );
 }
 
+// --- Multi-model compare mode (Issue #27) ---
+// One question, every configured model, all answering at once. The popup fans
+// out one getAiDefinition per model (each with its own requestId so the
+// existing streaming plumbing carries every stream independently) and shows
+// the answers as labeled sections. Everything a user touches stays familiar:
+// one obvious follow-up box, and Save/Copy inside each answer card. A
+// per-instance generation counter (compareGen) invalidates late responses
+// after a re-ask or a newer fan-out.
+const COMPARE_MODEL_CAP = 6;
+
+// Fans the word out to the configured models (capped) — but LAZILY: only the
+// first two cards are asked up front. Each further model is asked when the
+// user slides onto its card, so a popup with six models only spends tokens
+// on the models actually read.
+function startCompareLookup(instance, word, customPrompt) {
+  const allModels = instance.models || [];
+  if (allModels.length === 0) return;
+  const models = allModels.slice(0, COMPARE_MODEL_CAP);
+  const gen = ++instance.compareGen;
+
+  instance.compareWord = word;
+  instance.comparePrompt = customPrompt || null;
+  instance.compareFirstMessages = null; // word-lookup conversations start from the prompt
+  instance.compareIndex = 0; // every new question starts on the first model's card
+  instance.compareSlots = models.map(m => ({
+    modelId: m.id,
+    modelName: m.name,
+    messages: [],
+    started: false,        // lazy: false until this model is actually asked
+    status: 'idle',        // idle | waiting | streaming | done | error
+    settled: false,
+    errorText: null,
+    answerModelName: null,  // who actually answered (set from the response)
+    promptName: null,
+    lastRequest: null,
+    bodyPinned: true
+  }));
+
+  instance.isLoading = true;
+  startLoadingQuoteRotation(instance);
+  renderCompareView(instance);
+
+  // The follow-up box is shared by every section and stays locked until all
+  // models finish. Create it if this popup does not have one yet (compare can
+  // start before any single-model answer ever arrived).
+  if (!instance.popup.querySelector('#ai-popup-followup-container')) {
+    createFollowupInput(instance, word);
+  }
+  const followupInput = instance.popup.querySelector('#ai-popup-followup-input');
+  const followupSend = instance.popup.querySelector('.ai-popup-followup-send');
+  if (followupInput) followupInput.disabled = true;
+  if (followupSend) followupSend.disabled = true;
+
+  if (allModels.length > COMPARE_MODEL_CAP) {
+    showPopupToast(instance, `Comparing the first ${COMPARE_MODEL_CAP} of ${allModels.length} models`);
+  } else {
+    showPopupToast(instance, `Asking ${Math.min(2, models.length)} models — swipe for more`);
+  }
+
+  // Lazy fan-out: the default model and the one after it answer immediately.
+  ensureCompareSlotLoaded(instance, 0);
+  ensureCompareSlotLoaded(instance, 1);
+}
+
+// Asks one model on demand (first visit of its card, or a retry elsewhere).
+// A model picked up late joins the conversation at the ORIGINAL question —
+// follow-ups, which only already-started models receive, append from there,
+// so every card stays a coherent per-model thread.
+function ensureCompareSlotLoaded(instance, index) {
+  const slots = instance.compareSlots;
+  if (!slots || index < 0 || index >= slots.length) return;
+  const slot = slots[index];
+  if (slot.started) return;
+
+  if (instance.compareFirstMessages && slot.messages.length === 0) {
+    // Custom-question popup: the opening turn is a typed question, so the
+    // first ask must carry it as conversation history.
+    instance.compareFirstMessages.forEach(m => slot.messages.push({ ...m }));
+    issueCompareRequest(instance, instance.compareGen, slot, instance.compareWord || 'Custom Question', null, true);
+  } else {
+    issueCompareRequest(instance, instance.compareGen, slot, instance.compareWord, instance.comparePrompt, false);
+  }
+}
+
+// Sends the same question to every model ALREADY in the conversation. Models
+// the user has not slid to yet stay idle (un-billed); they join at the
+// original question whenever their card is first visited.
+function runCompareFollowup(instance, promptToSend, displayText) {
+  if (!instance.compareSlots || instance.compareSlots.length === 0) {
+    // Compare was enabled on the empty hotkey popup: build the sections now.
+    // The typed question is the OPENING turn every model must see, so it is
+    // kept as the join seed for late-visited cards.
+    const models = (instance.models || []).slice(0, COMPARE_MODEL_CAP);
+    if (models.length === 0) {
+      // No models to ask — unlock the box and say so; it must never stick
+      // disabled with the user's typed question swallowed.
+      updateCompareFollowupState(instance, false);
+      showPopupToast(instance, 'No models configured to compare', 'error');
+      return;
+    }
+    instance.compareWord = instance.sourceWord || 'Custom Question';
+    instance.comparePrompt = null;
+    instance.compareFirstMessages = [{ role: 'user', content: promptToSend, displayContent: displayText }];
+    instance.compareSlots = models.map(m => ({
+      modelId: m.id, modelName: m.name, messages: [], started: false, status: 'idle',
+      settled: false, errorText: null, answerModelName: null, promptName: null, lastRequest: null, bodyPinned: true
+    }));
+    instance.isLoading = true;
+    startLoadingQuoteRotation(instance);
+    renderCompareView(instance);
+    ensureCompareSlotLoaded(instance, 0);
+    ensureCompareSlotLoaded(instance, 1);
+    return;
+  }
+
+  const activeSlots = instance.compareSlots.filter(s => s.started);
+  if (activeSlots.length === 0) return;
+
+  instance.isLoading = true;
+  startLoadingQuoteRotation(instance);
+
+  activeSlots.forEach(slot => {
+    slot.messages.push({ role: 'user', content: promptToSend, displayContent: displayText });
+  });
+  renderCompareView(instance);
+
+  const word = instance.compareWord || instance.sourceWord || 'Custom Question';
+  activeSlots.forEach(slot => issueCompareRequest(instance, instance.compareGen, slot, word, null, true));
+}
+
+// One model's share of a fan-out: thinking placeholder, stream registration,
+// watchdog, and the request itself. disableFallback keeps the answer honestly
+// attributable to this slot's model. Marking the slot started here (not in
+// the callers) makes "has this model been billed yet" single-sourced.
+function issueCompareRequest(instance, gen, slot, word, customPrompt, isFollowup) {
+  slot.started = true;
+  slot.lastRequest = { word: word, customPrompt: customPrompt || null, isFollowup: !!isFollowup };
+  slot.status = 'streaming';
+  slot.settled = false;
+  slot.messages.push({ role: 'assistant', content: initLoadingQuote(instance), isThinking: true });
+  renderCompareView(instance);
+  // A model just joined the conversation (late-visited card or retry): the
+  // follow-up box must lock while it works, exactly as during a fan-out.
+  updateCompareFollowupState(instance, false);
+
+  const stream = trackAiStream(instance, () => {
+    const msgs = slot.messages;
+    return msgs.length > 0 ? msgs[msgs.length - 1] : null;
+  }, (inst) => renderCompareView(inst));
+
+  const watchdog = createResponseWatchdog(() => {
+    if (!activePopups.includes(instance)) return;
+    if (gen !== instance.compareGen) return;
+    settleCompareSlot(instance, slot, { error: 'The request timed out with no response.' });
+  });
+
+  const payload = {
+    type: 'getAiDefinition',
+    word: word,
+    modelId: slot.modelId,
+    requestId: stream.requestId,
+    disableFallback: true,
+    context: instance.implicitContext || undefined
+  };
+  if (isFollowup) {
+    payload.messages = slot.messages.filter(m => !m.isThinking && !m.isError && !m.isStreaming);
+  } else if (customPrompt) {
+    payload.customPrompt = customPrompt;
+  }
+
+  chrome.runtime.sendMessage(payload, (response) => {
+    watchdog.done();
+    stream.done();
+    if (watchdog.fired()) return; // watchdog already took over this slot
+    if (!activePopups.includes(instance)) return;
+    if (gen !== instance.compareGen) return; // mode switched / superseded
+    if (chrome.runtime.lastError) response = { error: chrome.runtime.lastError.message };
+    settleCompareSlot(instance, slot, response);
+  });
+}
+
+// Final render for one model's answer (or failure), plus the shared
+// busy-state bookkeeping that gates the follow-up input.
+function settleCompareSlot(instance, slot, response) {
+  slot.settled = true;
+  slot.messages = slot.messages.filter(m => !m.isThinking && !m.isStreaming);
+
+  if (response && !response.error && typeof response.definition === 'string') {
+    slot.status = 'done';
+    slot.errorText = null;
+    slot.answerModelName = response.usedModelName || slot.modelName;
+    slot.promptName = response.promptName || slot.promptName;
+    slot.messages.push({ role: 'assistant', content: response.definition, citations: response.citations || [] });
+  } else {
+    slot.status = 'error';
+    slot.errorText = String((response && response.error) || 'The model returned an empty response.');
+  }
+
+  renderCompareView(instance);
+
+  // The follow-up box unlocks only when every model that was actually ASKED
+  // has finished — idle (never visited) models are excluded, or the box would
+  // lock forever; a late-joined still-streaming model keeps it locked.
+  const slots = instance.compareSlots;
+  if (slots && slots.length > 0 && slots.every(s => !s.started || s.settled)) {
+    instance.isLoading = false;
+    stopLoadingQuoteRotation(instance);
+    updateCompareFollowupState(instance, !!(slot.lastRequest && slot.lastRequest.isFollowup));
+  }
+}
+
+// Locks or unlocks the shared follow-up box from live slot state. Locked
+// while any asked model is still answering, so questions can never interleave
+// with a pending answer inside a model's conversation.
+function updateCompareFollowupState(instance, wasFollowup) {
+  if (!instance.popup) return;
+  const input = instance.popup.querySelector('#ai-popup-followup-input');
+  const send = instance.popup.querySelector('.ai-popup-followup-send');
+  if (!input || !send) return;
+  const slots = instance.compareSlots || [];
+  const busy = slots.some(s => s.started && !s.settled);
+  input.disabled = busy;
+  send.disabled = busy;
+  if (!busy && wasFollowup) input.focus();
+}
+
+// Re-asks only this model's last question after a failure.
+function retryCompareSlot(instance, slot) {
+  const info = slot.lastRequest;
+  if (!info) return;
+  issueCompareRequest(instance, instance.compareGen, slot, info.word, info.customPrompt, info.isFollowup);
+}
+
+function latestCompareAnswer(slot) {
+  for (let i = slot.messages.length - 1; i >= 0; i--) {
+    const m = slot.messages[i];
+    if (m.role === 'assistant' && !m.isThinking && !m.isStreaming && !m.isError) return m;
+  }
+  return null;
+}
+
+// The compare view: a horizontal card slider. One model's answer fills the
+// popup; the row is dragged (mouse/touch), scrolled (two-finger/trackpad
+// horizontal), or driven with arrows and dots, snapping to the nearest card.
+// Only each model's LATEST answer shows — earlier turns stay in the
+// conversation the model sees, keeping every card a clean current answer.
+function renderCompareView(instance) {
+  const popup = instance.popup;
+  if (!popup) return;
+  const contentWrapper = popup.querySelector('#ai-popup-content');
+  if (!contentWrapper || !instance.compareSlots) return;
+  if (instance.compareDragActive) return; // the slider owns the pixels mid-drag
+
+  if (!contentWrapper.classList.contains('ai-compare-mode')) {
+    contentWrapper.classList.add('ai-compare-mode');
+  }
+  contentWrapper.innerHTML = '';
+
+  // The shared action toolbar is created once and lives outside the wiped
+  // content area; the guard makes repeated calls free.
+  ensureCompareToolbar(instance);
+
+  try {
+    const viewport = document.createElement('div');
+    viewport.className = 'ai-compare-viewport';
+
+    const track = document.createElement('div');
+    track.className = 'ai-compare-track';
+
+    instance.compareSlots.forEach(slot => {
+      const card = document.createElement('div');
+      card.className = 'ai-compare-card';
+      buildCompareCard(instance, card, slot);
+      track.appendChild(card);
+    });
+
+    viewport.appendChild(track);
+    contentWrapper.appendChild(viewport);
+    const nav = buildCompareNav(instance);
+    if (nav) contentWrapper.appendChild(nav);
+
+    makeCompareSlider(instance, contentWrapper);
+    applyCompareScroll(instance, false);
+  } catch (err) {
+    console.error('Compare render crashed:', err);
+    contentWrapper.insertAdjacentHTML('beforeend', '<div class="ai-popup-error-text">Error rendering answers.</div>');
+  }
+}
+
+// Fills one model's card: status header, answer body (live while streaming,
+// scrolled to bottom unless the reader scrolled up), and Save/Copy or Retry.
+// Cards of never-visited models render a quiet "not asked yet" placeholder —
+// sliding onto the card asks the model and replaces it.
+function buildCompareCard(instance, card, slot) {
+  // --- Card header: status dot, model name, state chip ---
+  const header = document.createElement('div');
+  header.className = 'ai-compare-header';
+
+  const dot = document.createElement('span');
+  dot.className = 'ai-compare-dot ' + (slot.status === 'done' ? 'done' : slot.status === 'error' ? 'error' : slot.status === 'streaming' || slot.status === 'waiting' ? 'streaming' : '');
+  header.appendChild(dot);
+
+  const name = document.createElement('span');
+  name.className = 'ai-compare-model';
+  name.textContent = slot.answerModelName || slot.modelName;
+  name.title = name.textContent;
+  header.appendChild(name);
+
+  const status = document.createElement('span');
+  status.className = 'ai-compare-status';
+  if (slot.status === 'done') {
+    status.innerHTML = iconSvg('checkCircle', 12) + '<span>done</span>';
+  } else if (slot.status === 'error') {
+    status.innerHTML = iconSvg('xCircle', 12) + '<span>failed</span>';
+  } else if (slot.status === 'streaming' || slot.status === 'waiting') {
+    status.textContent = 'answering…';
+  } else {
+    status.textContent = 'not asked yet';
+  }
+  header.appendChild(status);
+  card.appendChild(header);
+
+  if (!slot.started) {
+    const idle = document.createElement('div');
+    idle.className = 'ai-compare-idle';
+    idle.textContent = 'This model answers as soon as you slide to this card — it is skipped until then to save tokens.';
+    card.appendChild(idle);
+    return;
+  }
+
+  const lastMsg = slot.messages.length ? slot.messages[slot.messages.length - 1] : null;
+
+  if (slot.status === 'error') {
+    const err = document.createElement('div');
+    err.className = 'ai-compare-error';
+    err.textContent = slot.errorText || 'Something went wrong.';
+    card.appendChild(err);
+
+    const retryRow = document.createElement('div');
+    retryRow.className = 'ai-compare-actions';
+    const retryBtn = document.createElement('button');
+    retryBtn.type = 'button';
+    retryBtn.innerHTML = iconSvg('refresh', 12) + '<span>Retry</span>';
+    retryBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      retryBtn.disabled = true;
+      retryCompareSlot(instance, slot);
+    });
+    retryRow.appendChild(retryBtn);
+    card.appendChild(retryRow);
+    return;
+  }
+
+  // --- Card body: the answer, scrollable inside the card ---
+  const body = document.createElement('div');
+  body.className = 'ai-compare-body';
+  body.addEventListener('scroll', () => {
+    // Stop auto-following new tokens once the reader deliberately scrolled up.
+    slot.bodyPinned = body.scrollHeight - body.scrollTop - body.clientHeight < 24;
+  });
+
+  if (lastMsg && (lastMsg.isThinking || lastMsg.isStatus)) {
+    body.insertAdjacentHTML('beforeend', buildLoadingHtml(lastMsg.content));
+  } else if (lastMsg && lastMsg.isStreaming) {
+    body.innerHTML = renderMarkdownHtml(String(lastMsg.content || ''));
+  } else {
+    const answer = latestCompareAnswer(slot);
+    if (answer) {
+      body.innerHTML = renderMarkdownHtml(String(answer.content || ''));
+    } else {
+      body.insertAdjacentHTML('beforeend', buildLoadingHtml('Thinking...'));
+    }
+  }
+  if (slot.bodyPinned !== false) body.scrollTop = body.scrollHeight;
+  card.appendChild(body);
+
+  const answer = latestCompareAnswer(slot);
+  if (answer && Array.isArray(answer.citations) && answer.citations.length > 0) {
+    appendCitations(card, answer.citations);
+  }
+}
+
+// Arrows + one dot per model; the dot doubles as that model's status light.
+// Everything is a real button: clickable beats draggable for anyone
+// uncomfortable with swipe gestures. With a single model configured there is
+// nothing to slide — null suppresses the row.
+function buildCompareNav(instance) {
+  if (!instance.compareSlots || instance.compareSlots.length < 2) return null;
+
+  const nav = document.createElement('div');
+  nav.className = 'ai-compare-nav';
+
+  const prev = document.createElement('button');
+  prev.type = 'button';
+  prev.className = 'ai-compare-nav-btn ai-compare-nav-prev';
+  prev.innerHTML = iconSvg('chevronLeft', 14);
+  prev.title = 'Previous model';
+  prev.addEventListener('click', (e) => {
+    e.stopPropagation();
+    slideCompareTo(instance, (instance.compareIndex || 0) - 1, true);
+  });
+
+  const dots = document.createElement('span');
+  dots.className = 'ai-compare-dots';
+  instance.compareSlots.forEach((slot, i) => {
+    const d = document.createElement('button');
+    d.type = 'button';
+    d.className = 'ai-compare-dotnav';
+    d.title = `${slot.modelName} — ${slot.status === 'done' ? 'answered' : slot.status === 'error' ? 'failed' : slot.started ? 'answering…' : 'not asked yet'}`;
+    d.addEventListener('click', (e) => {
+      e.stopPropagation();
+      slideCompareTo(instance, i, true);
+    });
+    dots.appendChild(d);
+  });
+
+  const next = document.createElement('button');
+  next.type = 'button';
+  next.className = 'ai-compare-nav-btn ai-compare-nav-next';
+  next.innerHTML = iconSvg('chevronRight', 14);
+  next.title = 'Next model';
+  next.addEventListener('click', (e) => {
+    e.stopPropagation();
+    slideCompareTo(instance, (instance.compareIndex || 0) + 1, true);
+  });
+
+  nav.appendChild(prev);
+  nav.appendChild(dots);
+  nav.appendChild(next);
+  return nav;
+}
+
+function slideCompareTo(instance, index, animate) {
+  if (!instance.compareSlots || instance.compareSlots.length === 0) return;
+  const n = instance.compareSlots.length;
+  instance.compareIndex = Math.max(0, Math.min(index, n - 1));
+  applyCompareScroll(instance, animate);
+}
+
+// Positions the track on the current card and refreshes arrows/dots/counter.
+// Landing on a card is the lazy-load trigger: that model is asked now if it
+// has not been asked yet — and ONLY that model. No lookahead beyond the
+// opening pair: sliding must never bill a model the user has not moved to.
+function applyCompareScroll(instance, animate) {
+  const popup = instance.popup;
+  if (!popup) return;
+  const viewport = popup.querySelector('.ai-compare-viewport');
+  const track = popup.querySelector('.ai-compare-track');
+  if (!viewport || !track || !instance.compareSlots) return;
+  const n = instance.compareSlots.length;
+  instance.compareIndex = Math.max(0, Math.min(instance.compareIndex || 0, n - 1));
+  const cardWidth = viewport.clientWidth || 1;
+  track.classList.toggle('animating', !!animate);
+  track.style.transform = `translateX(${-(instance.compareIndex || 0) * cardWidth}px)`;
+  updateCompareNav(instance);
+  ensureCompareSlotLoaded(instance, instance.compareIndex);
+}
+
+function updateCompareNav(instance) {
+  const popup = instance.popup;
+  if (!popup || !instance.compareSlots) return;
+  const prev = popup.querySelector('.ai-compare-nav-prev');
+  const next = popup.querySelector('.ai-compare-nav-next');
+  const dots = popup.querySelectorAll('.ai-compare-dotnav');
+  const idx = instance.compareIndex || 0;
+  const n = instance.compareSlots.length;
+  if (prev) prev.disabled = idx <= 0;
+  if (next) next.disabled = idx >= n - 1;
+  dots.forEach((d, i) => {
+    d.classList.toggle('active', i === idx);
+    const slot = instance.compareSlots[i];
+    d.classList.toggle('done', !!slot && slot.status === 'done');
+    d.classList.toggle('error', !!slot && slot.status === 'error');
+  });
+}
+
+// Wires the slider gestures ONCE per popup (listeners live on the persistent
+// #ai-popup-content wrapper, so compare re-renders never orphan them):
+// pointer drag with rubber-banded edges and snap-to-card release, and
+// horizontal wheel/two-finger scroll (vertical scrolling stays native).
+function makeCompareSlider(instance, wrapper) {
+  if (instance.compareSliderBound) return;
+  instance.compareSliderBound = true;
+
+  let drag = null; // { startX, base, cardWidth, track, moved, lastDx }
+
+  wrapper.addEventListener('pointerdown', (e) => {
+    if (!instance.compareSlots) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    // Drags start on the card itself, never on its buttons and links.
+    if (e.target.closest('button, a, input, textarea, .ai-compare-actions')) return;
+    const viewport = wrapper.querySelector('.ai-compare-viewport');
+    const track = wrapper.querySelector('.ai-compare-track');
+    if (!viewport || !track) return;
+    const cardWidth = viewport.clientWidth || 1;
+    track.classList.remove('animating');
+    drag = {
+      startX: e.clientX,
+      base: -(instance.compareIndex || 0) * cardWidth,
+      cardWidth: cardWidth,
+      track: track,
+      moved: false,
+      lastDx: 0
+    };
+  });
+
+  window.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    if (!activePopups.includes(instance)) { drag = null; instance.compareDragActive = false; return; }
+    const dx = e.clientX - drag.startX;
+    if (!drag.moved && Math.abs(dx) < 6) return; // still a click/scroll, not a drag
+    drag.moved = true;
+    drag.lastDx = dx;
+    instance.compareDragActive = true;
+
+    const n = instance.compareSlots.length;
+    let t = drag.base + dx;
+    // Rubber-band past either end so edges feel solid, not empty.
+    if (t > 0) t *= 0.35;
+    const min = -(n - 1) * drag.cardWidth;
+    if (t < min) t = min + (t - min) * 0.35;
+    drag.track.style.transform = `translateX(${t}px)`;
+    if (e.cancelable) e.preventDefault();
+  }, { passive: false });
+
+  const endDrag = () => {
+    if (!drag) return;
+    const d = drag;
+    drag = null;
+    instance.compareDragActive = false;
+    if (!d.moved) return;
+
+    // Releasing a drag just above a link/button must not click through, but
+    // only for a heartbeat — a lingering swallow would eat the user's NEXT
+    // deliberate click (e.g. Save) seconds later.
+    instance.compareSuppressClickUntil = Date.now() + 120;
+
+    const threshold = Math.min(80, d.cardWidth * 0.25);
+    let idx = instance.compareIndex || 0;
+    if (d.lastDx < -threshold) idx += 1;
+    else if (d.lastDx > threshold) idx -= 1;
+    slideCompareTo(instance, idx, true);
+    renderCompareView(instance); // catch up on any renders skipped mid-drag
+  };
+  window.addEventListener('pointerup', endDrag);
+  window.addEventListener('pointercancel', endDrag);
+
+  wrapper.addEventListener('click', (e) => {
+    if (Date.now() < (instance.compareSuppressClickUntil || 0)) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }, true);
+
+  wrapper.addEventListener('wheel', (e) => {
+    if (!instance.compareSlots) return;
+    // Two-finger/trackpad sideways scroll drives the slider; vertical
+    // scrolling inside the answer stays with the page/card.
+    if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
+    if (Math.abs(e.deltaX) < 4) return;
+    e.preventDefault();
+    const now = Date.now();
+    if (instance.compareWheelLockUntil && now < instance.compareWheelLockUntil) return;
+    slideCompareTo(instance, (instance.compareIndex || 0) + (e.deltaX > 0 ? 1 : -1), true);
+    // One gesture = one card: trackpads emit long event streams.
+    instance.compareWheelLockUntil = now + 250;
+  }, { passive: false });
+}
+
+// The compare view's shared action row: the same toolbar the single-answer
+// view had (Listen, Save-as-PDF, Pin, list picker, Save), seated between the
+// slider and the follow-up box. Every button resolves the card CURRENTLY on
+// screen at click time, so one row serves all models and the cards
+// themselves carry nothing but the answer.
+function ensureCompareToolbar(instance) {
+  const popup = instance.popup;
+  if (!popup) return;
+  if (popup.querySelector('.ai-popup-actions.ai-compare-actions-row')) return;
+  if (instance.compareToolbarPending) return; // a build is already in flight
+  instance.compareToolbarPending = true;
+
+  chrome.runtime.sendMessage({ type: 'getWordLists' }, (response) => {
+    instance.compareToolbarPending = false;
+    if (!activePopups.includes(instance)) return;
+    if (popup.querySelector('.ai-popup-actions.ai-compare-actions-row')) return;
+
+    const actionsContainer = document.createElement('div');
+    actionsContainer.className = 'ai-popup-actions ai-compare-actions-row';
+
+    const mount = () => {
+      // Seat the toolbar between the answer slider and the follow-up input.
+      const followup = popup.querySelector('#ai-popup-followup-container');
+      if (followup) popup.insertBefore(actionsContainer, followup);
+      else popup.appendChild(actionsContainer);
+    };
+
+    if (!response || !response.lists || response.lists.length === 0) {
+      // No lists yet: keep every other control alive, only saving is gated.
+      const hint = document.createElement('span');
+      hint.textContent = 'Create a list in Settings to enable Save.';
+      hint.style.opacity = '0.8';
+      hint.style.fontSize = '13px';
+      actionsContainer.appendChild(hint);
+      mount();
+      return;
+    }
+
+    const lists = response.lists;
+    const validListId = lists.some(l => l.id === response.lastUsedListId)
+      ? response.lastUsedListId
+      : lists[0].id;
+
+    // Target resolution happens at CLICK time: the toolbar follows whatever
+    // card the user slid to, without rebuilding on every render.
+    const visibleSlot = () => (instance.compareSlots || [])[instance.compareIndex || 0] || null;
+    const visibleAnswer = () => {
+      const slot = visibleSlot();
+      return slot ? latestCompareAnswer(slot) : null;
+    };
+    const saveWordFor = (slot) => {
+      let wordToSave = instance.compareWord;
+      if (!wordToSave || wordToSave === 'Custom Question') {
+        const lastUser = slot.messages.filter(m => m.role === 'user').pop();
+        wordToSave = (lastUser && (lastUser.displayContent || lastUser.content)) || wordToSave || 'Conversation';
+      }
+      return wordToSave;
+    };
+
+    // --- Listen (same button id so toggleSpeech can swap its icon) ---
+    const speakButton = document.createElement('button');
+    speakButton.type = 'button';
+    speakButton.id = 'ai-popup-speak-btn';
+    speakButton.innerHTML = iconSvg('volume', 16);
+    speakButton.title = 'Listen to this answer';
+    speakButton.onclick = (e) => {
+      e.stopPropagation();
+      const answer = visibleAnswer();
+      if (!answer) { showPopupToast(instance, 'Nothing to read yet'); return; }
+      toggleSpeech(instance, answer.content);
+    };
+
+    // --- Save as PDF: exports the visible model's own conversation ---
+    const pdfButton = document.createElement('button');
+    pdfButton.type = 'button';
+    pdfButton.id = 'ai-popup-pdf-btn';
+    pdfButton.innerHTML = iconSvg('fileText', 16);
+    pdfButton.title = 'Save this conversation as PDF';
+    pdfButton.onclick = (e) => {
+      e.stopPropagation();
+      const slot = visibleSlot();
+      const answer = slot && latestCompareAnswer(slot);
+      if (!slot || !answer) { showPopupToast(instance, 'Nothing to save yet — wait for the answer'); return; }
+      saveConversationAsPdf(instance, slot.messages, slot.answerModelName || slot.modelName);
+    };
+
+    // --- Pin (identical to the single-answer toolbar) ---
+    const pinButton = document.createElement('button');
+    pinButton.type = 'button';
+    pinButton.id = 'ai-popup-pin-btn';
+    pinButton.innerHTML = iconSvg('pin', 16);
+    pinButton.title = 'Pin conversation';
+    pinButton.classList.toggle('pinned', !!instance.isPinned);
+    pinButton.onclick = (e) => {
+      e.stopPropagation();
+      instance.isPinned = !instance.isPinned;
+      pinButton.classList.toggle('pinned', instance.isPinned);
+    };
+
+    // --- List picker (same component + "create new" flow as before) ---
+    let listSelector;
+    function recreateDropdown(listsToUse, currentVal) {
+      const previousSelector = listSelector;
+      listSelector = createCustomDropdown(listsToUse, currentVal, (val) => {
+        if (val === "__create_new__") {
+          instance.isInteracting = true;
+          const newListName = prompt("Enter a name for the new list:");
+          instance.isInteracting = false;
+          if (newListName && newListName.trim()) {
+            chrome.runtime.sendMessage({ type: "createList", listName: newListName.trim() }, (resp) => {
+              if (resp && resp.success) {
+                listsToUse.push(resp.newList);
+                recreateDropdown(listsToUse, resp.newList.id);
+              } else {
+                showPopupToast(instance, "Failed to create list", 'error');
+                listSelector.value = validListId;
+              }
+            });
+          } else {
+            listSelector.value = validListId;
+          }
+        }
+      }, { showCreateNew: true });
+
+      // On re-creation (e.g. after "Create New List"), swap the new dropdown
+      // in where the old one sat. The INITIAL append happens in the ordered
+      // sequence below, so the row reads icons-left, list+Save-right.
+      if (previousSelector && previousSelector.parentNode) {
+        previousSelector.parentNode.replaceChild(listSelector, previousSelector);
+      }
+    }
+    recreateDropdown(lists, validListId);
+
+    // --- Save: the visible card's answer into the chosen list ---
+    const finalSaveButton = document.createElement('button');
+    finalSaveButton.textContent = 'Save';
+    finalSaveButton.className = 'ai-popup-button';
+    // Same seating as the original toolbar: icons left, list picker + Save
+    // pushed to the right edge together.
+    finalSaveButton.style.marginLeft = 'auto';
+    finalSaveButton.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const slot = visibleSlot();
+      const answer = slot && latestCompareAnswer(slot);
+      if (!slot || !answer) { showPopupToast(instance, 'Nothing to save yet — wait for the answer'); return; }
+
+      const { sourceUrl, sourceTitle } = collectSourceMetadata();
+      chrome.runtime.sendMessage({
+        type: 'saveToHistory',
+        word: saveWordFor(slot),
+        definition: answer.content,
+        listId: listSelector.value,
+        modelName: slot.answerModelName || slot.modelName,
+        promptName: slot.promptName || 'System Default',
+        sourceUrl: sourceUrl,
+        sourceTitle: sourceTitle,
+        citations: answer.citations || []
+      }, (saveResponse) => {
+        if (!activePopups.includes(instance)) return;
+        if (chrome.runtime.lastError || (saveResponse && saveResponse.status === 'error')) {
+          showPopupToast(instance, 'Failed to save', 'error');
+        } else {
+          // Sliding to another model must leave the button usable, so the
+          // confirmation is a toast rather than a permanent "Saved" state.
+          showPopupToast(instance, `Saved ${slot.answerModelName || slot.modelName}'s answer`);
+        }
+      });
+    });
+
+    actionsContainer.appendChild(speakButton);
+    actionsContainer.appendChild(pdfButton);
+    actionsContainer.appendChild(pinButton);
+    actionsContainer.appendChild(listSelector);
+    actionsContainer.appendChild(finalSaveButton);
+    mount();
+  });
+}
+
 // --- Function to create the model and prompt selectors ---
 function createSelectors(instance, models, prompts, currentModelId, currentPromptContent, selectedText, defaultPromptId) {
   const popup = instance.popup;
@@ -2660,6 +3645,10 @@ function createSelectors(instance, models, prompts, currentModelId, currentPromp
 
   const container = document.createElement('div');
   container.id = 'ai-popup-selectors-container';
+
+  // Compare mode needs the model list at toggle time; every path that builds
+  // selectors passes through here, so this is the one place to cache it.
+  instance.models = models;
 
   // --- Model Selector ---
   // Uses the themed custom dropdown (same component as the save-list picker)
@@ -2749,13 +3738,29 @@ function createSelectors(instance, models, prompts, currentModelId, currentPromp
     // only record the choice — follow-ups read the selectors live. Confirm
     // visibly, though: next to the re-querying text popups a silent switch
     // reads as a dead control.
+    // In the compare view the model dropdown chooses the FIRST card: the
+    // picked model answers first and the rest keep their order behind it.
+    const reorderModelsFirst = (modelId) => {
+      const chosen = models.find(m => m.id === modelId);
+      if (chosen) instance.models = [chosen, ...models.filter(m => m.id !== modelId)];
+    };
+
     if (selectedText === "Custom Question") {
+      // The empty hotkey popup has no question yet; record the choice so the
+      // next typed question fans out with this model leading.
       instance.lastModelId = newModelId;
       instance.lastModelName = models.find(m => m.id === newModelId)?.name;
+      reorderModelsFirst(newModelId);
       const promptName = newPromptContent
         ? ((prompts || []).find(p => p.content === newPromptContent)?.name || 'Custom prompt')
         : 'System Default';
-      showPopupToast(instance, `Next answer: ${instance.lastModelName || 'selected model'} · ${promptName}`);
+      showPopupToast(instance, `Next answers start with ${instance.lastModelName || 'selected model'} · ${promptName}`);
+      return;
+    }
+
+    if (instance.compareEnabled) {
+      reorderModelsFirst(newModelId);
+      startCompareLookup(instance, selectedText, newPromptContent);
       return;
     }
 
@@ -3407,9 +4412,16 @@ function createFollowupInput(instance, word) {
          promptToSend += '\n\n' + settings.followupCustomMessage;
       }
 
+      // Compare mode: the question goes to every model's own conversation,
+      // rendered as fresh answer cards. The single-model history is not used.
+      if (instance.compareEnabled) {
+        runCompareFollowup(instance, promptToSend, text);
+        return;
+      }
+
       // Add to history (use displayContent to hide the hidden prompt rule from the popup UI)
       instance.messages.push({ role: 'user', content: promptToSend, displayContent: text });
-      
+
       performFetch();
     });
   }
@@ -3644,10 +4656,15 @@ function adjustPopupPosition(instance, selectionRect) {
 }
 
 // --- NEW: Save Conversation as PDF ---
-function saveConversationAsPdf(instance) {
+// messagesOverride/subtitle serve the compare view: the toolbar exports the
+// currently visible model's own conversation instead of instance.messages.
+function saveConversationAsPdf(instance, messagesOverride, subtitle) {
   // The print pipeline is asynchronous (worker → staged payload → new tab →
   // print dialog); acknowledge the click immediately so it never feels dead.
   showPopupToast(instance, 'Opening print view…');
+  const titleLine = subtitle
+    ? `AI Conversation Transcript — ${escapeHtmlText(subtitle)}`
+    : 'AI Conversation Transcript';
   let html = `<!DOCTYPE html><html><head><title>Conversation Backup</title>
   <style>
     body { font-family: 'Google Sans', 'Google Sans Text', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 20px; max-width: 800px; margin: auto; line-height: 1.6; }
@@ -3677,9 +4694,10 @@ function saveConversationAsPdf(instance) {
     }
   </style>
   </head><body>
-  <h2 class="title">AI Conversation Transcript</h2>`;
+  <h2 class="title">${titleLine}</h2>`;
 
-  instance.messages.forEach(msg => {
+  const transcript = messagesOverride || instance.messages;
+  transcript.forEach(msg => {
     if (msg.isThinking || msg.isError || msg.needsRetry) return;
     const roleName = msg.role === 'user' ? 'You' : 'AI';
     const className = msg.role === 'user' ? 'user' : 'ai';
