@@ -532,6 +532,13 @@ function sanitizeStoredHighlights(list) {
         if (rects.length === 0) continue;
         if (!Number.isInteger(hl.id) || hl.id < 1) hl.id = ++idPool;
         hl.rects = rects;
+        // createdAt (sidebar timestamp) is a known optional field like the
+        // corner quads below: strip a corrupt value rather than let a NaN
+        // or string reach the age formatter. Absent means "saved before
+        // timestamps existed" and is left untouched.
+        if (!Number.isFinite(hl.createdAt) || hl.createdAt <= 0) {
+            delete hl.createdAt;
+        }
         // Strip corrupt corner quads so the export falls back to the
         // validated legacy geometry instead of emitting NaN/null
         // coordinates. The record itself stays usable — corners are an
@@ -1940,6 +1947,8 @@ function updatePageNumber() {
     // Auto-resume save logic (debounced to avoid spamming storage)
     if (autoSavedLastPage !== currentNum) {
         autoSavedLastPage = currentNum;
+        // The current-page comment filter follows the view
+        refreshCommentsForPageFilter();
         clearTimeout(scrollSaveTimeout);
         scrollSaveTimeout = setTimeout(() => {
             saveLastPage(currentNum);
@@ -2228,7 +2237,10 @@ document.querySelectorAll('.color-btn').forEach(btn => {
                 rects: group.rects,
                 color: color,
                 text: group.text,
-                markupType: currentMarkupType
+                markupType: currentMarkupType,
+                // Sidebar "x ago" stamp. Optional by design: records from
+                // before this field existed simply render without one.
+                createdAt: Date.now()
             };
 
             highlights.push(hl);
@@ -2378,10 +2390,16 @@ document.addEventListener('click', (e) => {
     if (clickedIdx !== -1) {
         const hl = highlights[clickedIdx];
         activeHighlightId = hl.id;
-        
+
         // Add active class
         document.querySelectorAll('.custom-highlight.active').forEach(el => el.classList.remove('active'));
         pageDiv.querySelectorAll(`.custom-highlight[data-hl-id="${hl.id}"]`).forEach(el => el.classList.add('active'));
+
+        // Adobe-style reverse navigation: with the Comments tab open, the
+        // click also locates this highlight's card in the sidebar. Runs
+        // after the page-side .active update so both surfaces light up
+        // together; a no-op whenever the comments list isn't visible.
+        focusSidebarComment(hl.id);
 
         const popup = document.getElementById('edit-highlight-popup');
         
@@ -3517,6 +3535,54 @@ document.getElementById('close_sidebar').addEventListener('click', () => {
     window.dispatchEvent(new Event('resize'));
 });
 
+// Adobe-style per-comment time: the creation stamp rendered as a coarse
+// relative age ("just now", "5m ago", "3h ago", "2d ago") that rolls over
+// to a calendar date ("Sep 1", or "Sep 1, 2025" across years) after a
+// week. Ages refresh naturally on the next renderSidebar — no interval
+// timer churns the list just to tick them. Returns '' for missing, corrupt,
+// or future stamps so the subtitle simply shows without the segment.
+function formatCommentAge(ts, now = Date.now()) {
+    if (!Number.isFinite(ts) || ts <= 0) return '';
+    const ageMs = now - ts;
+    if (ageMs < 0) return ''; // clock skew / future stamp: show nothing
+    const mins = Math.floor(ageMs / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    if (days < 7) return `${days}d ago`;
+    const d = new Date(ts);
+    const sameYear = d.getFullYear() === new Date(now).getFullYear();
+    return sameYear
+        ? d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+        : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+// --- Comments list: page dividers + current-page filter ---
+// Session-only view state (resets on reload, never persisted):
+// commentsCurrentPageOnly is the filter chip's on/off; commentsFilterLastPage
+// records which page the filtered list was last rendered for, so a filter or
+// page change restarts the list at the top instead of restoring a scroll
+// offset computed against different content.
+let commentsCurrentPageOnly = false;
+let commentsFilterLastPage = null;
+
+// Keeps the current-page filter in step with the viewed page; hooked into
+// updatePageNumber's page-changed branch. A near-zero no-op unless the
+// filter is on and the Comments list is visible. A focused note textarea
+// defers the refresh: rebuilding the list would destroy the field
+// mid-typing (its change event commits only on blur) — blur re-renders via
+// saveHighlights anyway, and the next page change after that re-syncs.
+function refreshCommentsForPageFilter() {
+    if (!commentsCurrentPageOnly) return;
+    if (!sidebar || sidebar.classList.contains('hidden')) return;
+    if (!tabComments || !tabComments.classList.contains('active')) return;
+    const ae = document.activeElement;
+    if (ae && ae.classList && ae.classList.contains('sidebar-item-note-input')) return;
+    renderSidebar();
+}
+
 function renderSidebar() {
     const sidebarContent = document.getElementById('sidebar-content-comments');
     if (!sidebarContent) return;
@@ -3540,10 +3606,74 @@ function renderSidebar() {
         const bTop = b.rects && b.rects[0] ? b.rects[0].pdfY : 0;
         return bTop - aTop; // In PDF space, higher Y is visually higher on the page
     });
-    
-    sortedHighlights.forEach(hl => {
+
+    // --- Current-page filter (scan aid for documents with many comments) ---
+    // autoSavedLastPage is the viewer's live page tracker (load, scroll,
+    // and cross-tab adoption all keep it current).
+    const filterPage = commentsCurrentPageOnly ? autoSavedLastPage : null;
+    const visibleHighlights = filterPage === null
+        ? sortedHighlights
+        : sortedHighlights.filter(hl => hl.pageNumber === filterPage);
+
+    if (sidebarTitle && tabComments.classList.contains('active')) {
+        sidebarTitle.textContent = filterPage === null
+            ? `Comments (${sortedHighlights.length})`
+            : `Comments (${visibleHighlights.length} of ${sortedHighlights.length})`;
+    }
+
+    // Filter chip rides above the cards. Clicking re-renders through this
+    // same path; the filter-page change below resets the list to the top.
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'sidebar-filter-chip' + (filterPage === null ? '' : ' active');
+    chip.textContent = filterPage === null ? 'Current page' : `Current page (${filterPage})`;
+    chip.title = 'Show only the comments on the page you are viewing';
+    chip.addEventListener('click', () => {
+        commentsCurrentPageOnly = !commentsCurrentPageOnly;
+        renderSidebar();
+    });
+    sidebarContent.appendChild(chip);
+
+    // New content class under the filter (chip toggled, or the viewer
+    // moved to a different page) restarts the list at the top; plain
+    // mutations (note edits, deletes) keep their scroll position.
+    const filterSwitched = filterPage !== commentsFilterLastPage;
+    commentsFilterLastPage = filterPage;
+
+    if (filterPage !== null && visibleHighlights.length === 0) {
+        const wrap = document.createElement('div');
+        wrap.innerHTML = sidebarEmptyHtml('messageSquare',
+            `No comments on Page ${filterPage}.`,
+            'Scroll the document or switch the filter off to see every comment.');
+        sidebarContent.appendChild(wrap.firstElementChild);
+        sidebarContent.scrollTop = 0;
+        return;
+    }
+
+    // One sticky "Page N" divider per page group; a single-page filtered
+    // list needs no grouping of its own.
+    const countsPerPage = new Map();
+    if (filterPage === null) {
+        for (const hl of sortedHighlights) {
+            countsPerPage.set(hl.pageNumber, (countsPerPage.get(hl.pageNumber) || 0) + 1);
+        }
+    }
+    let dividerPage = null;
+
+    visibleHighlights.forEach(hl => {
+        if (filterPage === null && hl.pageNumber !== dividerPage) {
+            dividerPage = hl.pageNumber;
+            const divider = document.createElement('div');
+            divider.className = 'sidebar-page-divider';
+            divider.textContent = `Page ${dividerPage} · ${countsPerPage.get(dividerPage) || 1}`;
+            sidebarContent.appendChild(divider);
+        }
         const item = document.createElement('div');
         item.className = 'sidebar-item';
+        // Locates this card from a page-side highlight click
+        // (focusSidebarComment); renderSidebar runs on every mutation via
+        // saveHighlights, so the attribute always matches the live list.
+        item.dataset.hlId = hl.id;
         
         // Header Row: Avatar + Author Info + Delete button
         const header = document.createElement('div');
@@ -3580,7 +3710,12 @@ function renderSidebar() {
         
         const subtitleEl = document.createElement('span');
         subtitleEl.className = 'sidebar-item-subtitle';
-        subtitleEl.textContent = `${typeLabel} · Page ${hl.pageNumber}`;
+        // "Highlighted Text · Page 3 · 2h ago"; the age segment (and its
+        // tooltip) simply drop off for records saved before timestamps
+        // existed or whose stamp was stripped as corrupt.
+        const age = formatCommentAge(hl.createdAt);
+        subtitleEl.textContent = `${typeLabel} · Page ${hl.pageNumber}${age ? ` · ${age}` : ''}`;
+        if (age) subtitleEl.title = new Date(hl.createdAt).toLocaleString();
         
         meta.appendChild(authorNameEl);
         meta.appendChild(subtitleEl);
@@ -3617,7 +3752,16 @@ function renderSidebar() {
             const textDiv = document.createElement('div');
             textDiv.className = 'sidebar-item-text';
             textDiv.style.borderLeftColor = hl.color || 'var(--accent)';
-            textDiv.textContent = hl.text;
+            // The quote is clamped to its first four words so long
+            // sentences can't fill the card; the full text stays one hover
+            // away (title tooltip) and, of course, highlighted in the page.
+            // Display-only — hl.text itself is never modified, so exports
+            // and the AI popup keep the complete sentence.
+            const words = String(hl.text).trim().split(/\s+/);
+            textDiv.textContent = words.length > 4
+                ? words.slice(0, 4).join(' ') + '…'
+                : String(hl.text).trim();
+            textDiv.title = hl.text;
             item.appendChild(textDiv);
         }
         
@@ -3653,7 +3797,55 @@ function renderSidebar() {
         autoResize();
     });
 
-    sidebarContent.scrollTop = prevScrollTop;
+    sidebarContent.scrollTop = filterSwitched ? 0 : prevScrollTop;
+}
+
+// Reverse of scrollToHighlight: a click on a highlight (or its note
+// indicator) in the page locates the matching card in the Comments list,
+// like Acrobat's comment panel. Scoped to when the Comments tab is actually
+// showing — with the sidebar closed or on Outline/Bookmarks the click keeps
+// its existing behavior (page-side selection + edit popup) untouched.
+let sidebarFlashTimer = null;
+function focusSidebarComment(hlId) {
+    if (!hlId || !sidebar || sidebar.classList.contains('hidden')) return;
+    if (!tabComments || !tabComments.classList.contains('active')) return;
+
+    const container = document.getElementById('sidebar-content-comments');
+    let item = container && container.querySelector(`.sidebar-item[data-hl-id="${hlId}"]`);
+    if (!item && commentsCurrentPageOnly) {
+        // The current-page filter is hiding this card (the click landed on
+        // a partially visible neighbouring page). Drop the filter and
+        // re-render. Safe re-render-wise: clicking in the page already
+        // blurred — and change-committed — any note textarea.
+        commentsCurrentPageOnly = false;
+        renderSidebar();
+        item = container && container.querySelector(`.sidebar-item[data-hl-id="${hlId}"]`);
+    }
+    // Still missing means the list was never rendered for this highlight;
+    // beyond the filter case above, never force a re-render here — it
+    // would rebuild the note textareas while the user may be typing in one.
+    if (!item) return;
+
+    // Center the card in the list. Scroll math is manual on purpose:
+    // Element.scrollIntoView also scrolls every scrollable ancestor, which
+    // would nudge the PDF page container behind the sidebar.
+    const containerRect = container.getBoundingClientRect();
+    const itemRect = item.getBoundingClientRect();
+    const target = container.scrollTop + (itemRect.top - containerRect.top)
+        - (container.clientHeight - itemRect.height) / 2;
+    container.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
+
+    // Flash ring, mirroring the 2s page-side .active flash. Clearing every
+    // flashing card plus the reflow read restarts the animation on rapid
+    // repeat clicks of the same highlight.
+    document.querySelectorAll('.sidebar-item.sidebar-flash').forEach(el => el.classList.remove('sidebar-flash'));
+    if (sidebarFlashTimer) clearTimeout(sidebarFlashTimer);
+    void item.offsetWidth;
+    item.classList.add('sidebar-flash');
+    sidebarFlashTimer = setTimeout(() => {
+        item.classList.remove('sidebar-flash');
+        sidebarFlashTimer = null;
+    }, 2000);
 }
 
 function renderBookmarks() {

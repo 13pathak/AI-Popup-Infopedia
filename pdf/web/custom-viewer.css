@@ -655,6 +655,64 @@ body, html {
     box-shadow: var(--item-shadow-hover);
 }
 
+/* Locate flash while the Comments list is open and the matching highlight
+   was clicked in the page (focusSidebarComment). Accent variables keep it
+   legible in both light and dark themes; the ring fades out just before
+   the 2s class removal so it never cuts off abruptly. */
+.sidebar-item.sidebar-flash {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.35);
+    animation: sidebarFlashPulse 1.6s ease-out;
+}
+
+@keyframes sidebarFlashPulse {
+    0% { box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.55); }
+    100% { box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0); }
+}
+
+/* Current-page filter chip above the comments list (renderSidebar) */
+.sidebar-filter-chip {
+    display: inline-flex;
+    align-items: center;
+    font-family: inherit;
+    font-size: 11px;
+    border: 1px solid var(--border-control);
+    background: var(--surface-raised);
+    color: var(--text-muted);
+    border-radius: 999px;
+    padding: 4px 12px;
+    margin: 0 0 12px;
+    cursor: pointer;
+}
+
+.sidebar-filter-chip:hover {
+    border-color: var(--border-control-strong);
+    color: var(--text);
+}
+
+.sidebar-filter-chip.active {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(var(--accent-rgb), 0.1);
+}
+
+/* Sticky "Page N" group header between comment cards. The panel
+   background must be opaque so cards scroll under it cleanly. */
+.sidebar-page-divider {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--surface-alt);
+    padding: 6px 2px 5px;
+    margin: 2px 0 8px;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--border);
+}
+
 .sidebar-item-header {
     display: flex;
     justify-content: space-between;
