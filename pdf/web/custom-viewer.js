@@ -1229,17 +1229,22 @@ function viewerModalOpen() {
 // nested markedContent / inline text spans) and overlapping runs. Merging them
 // ensures that highlights, underlines, strikethroughs, and print outputs render with
 // uniform opacity and no multiplied/darkened overlap seams.
-function mergeHighlightRectangles(rawRects) {
-    if (!Array.isArray(rawRects) || rawRects.length <= 1) {
-        return rawRects ? rawRects.slice() : [];
-    }
+//
+// scale is the CSS-pixels-per-PDF-point factor the boxes were produced at
+// (viewport.scale of the caller). Every threshold below lives in CSS pixels,
+// so a fixed value would decide differently at different zooms — a 40pt
+// column gutter is 40px at 100% but only 10px at 25%, sliding under a fixed
+// 12px word-gap floor. Factoring scale in keeps the merge decision (and
+// therefore the persisted geometry vs. every re-render) zoom-invariant.
+function mergeHighlightRectangles(rawRects, scale = 1) {
+    if (!Array.isArray(rawRects)) return [];
 
     const rects = rawRects
         .map(r => {
-            const left = r.left !== undefined ? r.left : r.cssLeft;
-            const top = r.top !== undefined ? r.top : r.cssTop;
-            const width = r.width !== undefined ? r.width : r.cssWidth;
-            const height = r.height !== undefined ? r.height : r.cssHeight;
+            const left = r.left;
+            const top = r.top;
+            const width = r.width;
+            const height = r.height;
             return {
                 left,
                 top,
@@ -1253,6 +1258,11 @@ function mergeHighlightRectangles(rawRects) {
 
     if (rects.length <= 1) return rects;
 
+    // Sub-pixel duplicate/containment tolerance in CSS pixels.
+    const tol = 0.5 * scale;
+    // Same-line band for the reading-order sorts below.
+    const lineBand = 4 * scale;
+
     // Filter out duplicate or fully contained rectangles
     const unique = [];
     for (let i = 0; i < rects.length; i++) {
@@ -1261,10 +1271,10 @@ function mergeHighlightRectangles(rawRects) {
         for (let j = 0; j < rects.length; j++) {
             if (i === j) continue;
             const b = rects[j];
-            if (a.left >= b.left - 0.5 && a.right <= b.right + 0.5 &&
-                a.top >= b.top - 0.5 && a.bottom <= b.bottom + 0.5) {
-                if (Math.abs(a.left - b.left) < 0.5 && Math.abs(a.right - b.right) < 0.5 &&
-                    Math.abs(a.top - b.top) < 0.5 && Math.abs(a.bottom - b.bottom) < 0.5) {
+            if (a.left >= b.left - tol && a.right <= b.right + tol &&
+                a.top >= b.top - tol && a.bottom <= b.bottom + tol) {
+                if (Math.abs(a.left - b.left) < tol && Math.abs(a.right - b.right) < tol &&
+                    Math.abs(a.top - b.top) < tol && Math.abs(a.bottom - b.bottom) < tol) {
                     if (i > j) { isContained = true; break; }
                 } else {
                     isContained = true; break;
@@ -1278,18 +1288,24 @@ function mergeHighlightRectangles(rawRects) {
     unique.sort((a, b) => {
         const aCenterY = a.top + a.height / 2;
         const bCenterY = b.top + b.height / 2;
-        if (Math.abs(aCenterY - bCenterY) > 4) return aCenterY - bCenterY;
+        if (Math.abs(aCenterY - bCenterY) > lineBand) return aCenterY - bCenterY;
         return a.left - b.left;
     });
 
-    // Group into horizontal text lines based on vertical overlap
+    // Group into horizontal text lines based on vertical overlap. The
+    // overlap must clear half of the TALLER box: against the shorter one, a
+    // tall fragment (an inline image beside text) overlaps each neighboring
+    // text line by more than half its own height, absorbs both, and the
+    // grown line bounds then cascade into one block that paints the
+    // inter-line whitespace. Equal-height text neighbors still group
+    // normally; only tall-vs-short pairs stay apart.
     const lines = [];
     for (const r of unique) {
         let placed = false;
         for (const line of lines) {
             const vOverlap = Math.min(line.bottom, r.bottom) - Math.max(line.top, r.top);
-            const minHeight = Math.min(line.bottom - line.top, r.height);
-            if (vOverlap > minHeight * 0.5) {
+            const maxHeight = Math.max(line.bottom - line.top, r.height);
+            if (vOverlap > maxHeight * 0.5) {
                 line.rects.push(r);
                 line.top = Math.min(line.top, r.top);
                 line.bottom = Math.max(line.bottom, r.bottom);
@@ -1310,8 +1326,10 @@ function mergeHighlightRectangles(rawRects) {
         for (let i = 1; i < line.rects.length; i++) {
             const next = line.rects[i];
             const lineHeight = Math.min(curr.height, next.height);
-            // Merge if overlapping or within word-spacing threshold (<= 50% line height or <= 14px)
-            const maxWordGap = Math.max(12, lineHeight * 0.5);
+            // Merge if overlapping or within word-spacing threshold. The
+            // lineHeight term is already in current pixels and self-scales
+            // with zoom; only the 12px floor needs the scale factor.
+            const maxWordGap = Math.max(12 * scale, lineHeight * 0.5);
             if (next.left <= curr.right + maxWordGap) {
                 const newLeft = Math.min(curr.left, next.left);
                 const newRight = Math.max(curr.right, next.right);
@@ -1335,7 +1353,7 @@ function mergeHighlightRectangles(rawRects) {
 
     // Sort final merged rectangles in reading order
     merged.sort((a, b) => {
-        if (Math.abs(a.top - b.top) > 4) return a.top - b.top;
+        if (Math.abs(a.top - b.top) > lineBand) return a.top - b.top;
         return a.left - b.left;
     });
 
@@ -1364,7 +1382,7 @@ function drawPrintHighlights(ctx, viewport, pageNum) {
                 height: Math.abs(pt2[1] - pt1[1])
             };
         });
-        const boxes = mergeHighlightRectangles(rawBoxes);
+        const boxes = mergeHighlightRectangles(rawBoxes, viewport.scale);
         for (const box of boxes) {
             const left = box.left;
             const right = box.left + box.width;
@@ -2040,7 +2058,7 @@ document.addEventListener('mouseup', (e) => {
                 width: r.width,
                 height: r.height
             }));
-            const mergedRects = mergeHighlightRectangles(pageRelativeRaw);
+            const mergedRects = mergeHighlightRectangles(pageRelativeRaw, viewport.scale);
 
             const relativeRects = mergedRects.map(r => {
                 const left = r.left;
@@ -2242,7 +2260,7 @@ function drawHighlight(hl, pageDiv, viewport) {
             height: Math.abs(pt2[1] - pt1[1])
         };
     });
-    const boxes = mergeHighlightRectangles(rawBoxes);
+    const boxes = mergeHighlightRectangles(rawBoxes, viewport.scale);
 
     boxes.forEach(box => {
         const div = document.createElement('div');
