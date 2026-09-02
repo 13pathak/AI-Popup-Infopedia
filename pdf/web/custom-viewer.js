@@ -1224,6 +1224,124 @@ function viewerModalOpen() {
     return !!document.getElementById('viewer-modal-overlay');
 }
 
+// Merges duplicate, overlapping, or immediately adjacent rectangles on the same line.
+// range.getClientRects() frequently returns duplicate bounding boxes (e.g. for
+// nested markedContent / inline text spans) and overlapping runs. Merging them
+// ensures that highlights, underlines, strikethroughs, and print outputs render with
+// uniform opacity and no multiplied/darkened overlap seams.
+function mergeHighlightRectangles(rawRects) {
+    if (!Array.isArray(rawRects) || rawRects.length <= 1) {
+        return rawRects ? rawRects.slice() : [];
+    }
+
+    const rects = rawRects
+        .map(r => {
+            const left = r.left !== undefined ? r.left : r.cssLeft;
+            const top = r.top !== undefined ? r.top : r.cssTop;
+            const width = r.width !== undefined ? r.width : r.cssWidth;
+            const height = r.height !== undefined ? r.height : r.cssHeight;
+            return {
+                left,
+                top,
+                width,
+                height,
+                right: left + width,
+                bottom: top + height
+            };
+        })
+        .filter(r => r.width > 0 && r.height > 0);
+
+    if (rects.length <= 1) return rects;
+
+    // Filter out duplicate or fully contained rectangles
+    const unique = [];
+    for (let i = 0; i < rects.length; i++) {
+        const a = rects[i];
+        let isContained = false;
+        for (let j = 0; j < rects.length; j++) {
+            if (i === j) continue;
+            const b = rects[j];
+            if (a.left >= b.left - 0.5 && a.right <= b.right + 0.5 &&
+                a.top >= b.top - 0.5 && a.bottom <= b.bottom + 0.5) {
+                if (Math.abs(a.left - b.left) < 0.5 && Math.abs(a.right - b.right) < 0.5 &&
+                    Math.abs(a.top - b.top) < 0.5 && Math.abs(a.bottom - b.bottom) < 0.5) {
+                    if (i > j) { isContained = true; break; }
+                } else {
+                    isContained = true; break;
+                }
+            }
+        }
+        if (!isContained) unique.push(a);
+    }
+
+    // Sort primarily by vertical center, secondarily by left
+    unique.sort((a, b) => {
+        const aCenterY = a.top + a.height / 2;
+        const bCenterY = b.top + b.height / 2;
+        if (Math.abs(aCenterY - bCenterY) > 4) return aCenterY - bCenterY;
+        return a.left - b.left;
+    });
+
+    // Group into horizontal text lines based on vertical overlap
+    const lines = [];
+    for (const r of unique) {
+        let placed = false;
+        for (const line of lines) {
+            const vOverlap = Math.min(line.bottom, r.bottom) - Math.max(line.top, r.top);
+            const minHeight = Math.min(line.bottom - line.top, r.height);
+            if (vOverlap > minHeight * 0.5) {
+                line.rects.push(r);
+                line.top = Math.min(line.top, r.top);
+                line.bottom = Math.max(line.bottom, r.bottom);
+                placed = true;
+                break;
+            }
+        }
+        if (!placed) {
+            lines.push({ top: r.top, bottom: r.bottom, rects: [r] });
+        }
+    }
+
+    // On each line, merge overlapping or adjacent word boxes
+    const merged = [];
+    for (const line of lines) {
+        line.rects.sort((a, b) => a.left - b.left);
+        let curr = line.rects[0];
+        for (let i = 1; i < line.rects.length; i++) {
+            const next = line.rects[i];
+            const lineHeight = Math.min(curr.height, next.height);
+            // Merge if overlapping or within word-spacing threshold (<= 50% line height or <= 14px)
+            const maxWordGap = Math.max(12, lineHeight * 0.5);
+            if (next.left <= curr.right + maxWordGap) {
+                const newLeft = Math.min(curr.left, next.left);
+                const newRight = Math.max(curr.right, next.right);
+                const newTop = Math.min(curr.top, next.top);
+                const newBottom = Math.max(curr.bottom, next.bottom);
+                curr = {
+                    left: newLeft,
+                    top: newTop,
+                    right: newRight,
+                    bottom: newBottom,
+                    width: newRight - newLeft,
+                    height: newBottom - newTop
+                };
+            } else {
+                merged.push(curr);
+                curr = next;
+            }
+        }
+        merged.push(curr);
+    }
+
+    // Sort final merged rectangles in reading order
+    merged.sort((a, b) => {
+        if (Math.abs(a.top - b.top) > 4) return a.top - b.top;
+        return a.left - b.left;
+    });
+
+    return merged;
+}
+
 // Paint this document's annotations onto a freshly rendered print page.
 // The on-screen marks are overlay divs inside .page containers, which
 // don't exist in #print-container — without this pass, printed paper
@@ -1236,15 +1354,22 @@ function drawPrintHighlights(ctx, viewport, pageNum) {
     for (const h of highlights) {
         if (h.pageNumber !== pageNum || !Array.isArray(h.rects)) continue;
         const type = h.markupType || 'Highlight';
-        for (const r of h.rects) {
+        const rawBoxes = h.rects.map(r => {
             const pt1 = viewport.convertToViewportPoint(r.pdfX, r.pdfY);
             const pt2 = viewport.convertToViewportPoint(r.pdfX + r.pdfWidth, r.pdfY - r.pdfHeight);
-            // Extents can be negative on /Rotate pages; normalize both axes
-            // like the on-screen drawer does.
-            const left = Math.min(pt1[0], pt2[0]);
-            const right = Math.max(pt1[0], pt2[0]);
-            const top = Math.min(pt1[1], pt2[1]);
-            const bottom = Math.max(pt1[1], pt2[1]);
+            return {
+                left: Math.min(pt1[0], pt2[0]),
+                top: Math.min(pt1[1], pt2[1]),
+                width: Math.abs(pt2[0] - pt1[0]),
+                height: Math.abs(pt2[1] - pt1[1])
+            };
+        });
+        const boxes = mergeHighlightRectangles(rawBoxes);
+        for (const box of boxes) {
+            const left = box.left;
+            const right = box.left + box.width;
+            const top = box.top;
+            const bottom = box.top + box.height;
             ctx.save();
             try {
                 if (type === 'Underline' || type === 'StrikeOut') {
@@ -1258,7 +1383,7 @@ function drawPrintHighlights(ctx, viewport, pageNum) {
                 } else {
                     ctx.globalCompositeOperation = 'multiply';
                     ctx.fillStyle = h.color;
-                    ctx.fillRect(left, top, right - left, bottom - top);
+                    ctx.fillRect(left, top, box.width, box.height);
                 }
             } finally {
                 ctx.restore(); // also reverts any ignored invalid style set
@@ -1909,10 +2034,17 @@ document.addEventListener('mouseup', (e) => {
     Promise.all(assemblies.map(a => pdfDoc.getPage(parseInt(a.entry.pageDiv.dataset.pageNumber, 10)))).then(pages => {
         const groups = assemblies.map((a, i) => {
             const viewport = pages[i].getViewport({ scale: scale });
-            const relativeRects = a.rects.map(r => {
-                // CSS pixels relative to page container
-                const left = r.left - a.entry.rect.left;
-                const top = r.top - a.entry.rect.top;
+            const pageRelativeRaw = a.rects.map(r => ({
+                left: r.left - a.entry.rect.left,
+                top: r.top - a.entry.rect.top,
+                width: r.width,
+                height: r.height
+            }));
+            const mergedRects = mergeHighlightRectangles(pageRelativeRaw);
+
+            const relativeRects = mergedRects.map(r => {
+                const left = r.left;
+                const top = r.top;
 
                 // Convert to PDF points. All four corners are stored:
                 // convertToPdfPoint includes the page's /Rotate transform,
@@ -2100,7 +2232,19 @@ document.getElementById('close-color-picker').addEventListener('click', () => {
 });
 
 function drawHighlight(hl, pageDiv, viewport) {
-    hl.rects.forEach(r => {
+    const rawBoxes = hl.rects.map(r => {
+        const pt1 = viewport.convertToViewportPoint(r.pdfX, r.pdfY);
+        const pt2 = viewport.convertToViewportPoint(r.pdfX + r.pdfWidth, r.pdfY - r.pdfHeight);
+        return {
+            left: Math.min(pt1[0], pt2[0]),
+            top: Math.min(pt1[1], pt2[1]),
+            width: Math.abs(pt2[0] - pt1[0]),
+            height: Math.abs(pt2[1] - pt1[1])
+        };
+    });
+    const boxes = mergeHighlightRectangles(rawBoxes);
+
+    boxes.forEach(box => {
         const div = document.createElement('div');
         div.className = 'custom-highlight';
         if (hl.id === activeHighlightId) {
@@ -2114,22 +2258,10 @@ function drawHighlight(hl, pageDiv, viewport) {
         }
         div.dataset.hlId = hl.id;
         
-        // Recalculate CSS pixels from PDF coordinates for the current zoom scale
-        // pdfX and pdfY represent bottom-left in PDF space, but top-left in CSS space when we converted earlier
-        // Wait, earlier we stored pt1 = viewport.convertToPdfPoint(left, top)
-        // Let's use convertToViewportPoint to get it back
-        const pt1 = viewport.convertToViewportPoint(r.pdfX, r.pdfY);
-        const pt2 = viewport.convertToViewportPoint(r.pdfX + r.pdfWidth, r.pdfY - r.pdfHeight);
-        
-        const cssLeft = Math.min(pt1[0], pt2[0]);
-        const cssTop = Math.min(pt1[1], pt2[1]);
-        const cssWidth = Math.abs(pt2[0] - pt1[0]);
-        const cssHeight = Math.abs(pt2[1] - pt1[1]);
-
-        div.style.left = `${cssLeft}px`;
-        div.style.top = `${cssTop}px`;
-        div.style.width = `${cssWidth}px`;
-        div.style.height = `${cssHeight}px`;
+        div.style.left = `${box.left}px`;
+        div.style.top = `${box.top}px`;
+        div.style.width = `${box.width}px`;
+        div.style.height = `${box.height}px`;
         
         const mType = hl.markupType || 'Highlight';
         if (mType === 'Underline') {
