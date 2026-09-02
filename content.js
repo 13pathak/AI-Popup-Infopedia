@@ -3302,7 +3302,12 @@ function appendCompareConversation(instance, body, slot) {
     body.appendChild(turn);
     drewAny = true;
   });
-  if (!drewAny) body.insertAdjacentHTML('beforeend', buildLoadingHtml('Thinking...'));
+  // Empty conversation: show the thinking placeholder only while an answer is
+  // actually expected — a card that failed its FIRST question has nothing in
+  // flight, and animated dots above the error would read as a contradiction.
+  if (!drewAny && slot.status !== 'error') {
+    body.insertAdjacentHTML('beforeend', buildLoadingHtml('Thinking...'));
+  }
 }
 
 // Arrows + one dot per model; the dot doubles as that model's status light.
@@ -3674,7 +3679,11 @@ function ensureCompareToolbar(instance) {
           showPopupToast(instance, 'Failed to save', 'error');
         } else {
           // Sliding to another model must leave the button usable, so the
-          // confirmation is a toast rather than a permanent "Saved" state.
+          // confirmation is a toast rather than a permanent "Saved" state —
+          // but a short lockout still swallows accidental double-clicks
+          // (the single-answer flow prevented duplicates by staying disabled).
+          finalSaveButton.disabled = true;
+          setTimeout(() => { if (activePopups.includes(instance)) finalSaveButton.disabled = false; }, 1200);
           showPopupToast(instance, `Saved ${slot.answerModelName || slot.modelName}'s answer`);
         }
       });
