@@ -561,6 +561,27 @@ const popupStyles = `
     background: var(--popup-accent-btn-hover);
     transform: translateY(-1px);
   }
+
+  /* Resume button under the empty hotkey popup's greeting (Issue #26):
+     full-width and quiet — an offer, not a call to action. */
+  .ai-popup-restore-btn {
+    width: 100%;
+    margin-top: 12px;
+    background: var(--popup-field-bg);
+    border-color: var(--popup-field-border);
+    color: var(--popup-text);
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    flex-shrink: 1;
+  }
+  .ai-popup-restore-btn:hover {
+    background: var(--popup-field-bg);
+    border-color: rgba(var(--popup-accent-rgb), 0.6);
+    color: var(--popup-text);
+  }
   .ai-popup-button:active {
     transform: translateY(0) scale(0.98);
   }
@@ -1554,12 +1575,30 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       const selectedText = selection.toString().trim();
       if (selectedText.length > 0) {
         const rect = selection.getRangeAt(0).getBoundingClientRect();
-        // For manual trigger, we can skip the Open button and just show the popup.
+        // For manual trigger, we skip the Open button and just show the popup.
         initiatePopupSequence(rect, selectedText, undefined, extractImplicitContext(selection, selectedText));
       } else {
         // NEW: Trigger empty popup for questioning when no text is selected
         initiateEmptyPopupSequence();
       }
+    }
+  }
+
+  // --- Issue #26: reopen the stashed (accidentally dismissed) conversation ---
+  if (request.type === "reopenLastConversation") {
+    // Same frame-selection rules as triggerPopup: only the actually-focused
+    // frame acts, with the top frame as the no-focus fallback.
+    let shouldHandle = false;
+    if (document.hasFocus()) {
+      shouldHandle = !(document.activeElement && document.activeElement.tagName === 'IFRAME');
+    } else {
+      shouldHandle = (window === window.top);
+    }
+    if (shouldHandle) {
+      const top = activePopups[activePopups.length - 1];
+      if (popupHasConversation(top)) return; // already reading something — leave it be
+      if (top) removePopupInstance(top); // an empty/greeting popup makes way
+      reopenLastConversationPopup();
     }
   }
 });
@@ -1587,6 +1626,29 @@ function initiateEmptyPopupSequence() {
         // The typed question fans out through the compare slider; only the
         // follow-up box (with its mic) is needed up front.
         createFollowupInput(popupInstance, "Custom Question");
+
+        // One-tap resume for the last dismissed conversation (Issue #26):
+        // shown only when there is actually something to restore. The
+        // greeting popup itself stashes nothing (no model ever answered), so
+        // making way for the restore can never overwrite the saved thread.
+        chrome.runtime.sendMessage({ type: 'getLastConversation' }, (resp) => {
+          if (chrome.runtime.lastError || !resp || !resp.payload) return;
+          if (!activePopups.includes(popupInstance)) return;
+          const contentEl = popupInstance.popup.querySelector('#ai-popup-content');
+          if (!contentEl) return;
+          const restoreBtn = document.createElement('button');
+          restoreBtn.type = 'button';
+          restoreBtn.className = 'ai-popup-button ai-popup-restore-btn';
+          restoreBtn.innerHTML = iconSvg('refresh', 13) + '<span>Open last conversation</span>';
+          restoreBtn.title = 'Reopen the conversation that was closed';
+          restoreBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            restoreBtn.disabled = true;
+            removePopupInstance(popupInstance);
+            reopenLastConversationPopup();
+          });
+          contentEl.appendChild(restoreBtn);
+        });
       } else {
         // No models: fall back to the legacy single flow, which surfaces the
         // configuration error and keeps the full action row available.
@@ -1998,6 +2060,16 @@ function handlePopupSaveShortcut(event) {
 }
 window.addEventListener('keydown', handlePopupSaveShortcut, true);
 document.addEventListener('keydown', handlePopupSaveShortcut, true);
+
+// --- Issue #26: stash conversations when the page goes away ---
+// Outside clicks and Escape funnel through the removal functions above, but
+// navigation and tab close bypass them. pagehide fires in all those cases
+// (and on bfcache suspend); the stash write is best-effort.
+window.addEventListener('pagehide', () => {
+  activePopups.forEach(instance => {
+    if (!instance.isPinned) stashConversationFromPopup(instance);
+  });
+});
 
 // MV3 service workers are idle-killed ~30s after their last event. A popup
 // that outlives its answer (reading, follow-ups, then Save) would otherwise
@@ -4628,16 +4700,178 @@ function stopSpeechSafely() {
   }
 }
 
+// --- Conversation stash & reopen (Issue #26) ---
+// Closing a popup (outside click, Escape, page navigation) used to discard
+// the thread unless it had been saved to history first. Every close path now
+// auto-stashes the compare threads to chrome.storage.session via the
+// background worker, and the "Open Last Conversation" command (plus a button
+// on the empty hotkey popup) rebuilds the popup from it. Session storage dies
+// with the browser, so this is a resume convenience, not persistence.
+const CONVO_STASH_MAX_MESSAGES_PER_SLOT = 40;
+
+// Snapshot of a closing popup's threads, or null when there is nothing worth
+// resuming (no model ever answered). Volatile state (thinking/streaming
+// placeholders) is dropped; each model keeps its last N turns only.
+function buildConversationStash(instance) {
+  const slots = instance.compareSlots || [];
+  const stashed = [];
+  slots.forEach(slot => {
+    if (!slot || !slot.started) return;
+    const msgs = slot.messages
+      .filter(m => m && !m.isThinking && !m.isStreaming && !m.isStatus && !m.isError &&
+        ((m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content))
+      .slice(-CONVO_STASH_MAX_MESSAGES_PER_SLOT)
+      .map(m => {
+        const clean = { role: m.role, content: m.content };
+        if (typeof m.displayContent === 'string') clean.displayContent = m.displayContent;
+        if (Array.isArray(m.citations) && m.citations.length > 0) clean.citations = m.citations;
+        return clean;
+      });
+    if (!msgs.some(m => m.role === 'assistant')) return; // this model never answered
+    stashed.push({
+      modelId: slot.modelId,
+      answerModelName: slot.answerModelName || slot.modelName,
+      promptName: slot.promptName || null,
+      messages: msgs
+    });
+  });
+  if (stashed.length === 0) return null;
+  return {
+    savedAt: Date.now(),
+    word: instance.compareWord || null,
+    firstMessages: Array.isArray(instance.compareFirstMessages) ? instance.compareFirstMessages : null,
+    index: instance.compareIndex || 0,
+    slots: stashed
+  };
+}
+
+// Fire-and-forget: stashing must never slow or break closing a popup.
+function stashConversationFromPopup(instance) {
+  let payload;
+  try {
+    payload = buildConversationStash(instance);
+  } catch (e) {
+    return;
+  }
+  if (!payload) return;
+  try {
+    chrome.runtime.sendMessage({ type: 'stashConversation', payload: payload }, () => { void chrome.runtime.lastError; });
+  } catch (e) {
+    // Extension context invalidated (page unloading) — nothing to do.
+  }
+}
+
+// Rebuilds a popup from a stashed conversation. Only models that still exist
+// (and actually answered back then) come back; returns true when at least one
+// did. Restored threads open scrolled to the top and behave like any compare
+// conversation — follow-ups append, Save/PDF work per card.
+function restoreConversationFromStash(instance, stash, models) {
+  if (!stash || !Array.isArray(stash.slots) || !models || models.length === 0) return false;
+  const byId = new Map(models.map(m => [m.id, m]));
+  const slots = [];
+  stash.slots.forEach(s => {
+    const model = byId.get(s.modelId);
+    if (!model) return; // model deleted since the stash — skip its card
+    const msgs = (Array.isArray(s.messages) ? s.messages : [])
+      .filter(m => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content);
+    if (!msgs.some(m => m.role === 'assistant')) return;
+    slots.push({
+      modelId: model.id,
+      modelName: model.name,
+      messages: msgs,
+      started: true,
+      status: 'done',
+      settled: true,
+      errorText: null,
+      answerModelName: s.answerModelName || model.name,
+      promptName: s.promptName || null,
+      lastRequest: null,
+      bodyPinned: false
+    });
+  });
+  if (slots.length === 0) return false;
+
+  instance.compareWord = stash.word || null;
+  instance.comparePrompt = null;
+  instance.compareFirstMessages = Array.isArray(stash.firstMessages) ? stash.firstMessages : null;
+  instance.compareSlots = slots;
+  instance.compareGen = (instance.compareGen || 0) + 1; // invalidate any stale callbacks
+  instance.compareIndex = Math.max(0, Math.min(stash.index || 0, slots.length - 1));
+  instance.isLoading = false;
+
+  if (!instance.popup.querySelector('#ai-popup-followup-container')) {
+    createFollowupInput(instance, instance.compareWord && instance.compareWord !== 'Custom Question' ? instance.compareWord : 'Custom Question');
+  }
+  renderCompareView(instance);
+  updateCompareFollowupState(instance, false);
+  return true;
+}
+
+// Opens the stashed conversation: dedicated keyboard command, or the restore
+// button on the empty hotkey popup. Falls back to the normal empty popup when
+// nothing is restorable so the shortcut is never a dead key.
+function reopenLastConversationPopup() {
+  const popupInstance = showPopup(0, 0, 'Restoring your last conversation…');
+  popupInstance.isLoading = true;
+  popupInstance.compareEnabled = true;
+
+  chrome.runtime.sendMessage({ type: 'getLastConversation' }, (resp) => {
+    if (chrome.runtime.lastError) resp = null;
+    const stash = resp && resp.payload;
+
+    chrome.storage.sync.get({ secretsLocalOnly: false, models: [], defaultModelId: null, customPrompts: [], defaultPromptId: null }, (syncData) => {
+      const begin = (models) => {
+        if (!activePopups.includes(popupInstance)) return; // closed while loading
+        createSelectors(popupInstance, models, syncData.customPrompts || [], syncData.defaultModelId || null, null, (stash && stash.word) || 'Conversation', syncData.defaultPromptId || null);
+        const restored = restoreConversationFromStash(popupInstance, stash, models);
+        if (restored) {
+          adjustPopupPosition(popupInstance, null);
+          showPopupToast(popupInstance, 'Conversation restored — keep asking below');
+        } else {
+          // The restoring popup holds no content, so closing it stashes
+          // nothing; the familiar empty popup takes over.
+          removePopupInstance(popupInstance);
+          initiateEmptyPopupSequence();
+        }
+      };
+      // Only models/default-model are secret-bearing; prompts are plain sync
+      // data (same split as every other popup entry point).
+      if (syncData.secretsLocalOnly) {
+        chrome.storage.local.get(['models', 'defaultModelId'], (localData) => {
+          if (!activePopups.includes(popupInstance)) return;
+          begin(localData.models || []);
+        });
+      } else {
+        begin(syncData.models || []);
+      }
+    });
+  });
+}
+
+// Does the given popup hold a conversation worth protecting from replacement?
+function popupHasConversation(instance) {
+  if (!instance) return false;
+  if (instance.compareSlots && instance.compareSlots.some(s => s.messages && s.messages.length > 0)) return true;
+  return !!(instance.messages && instance.messages.some(m => m.role === 'assistant' && !m.isError && !m.isThinking));
+}
+
 function removeAllPopups() {
+  // Stash exactly ONE conversation — the newest that has content. Sending a
+  // stash per popup would race (async sends can land out of order) and could
+  // crown an older thread as "last".
+  let newestWithContent = null;
   activePopups = activePopups.filter(instance => {
     if (!instance.isPinned) {
+      if (buildConversationStash(instance)) newestWithContent = instance;
       stopLoadingQuoteRotation(instance);
+      if (instance.compareSliderCleanup) instance.compareSliderCleanup();
       if (instance.stopMic) instance.stopMic();
       if (instance.container) instance.container.remove();
       return false; // Remove from array
     }
     return true; // Keep in array
   });
+  if (newestWithContent) stashConversationFromPopup(newestWithContent);
   if (activePopups.length === 0) {
     stopSpeechSafely();
   }
@@ -4649,7 +4883,9 @@ function removeLastPopup() {
   for (let i = activePopups.length - 1; i >= 0; i--) {
     if (!activePopups[i].isPinned) {
       const instance = activePopups.splice(i, 1)[0];
+      stashConversationFromPopup(instance);
       stopLoadingQuoteRotation(instance);
+      if (instance.compareSliderCleanup) instance.compareSliderCleanup();
       if (instance.stopMic) instance.stopMic();
       if (instance.container) instance.container.remove();
       break;
@@ -4664,6 +4900,7 @@ function removePopupInstance(instance) {
   const index = activePopups.indexOf(instance);
   if (index > -1) {
     activePopups.splice(index, 1);
+    stashConversationFromPopup(instance);
     stopLoadingQuoteRotation(instance);
     cleanupStreamHandlersFor(instance);
     if (instance.compareSliderCleanup) instance.compareSliderCleanup();

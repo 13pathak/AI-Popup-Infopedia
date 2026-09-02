@@ -17,6 +17,12 @@
         "default": "Ctrl+Shift+Y"
       },
       "description": "Trigger AI Popup"
+    },
+    "open-last-conversation": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+U"
+      },
+      "description": "Open Last Conversation"
     }
   },
   "host_permissions": [

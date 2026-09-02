@@ -342,21 +342,26 @@ const IMPLICIT_CONTEXT_SEARCH_ADDENDUM = ' The page context is not a source of k
 
 // --- NEW: Listen for keyboard shortcuts (commands) ---
 chrome.commands.onCommand.addListener((command) => {
-  if (command === "trigger-popup") {
-    // Send message to the active tab to trigger the popup
+  // Both commands reach the popup through the active tab's content script;
+  // the callback surfaces pages where it cannot be delivered (chrome://,
+  // the Web Store, the extension's own pages).
+  const sendToActiveTab = (type) => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       if (tabs.length > 0) {
-        // Use a callback so we can detect failures (e.g. on chrome:// pages,
-        // the Web Store, the extension's own options page, or PDF viewer
-        // pages where the content script is not injected).
-        chrome.tabs.sendMessage(tabs[0].id, { type: "triggerPopup" }, () => {
+        chrome.tabs.sendMessage(tabs[0].id, { type: type }, () => {
           if (chrome.runtime.lastError) {
-            // Content script not reachable on this tab.
-            console.warn("triggerPopup could not be delivered:", chrome.runtime.lastError.message);
+            console.warn(`${type} could not be delivered:`, chrome.runtime.lastError.message);
           }
         });
       }
     });
+  };
+
+  if (command === "trigger-popup") {
+    sendToActiveTab("triggerPopup");
+  }
+  if (command === "open-last-conversation") {
+    sendToActiveTab("reopenLastConversation");
   }
 });
 
@@ -564,6 +569,42 @@ function buildLookupCacheKey(word, modelId, promptTemplate, cleanContext) {
   const normalized = String(word).trim().replace(/\s+/g, ' ');
   const contextPart = cleanContext ? JSON.stringify([cleanContext.pageTitle || '', cleanContext.sentence || '']) : '';
   return JSON.stringify([normalized, modelId, promptTemplate, contextPart]);
+}
+
+// --- Conversation stash (Issue #26) ---
+// Closing a popup (outside click, Escape) used to discard the whole thread
+// unless it had been saved to history. Popups now auto-stash their compare
+// threads here on close, and the "Open Last Conversation" command rebuilds
+// the popup from it. Session storage is the right home: device-local,
+// in-memory, wiped when the browser closes — a resume convenience for
+// accidental dismissals, not persistence. On legacy Chrome without
+// storage.session both handlers degrade to no-ops.
+const CONVO_STASH_KEY = 'lastConversationStash';
+
+function convoStashArea() {
+  return (chrome.storage && chrome.storage.session) ? chrome.storage.session : null;
+}
+
+function getConvoStash() {
+  const area = convoStashArea();
+  if (!area) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    area.get(CONVO_STASH_KEY, (stored) => {
+      const raw = stored && stored[CONVO_STASH_KEY];
+      resolve(raw && typeof raw === 'object' && Array.isArray(raw.slots) ? raw : null);
+    });
+  });
+}
+
+function setConvoStash(payload) {
+  const area = convoStashArea();
+  if (!area) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    area.set({ [CONVO_STASH_KEY]: payload }, () => {
+      const failed = !!chrome.runtime.lastError;
+      resolve(!failed);
+    });
+  });
 }
 
 // --- This listener now handles multiple message types ---
@@ -1273,6 +1314,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.type === "clearAiUsageStats") {
     clearAiUsageStats().then(() => {
       sendResponse({ status: "cleared" });
+    });
+    return true; // async
+  }
+
+  // --- Issue #26: conversation stash (resume accidental dismissals) ---
+  if (request.type === "stashConversation") {
+    setConvoStash(request.payload || null).then((ok) => {
+      sendResponse({ ok: ok });
+    });
+    return true; // async
+  }
+  if (request.type === "getLastConversation") {
+    getConvoStash().then((payload) => {
+      sendResponse({ payload: payload });
     });
     return true; // async
   }
