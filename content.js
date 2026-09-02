@@ -1914,9 +1914,12 @@ function initiatePopupSequence(rect, selectedText, customPrompt, implicitContext
       }
     };
     if (syncData.secretsLocalOnly) {
-      chrome.storage.local.get(['models', 'defaultModelId', 'customPrompts'], (localData) => {
+      chrome.storage.local.get(['models', 'defaultModelId'], (localData) => {
         if (!activePopups.includes(popupInstance)) return;
-        begin(localData.models || [], localData.customPrompts || [], localData.defaultModelId || null);
+        // Only models/defaultModelId are secret-bearing; custom prompts and
+        // the default prompt id are ordinary sync data (same split the empty
+        // hotkey popup uses), so they come from syncData above.
+        begin(localData.models || [], syncData.customPrompts || [], localData.defaultModelId || null);
       });
     } else {
       begin(syncData.models || [], syncData.customPrompts || [], syncData.defaultModelId || null);
