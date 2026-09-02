@@ -1332,6 +1332,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true; // async
   }
 
+  // --- Issue #25: refresh the due-cards toolbar badge on request ---
+  // Extension pages (options) can no longer clear the badge themselves now
+  // that it shows the due count; they ask the worker to recompute it.
+  if (request.type === "refreshDueCardsBadge") {
+    updateDueCardsBadge();
+    sendResponse({ ok: true });
+    return;
+  }
+
   // --- Case 2.9: Open Options Page Tab (e.g. support-content) ---
   if (request.type === "openOptionsTab") {
     const targetTab = request.tab || 'support-content';
@@ -1559,6 +1568,107 @@ function saveToHistory(word, definition, listId, modelName, promptName, sourceUr
   });
 }
 
+// --- Due-cards toolbar badge & review streak (Issue #25) ---
+// The toolbar icon's badge shows how many flashcards are due right now,
+// computed from the same nextReview timestamps the review session uses
+// (FSRS.isDue: never reviewed, or due date in the past). Unexplained clips
+// are excluded exactly like startFlashcardReview filters them, so the badge
+// count always matches what a session would actually serve. The badge is
+// the extension's only always-visible surface, so it doubles as the daily
+// review nudge: cards become due as time passes (not just on writes), so a
+// periodic alarm refreshes the count across the day, including the local
+// midnight rollover. The companion day-streak stat lives on the Flashcards
+// tab (options.js loadStats).
+const DUE_BADGE_ALARM_NAME = 'dueCardsBadgeRefresh';
+const DUE_BADGE_REFRESH_MINUTES = 30;
+const DUE_BADGE_DISPLAY_MAX = 999;
+
+function isDueForBadge(item, now) {
+  if (!item || typeof item !== 'object') return false;
+  // Unexplained clips are skipped by review sessions — their card back
+  // would be blank until a definition exists.
+  if (item.modelName === 'clip' && !item.definition) return false;
+  return !item.nextReview || item.nextReview <= now;
+}
+
+function setBadgeTextChecked(text) {
+  chrome.action.setBadgeText({ text: text }, () => { void chrome.runtime.lastError; });
+}
+
+function applyDueCardsBadge(dueCount) {
+  if (!Number.isFinite(dueCount) || dueCount <= 0) {
+    setBadgeTextChecked('');
+    return;
+  }
+  const text = dueCount > DUE_BADGE_DISPLAY_MAX ? `${DUE_BADGE_DISPLAY_MAX}+` : String(dueCount);
+  chrome.action.setBadgeBackgroundColor({ color: '#DC2626' }, () => { void chrome.runtime.lastError; });
+  // Badge text color is Chrome 110+; on older Chrome the platform default
+  // (white or black, chosen for contrast) applies.
+  if (chrome.action.setBadgeTextColor) {
+    chrome.action.setBadgeTextColor({ color: '#FFFFFF' }, () => { void chrome.runtime.lastError; });
+  }
+  setBadgeTextChecked(text);
+}
+
+function updateDueCardsBadge() {
+  chrome.storage.sync.get({ dueBadgeEnabled: true }, (syncData) => {
+    if (syncData.dueBadgeEnabled === false) {
+      setBadgeTextChecked('');
+      return;
+    }
+    chrome.storage.local.get({ history: [] }, (localData) => {
+      const now = Date.now();
+      const history = Array.isArray(localData.history) ? localData.history : [];
+      let due = 0;
+      for (const item of history) {
+        if (isDueForBadge(item, now)) due++;
+      }
+      applyDueCardsBadge(due);
+    });
+  });
+}
+
+// Review sessions write history once per rated card, and saves/imports can
+// touch it repeatedly — coalesce bursts into a single recompute. A short
+// setTimeout is safe in an MV3 worker: the storage event that scheduled it
+// keeps the worker alive well past 250ms.
+let dueBadgeRefreshTimer = null;
+function scheduleDueBadgeRefresh() {
+  if (dueBadgeRefreshTimer) clearTimeout(dueBadgeRefreshTimer);
+  dueBadgeRefreshTimer = setTimeout(() => {
+    dueBadgeRefreshTimer = null;
+    updateDueCardsBadge();
+  }, 250);
+}
+
+// Created only on startup/install (not on every worker evaluation): a
+// top-level alarms.create would reset the 30-minute window each time the
+// MV3 worker cold-starts, and a frequently re-woken worker could defer the
+// alarm indefinitely. The get-guard keeps the cadence stable across worker
+// restarts; alarms themselves persist until the extension is removed.
+function ensureDueBadgeAlarm() {
+  try {
+    chrome.alarms.get(DUE_BADGE_ALARM_NAME, (existing) => {
+      void chrome.runtime.lastError;
+      if (!existing) {
+        chrome.alarms.create(DUE_BADGE_ALARM_NAME, { periodInMinutes: DUE_BADGE_REFRESH_MINUTES });
+      }
+    });
+  } catch (e) {
+    // Alarms API unavailable: the badge still refreshes on history writes,
+    // startup, and settings changes — only time-based drift goes stale.
+  }
+}
+
+chrome.storage.onChanged.addListener((changes, namespace) => {
+  if (namespace === 'local' && changes.history) {
+    scheduleDueBadgeRefresh();
+  }
+  if (namespace === 'sync' && changes.dueBadgeEnabled) {
+    updateDueCardsBadge();
+  }
+});
+
 // --- NEW: Auto-Backup Logic ---
 
 // Check every 60 minutes
@@ -1568,16 +1678,25 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === "checkBackupReminder") {
     performAutoBackupCheck();
   }
+  if (alarm.name === DUE_BADGE_ALARM_NAME) {
+    updateDueCardsBadge();
+  }
 });
 
 // Also check on startup
 chrome.runtime.onStartup.addListener(() => {
   performAutoBackupCheck();
+  // Badge state persists across browser restarts; recompute it (and make
+  // sure the periodic refresh alarm exists) so the count is fresh.
+  ensureDueBadgeAlarm();
+  updateDueCardsBadge();
 });
 
 // And on installed
 chrome.runtime.onInstalled.addListener(() => {
   performAutoBackupCheck();
+  ensureDueBadgeAlarm();
+  updateDueCardsBadge();
 });
 
 // Listen for changes in settings to update immediately
@@ -1591,9 +1710,11 @@ function performAutoBackupCheck() {
   chrome.storage.sync.get({ backupReminderFrequency: 0 }, (syncData) => {
     const frequencyDays = syncData.backupReminderFrequency;
 
-    // specific check: if 0 (disabled), ensure no badge/action
+    // specific check: if 0 (disabled), ensure no badge/action.
+    // The toolbar badge now belongs to the due-card count (Issue #25), so
+    // this refreshes that badge instead of blindly clearing it.
     if (frequencyDays === 0) {
-      chrome.action.setBadgeText({ text: '' });
+      updateDueCardsBadge();
       return;
     }
 

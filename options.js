@@ -397,6 +397,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   initMemoryModelSection();
   initFocusMode();
+  initDueBadgeToggle();
 
   // --- NEW: PDF File Access Check ---
   // MV3 removed chrome.extension (and with it isAllowedFileSchemeAccess),
@@ -3765,11 +3766,10 @@ function saveReminderSettings() {
   }, () => {
     updateReminderStatus('Backup settings saved!', 'success');
 
-    // Also check if we need to update the badge immediately
-    // If user turned it off (0), we should clear the badge
-    if (parseInt(frequency, 10) === 0) {
-      chrome.action.setBadgeText({ text: '' });
-    }
+    // The toolbar badge now shows the due-flashcard count (Issue #25), so
+    // this page no longer clears it directly — the background worker
+    // recomputes it from history instead.
+    chrome.runtime.sendMessage({ type: "refreshDueCardsBadge" }, () => { void chrome.runtime.lastError; });
 
     // Trigger a check immediately to schedule/unschedule
     chrome.runtime.sendMessage({ type: "checkBackupReminder" });
@@ -3830,8 +3830,9 @@ function resetBackupReminder() {
   // Update the last backup time to now
   chrome.storage.local.set({ lastBackupTime: Date.now() }, () => {
     console.log("Backup time updated.");
-    // Clear the badge
-    chrome.action.setBadgeText({ text: '' });
+    // The badge is owned by the due-card count (Issue #25); have the
+    // background worker refresh it rather than clearing it here.
+    chrome.runtime.sendMessage({ type: "refreshDueCardsBadge" }, () => { void chrome.runtime.lastError; });
   });
 }
 
@@ -5297,6 +5298,21 @@ function initFocusMode() {
   bind('focus-delete-btn', deleteCurrentFocusCard);
 }
 
+// Toolbar badge toggle (Issue #25): show the due-flashcard count on the
+// extension icon. Stored in sync so the preference follows the user; the
+// background worker watches the key and repaints (or clears) the badge on
+// change, so no direct chrome.action calls happen here.
+function initDueBadgeToggle() {
+  const toggle = document.getElementById('due-badge-toggle');
+  if (!toggle) return;
+  chrome.storage.sync.get({ dueBadgeEnabled: true }, (data) => {
+    toggle.checked = data.dueBadgeEnabled !== false;
+  });
+  toggle.addEventListener('change', () => {
+    chrome.storage.sync.set({ dueBadgeEnabled: toggle.checked });
+  });
+}
+
 // Load flashcard lists when tab is clicked (handled by tab switching)
 
 // ---
@@ -5336,6 +5352,47 @@ function animateStatValue(el, target) {
   el._statAnim = requestAnimationFrame(step);
 }
 
+// --- Review streak (Issue #25) ---
+// Consecutive local calendar days on which at least one card was rated.
+// A day counts when any reviewLog entry falls on it (each rating appends
+// one {ts} record), with the item's lastReviewed as the fallback for
+// progress imported from CSVs or backups that strip the log. The streak is
+// counted back from today — or from yesterday when today has no reviews
+// yet, so an active streak isn't zeroed out every morning.
+function dayKeyFromTs(ts) {
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+}
+
+function computeReviewStreakDays(history) {
+  const activeDays = new Set();
+  for (const item of history) {
+    if (!item) continue;
+    if (Number.isFinite(item.lastReviewed) && item.lastReviewed > 0) {
+      activeDays.add(dayKeyFromTs(item.lastReviewed));
+    }
+    if (Array.isArray(item.reviewLog)) {
+      for (const rec of item.reviewLog) {
+        if (rec && Number.isFinite(rec.ts) && rec.ts > 0) {
+          activeDays.add(dayKeyFromTs(rec.ts));
+        }
+      }
+    }
+  }
+  const keyOf = (d) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+  const cursor = new Date();
+  if (!activeDays.has(keyOf(cursor))) {
+    cursor.setDate(cursor.getDate() - 1);
+    if (!activeDays.has(keyOf(cursor))) return 0;
+  }
+  let streak = 0;
+  while (activeDays.has(keyOf(cursor))) {
+    streak++;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return streak;
+}
+
 function loadStats() {
   chrome.storage.local.get(['history'], (result) => {
     const history = result.history || [];
@@ -5350,6 +5407,10 @@ function loadStats() {
       return FSRS.isDue(item, now);
     }).length;
 
+    // Same definition as the toolbar badge (Issue #25): the count shown
+    // here and the count on the icon must agree.
+    const streakDays = computeReviewStreakDays(history);
+
     // Estimate total reviews (if we don't have exact counts, we can estimate based on intervals)
     // For now, let's just count how many items have an interval set (meaning they've been reviewed at least once)
     const totalReviews = history.filter(item => item.interval > 0).length;
@@ -5358,6 +5419,7 @@ function loadStats() {
     animateStatValue(document.getElementById('stat-favorites'), favorites);
     animateStatValue(document.getElementById('stat-due-cards'), dueCards);
     animateStatValue(document.getElementById('stat-total-reviews'), totalReviews);
+    animateStatValue(document.getElementById('stat-day-streak'), streakDays);
 
     // 2. Render Heatmap (90 Days)
     const heatmapGrid = document.getElementById('heatmap-grid');
