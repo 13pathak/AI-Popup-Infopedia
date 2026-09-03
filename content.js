@@ -69,7 +69,7 @@ const popupStyles = `
     --popup-text: #eef3f8;
     --popup-text-muted: #94a3b8;
     --popup-text-header: #f8fafc;
-    --popup-border: rgba(125, 211, 252, 0.22);
+    --popup-border: rgba(255, 255, 255, 0.1);
     --popup-card-bg: #111c2c;
     --popup-field-bg: #101827;
     --popup-field-border: #475569;
@@ -101,7 +101,7 @@ const popupStyles = `
     --popup-text: #0f172a;
     --popup-text-muted: #64748b;
     --popup-text-header: #0f172a;
-    --popup-border: rgba(15, 23, 42, 0.12);
+    --popup-border: rgba(15, 23, 42, 0.1);
     --popup-card-bg: #f1f5f9;
     --popup-field-bg: #ffffff;
     --popup-field-border: #cbd5e1;
@@ -134,7 +134,7 @@ const popupStyles = `
       --popup-text: #0f172a;
       --popup-text-muted: #64748b;
       --popup-text-header: #0f172a;
-      --popup-border: rgba(15, 23, 42, 0.12);
+      --popup-border: rgba(15, 23, 42, 0.1);
       --popup-card-bg: #f1f5f9;
       --popup-field-bg: #ffffff;
       --popup-field-border: #cbd5e1;
@@ -168,7 +168,7 @@ const popupStyles = `
     color: var(--popup-text);
     border: 1px solid var(--popup-border);
     border-radius: 12px;
-    padding: 18px 14px 14px 14px;
+    padding: 14px 14px 14px 14px;
     font-family: var(--popup-font-family);
     font-size: 14px;
     line-height: 1.5;
@@ -178,7 +178,7 @@ const popupStyles = `
     max-height: 85vh; /* Keep the popup within screen bounds */
     display: flex;
     flex-direction: column;
-    box-shadow: 0 18px 42px var(--popup-shadow-1), 0 3px 12px var(--popup-shadow-2);
+    box-shadow: 0 18px 42px var(--popup-shadow-1), 0 3px 12px var(--popup-shadow-2), inset 0 1px 0 rgba(255, 255, 255, 0.09);
     pointer-events: auto; /* Re-enable pointer events for the popup itself */
     z-index: 1; /* z-index is now relative to its container */
     animation: ai-popup-enter 180ms ease-out;
@@ -255,27 +255,24 @@ const popupStyles = `
     align-items: center;
     justify-content: space-between;
     gap: 10px;
-    margin-bottom: 10px;
+    margin-bottom: 12px;
     cursor: grab;
     user-select: none; /* the header drags the popup; text stays copyable via its tooltip */
   }
   #ai-popup-context:active { cursor: grabbing; }
-  .ai-popup-context-copy { min-width: 0; }
+  .ai-popup-context-copy { min-width: 0; flex: 1 1 auto; }
   .ai-popup-context-label {
-    color: var(--popup-context-label);
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
+    display: none;
   }
   .ai-popup-context-query {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--popup-text-header);
-    font-size: 17px;
-    letter-spacing: -0.01em; /* tighter tracking suits the larger display size */
-    font-weight: 650;
+    font-size: 19px;
+    letter-spacing: -0.02em; /* tighter tracking suits the bold display size */
+    font-weight: 700;
+    line-height: 1.25;
   }
   .ai-popup-context-model {
     max-width: 110px;
@@ -295,10 +292,10 @@ const popupStyles = `
   .custom-select-container { position: relative; flex-grow: 1; min-width: 110px; }
   .custom-select {
       display: flex; align-items: center; justify-content: space-between;
-      padding: 7px 10px; background-color: var(--popup-field-bg);
+      padding: 6px 9px; background-color: var(--popup-field-bg);
       border: 1px solid var(--popup-field-border); border-radius: 8px;
       cursor: pointer; user-select: none; color: var(--popup-field-text);
-      font-size: 13px; font-family: inherit;
+      font-size: 12.5px; font-family: inherit;
   }
   .custom-select-value {
       min-width: 0;
@@ -358,14 +355,20 @@ const popupStyles = `
   /* --- Styles for selectors --- */
   #ai-popup-selectors-container {
     display: flex;
-    gap: 7px;
+    gap: 8px;
     margin-bottom: 12px;
   }
-  /* flex-basis 0 so both rows split 50:50 no matter how long their labels are
-     (flex-grow alone would size each container by its content first) */
   #ai-popup-selectors-container .custom-select-container {
     flex: 1 1 0;
     min-width: 0;
+  }
+  #ai-popup-selectors-container .custom-select-container:first-child {
+    flex: 0 1 45%;
+    min-width: 110px;
+  }
+  #ai-popup-selectors-container .custom-select-container:last-child {
+    flex: 1 1 55%;
+    min-width: 120px;
   }
 
   /* Wrapper for the AI-generated text */
@@ -536,29 +539,31 @@ const popupStyles = `
     display: flex;
     align-items: center; /* Vertically center items */
     gap: 6px;
-    margin-top: 14px;
-    padding: 8px;
-    background: var(--popup-card-bg);
-    border: none;
-    border-radius: 8px;
+    margin-top: 10px;
+    padding: 6px 8px;
+    background: rgba(var(--popup-accent-rgb), 0.04);
+    border: 1px solid var(--popup-border);
+    border-radius: 9px;
   }
 
   .ai-popup-button {
     font-family: inherit;
-    font-size: 14px; 
-    font-weight: bold; 
-    color: var(--popup-accent-btn-text);
+    font-size: 12.5px; 
+    font-weight: 600; 
+    color: rgba(var(--popup-accent-rgb), 1);
     cursor: pointer;
-    background: var(--popup-accent-btn-bg);
-    border: 1px solid var(--popup-accent-btn-border);
-    border-radius: 8px;
-    padding: 6px 11px;
+    background: rgba(var(--popup-accent-rgb), 0.14);
+    border: 1px solid rgba(var(--popup-accent-rgb), 0.35);
+    border-radius: 7px;
+    padding: 5px 12px;
     white-space: nowrap; /* Prevent wrapping */
     flex-shrink: 0; /* Prevent button from shrinking */
+    transition: all 140ms ease;
   }
 
   .ai-popup-button:hover {
-    background: var(--popup-accent-btn-hover);
+    background: rgba(var(--popup-accent-rgb), 0.24);
+    border-color: rgba(var(--popup-accent-rgb), 0.55);
     transform: translateY(-1px);
   }
 
@@ -586,10 +591,10 @@ const popupStyles = `
     transform: translateY(0) scale(0.98);
   }
 
-  /* SPEECH, PDF & PIN BUTTONS */
-  #ai-popup-speak-btn, #ai-popup-pdf-btn, #ai-popup-pin-btn {
-    width: 30px;
-    height: 30px;
+  /* SPEECH & PDF BUTTONS */
+  #ai-popup-speak-btn, #ai-popup-pdf-btn {
+    width: 28px;
+    height: 28px;
     padding: 0;
     font-size: 15px;
     color: var(--popup-btn-icon-color);
@@ -600,31 +605,54 @@ const popupStyles = `
     flex-shrink: 0;
     background: transparent;
     border: none;
-    border-radius: 8px;
+    border-radius: 7px;
     transition: transform 140ms ease, background-color 140ms ease;
   }
-  #ai-popup-speak-btn:hover, #ai-popup-pdf-btn:hover, #ai-popup-pin-btn:hover {
+  #ai-popup-speak-btn:hover, #ai-popup-pdf-btn:hover {
     color: var(--popup-btn-icon-hover);
     background: rgba(var(--popup-accent-rgb), 0.15);
     transform: translateY(-1px);
   }
-  #ai-popup-speak-btn:active, #ai-popup-pdf-btn:active, #ai-popup-pin-btn:active {
+  #ai-popup-speak-btn:active, #ai-popup-pdf-btn:active {
     transform: translateY(0) scale(0.98);
   }
-  /* Pinned state: accent-tinted instead of hardcoded teal so it tracks the theme */
+
+  /* PIN BUTTON (Header placement) */
+  #ai-popup-pin-btn {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    color: var(--popup-text-muted);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    background: var(--popup-field-bg);
+    border: 1px solid var(--popup-field-border);
+    border-radius: 7px;
+    transition: transform 140ms ease, background-color 140ms ease, border-color 140ms ease, color 140ms ease;
+  }
+  #ai-popup-pin-btn:hover {
+    color: var(--popup-text-header);
+    border-color: rgba(var(--popup-accent-rgb), 0.5);
+    background: rgba(var(--popup-accent-rgb), 0.12);
+  }
+  #ai-popup-pin-btn:active {
+    transform: translateY(0) scale(0.96);
+  }
   #ai-popup-pin-btn.pinned {
     color: rgba(var(--popup-accent-rgb), 1);
-    opacity: 0.5;
+    background: rgba(var(--popup-accent-rgb), 0.2);
+    border-color: rgba(var(--popup-accent-rgb), 0.5);
+    opacity: 1;
   }
 
   /* --- Follow-up Prompt --- */
   #ai-popup-followup-container {
     display: flex;
     position: relative;
-    margin-top: 14px;
-    padding-top: 14px;
-    border-top: 1px solid var(--popup-border);
-    gap: 8px;
+    margin-top: 10px;
     align-items: center;
   }
   
@@ -633,13 +661,14 @@ const popupStyles = `
     background-color: var(--popup-field-bg);
     color: var(--popup-field-text);
     border: 1px solid var(--popup-field-border);
-    border-radius: 8px;
-    padding: 6px 36px 6px 10px;
+    border-radius: 9px;
+    padding: 7px 62px 7px 11px;
     font-family: inherit;
-    font-size: 13px;
+    font-size: 12.5px;
     outline: none;
     width: 100%;
     box-sizing: border-box;
+    transition: border-color 140ms ease, box-shadow 140ms ease;
   }
   
   #ai-popup-followup-input::placeholder {
@@ -647,35 +676,49 @@ const popupStyles = `
   }
 
   .ai-popup-followup-send {
+    position: absolute;
+    right: 4px;
+    top: 50%;
+    transform: translateY(-50%);
     background: var(--popup-accent-btn-bg);
     color: var(--popup-accent-btn-text);
-    border: 1px solid var(--popup-accent-btn-border);
-    border-radius: 8px;
-    padding: 6px 12px;
+    border: none;
+    border-radius: 6px;
+    width: 25px;
+    height: 25px;
+    padding: 0;
     cursor: pointer;
-    font-weight: bold;
-    font-size: 13px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 120ms ease, background-color 120ms ease;
   }
 
   .ai-popup-followup-send:hover {
     background: var(--popup-accent-btn-hover);
+    transform: translateY(-50%) scale(1.05);
+  }
+  .ai-popup-followup-send:active {
+    transform: translateY(-50%) scale(0.95);
   }
 
   /* --- Follow-up Mic Button --- */
   .ai-popup-followup-mic {
     position: absolute;
-    right: 4px;
+    right: 33px;
+    top: 50%;
+    transform: translateY(-50%);
     background: transparent;
     color: var(--popup-text-muted);
     border: none;
-    padding: 6px;
+    padding: 4px;
     cursor: pointer;
     font-size: 13px;
     display: flex;
     align-items: center;
     justify-content: center;
     transition: all 0.2s;
-    border-radius: 8px;
+    border-radius: 6px;
   }
 
   .ai-popup-followup-mic:hover {
@@ -1014,46 +1057,49 @@ const popupStyles = `
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 10px;
-    padding: 9px 0 2px 0;
+    gap: 8px;
+    padding: 6px 0 2px 0;
     user-select: none;
   }
   .ai-compare-nav-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 30px;
-    height: 30px;
-    border-radius: 50%;
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
     border: 1px solid var(--popup-field-border);
     background: var(--popup-field-bg);
     color: var(--popup-text);
     cursor: pointer;
     padding: 0;
+    transition: all 120ms ease;
   }
   .ai-compare-nav-btn:disabled { opacity: 0.35; cursor: default; }
   .ai-compare-nav-btn:not(:disabled):hover {
     border-color: rgba(var(--popup-accent-rgb), 0.6);
+    background: rgba(var(--popup-accent-rgb), 0.1);
   }
   .ai-compare-dots {
     display: inline-flex;
     align-items: center;
-    gap: 7px;
+    gap: 6px;
   }
   .ai-compare-dotnav {
-    width: 9px;
-    height: 9px;
+    width: 8px;
+    height: 8px;
     border-radius: 50%;
     border: 1px solid var(--popup-field-border);
     background: var(--popup-field-bg);
     padding: 0;
     cursor: pointer;
+    transition: all 150ms ease;
   }
   .ai-compare-dotnav.done { border-color: rgba(52, 211, 153, 0.8); }
   .ai-compare-dotnav.error { border-color: var(--popup-error-text); }
   .ai-compare-dotnav.active {
-    width: 22px;
-    border-radius: 5px;
+    width: 20px;
+    border-radius: 4px;
     background: rgba(var(--popup-accent-rgb), 0.9);
     border-color: transparent;
   }
@@ -1098,7 +1144,9 @@ const POPUP_ICON_PATHS = {
   chevronRight: '<polyline points="9 18 15 12 9 6"/>',
   chevronLeft: '<polyline points="15 18 9 12 15 6"/>',
   sparkles: '<path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/>',
-  bookmark: '<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>'
+  bookmark: '<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>',
+  send: '<line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>',
+  arrowRight: '<line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>'
 };
 
 function iconSvg(name, size = 16) {
@@ -2424,6 +2472,7 @@ function makePopupDraggable(instance) {
     if (e.button !== 0) return; // left button only
     const header = popup.querySelector('#ai-popup-context');
     if (!header || !header.contains(e.target)) return;
+    if (e.target.closest('button')) return;
 
     e.preventDefault(); // keep the page's text selection out of the drag
 
@@ -3674,19 +3723,6 @@ function ensureCompareToolbar(instance) {
       saveConversationAsPdf(instance, slot.messages, slot.answerModelName || slot.modelName);
     };
 
-    // --- Pin (identical to the single-answer toolbar) ---
-    const pinButton = document.createElement('button');
-    pinButton.type = 'button';
-    pinButton.id = 'ai-popup-pin-btn';
-    pinButton.innerHTML = iconSvg('pin', 16);
-    pinButton.title = 'Pin conversation';
-    pinButton.classList.toggle('pinned', !!instance.isPinned);
-    pinButton.onclick = (e) => {
-      e.stopPropagation();
-      instance.isPinned = !instance.isPinned;
-      pinButton.classList.toggle('pinned', instance.isPinned);
-    };
-
     // --- List picker (same component + "create new" flow as before) ---
     let listSelector;
     function recreateDropdown(listsToUse, currentVal) {
@@ -3716,6 +3752,7 @@ function ensureCompareToolbar(instance) {
       // in where the old one sat. The INITIAL append happens in the ordered
       // sequence below, so the row reads icons-left, list+Save-right.
       if (previousSelector && previousSelector.parentNode) {
+        listSelector.style.marginLeft = 'auto';
         previousSelector.parentNode.replaceChild(listSelector, previousSelector);
       }
     }
@@ -3725,9 +3762,6 @@ function ensureCompareToolbar(instance) {
     const finalSaveButton = document.createElement('button');
     finalSaveButton.textContent = 'Save';
     finalSaveButton.className = 'ai-popup-button';
-    // Same seating as the original toolbar: icons left, list picker + Save
-    // pushed to the right edge together.
-    finalSaveButton.style.marginLeft = 'auto';
     finalSaveButton.addEventListener('click', (ev) => {
       ev.stopPropagation();
       const slot = visibleSlot();
@@ -3763,7 +3797,7 @@ function ensureCompareToolbar(instance) {
 
     actionsContainer.appendChild(speakButton);
     actionsContainer.appendChild(pdfButton);
-    actionsContainer.appendChild(pinButton);
+    listSelector.style.marginLeft = 'auto';
     actionsContainer.appendChild(listSelector);
     actionsContainer.appendChild(finalSaveButton);
     mount();
@@ -3791,16 +3825,27 @@ function createSelectors(instance, models, prompts, currentModelId, currentPromp
 
   const contextCopy = document.createElement('div');
   contextCopy.className = 'ai-popup-context-copy';
-  const contextLabel = document.createElement('div');
-  contextLabel.className = 'ai-popup-context-label';
-  contextLabel.textContent = selectedText === 'Custom Question' ? 'Conversation' : 'Selected text';
   const contextQuery = document.createElement('div');
   contextQuery.className = 'ai-popup-context-query';
   contextQuery.textContent = selectedText === 'Custom Question' ? 'Ask anything' : selectedText;
   contextQuery.title = contextQuery.textContent;
-  contextCopy.append(contextLabel, contextQuery);
+  contextCopy.append(contextQuery);
 
-  context.append(contextCopy);
+  // Top-right window Pin button (stays pinned on screen)
+  const pinButton = document.createElement('button');
+  pinButton.type = 'button';
+  pinButton.id = 'ai-popup-pin-btn';
+  pinButton.innerHTML = iconSvg('pin', 15);
+  pinButton.title = instance.isPinned ? 'Unpin popup' : 'Pin popup on screen';
+  pinButton.classList.toggle('pinned', !!instance.isPinned);
+  pinButton.onclick = (e) => {
+    e.stopPropagation();
+    instance.isPinned = !instance.isPinned;
+    pinButton.classList.toggle('pinned', instance.isPinned);
+    pinButton.title = instance.isPinned ? 'Unpin popup' : 'Pin popup on screen';
+  };
+
+  context.append(contextCopy, pinButton);
 
   const container = document.createElement('div');
   container.id = 'ai-popup-selectors-container';
@@ -4150,19 +4195,6 @@ function createActionButtons(instance, word, definition, modelName, promptName, 
       saveConversationAsPdf(instance);
     };
 
-    // --- NEW: PIN BUTTON ---
-    const pinButton = document.createElement('button');
-    pinButton.type = 'button';
-    pinButton.id = 'ai-popup-pin-btn';
-    pinButton.innerHTML = iconSvg('pin', 16);
-    pinButton.title = 'Pin conversation';
-    pinButton.classList.toggle('pinned', !!instance.isPinned);
-    pinButton.onclick = (e) => {
-      e.stopPropagation();
-      instance.isPinned = !instance.isPinned;
-      pinButton.classList.toggle('pinned', instance.isPinned);
-    };
-
     // 2. Create list selector using Custom Dropdown Component
     let listSelector;
     function recreateDropdown(listsToUse, currentVal) {
@@ -4192,6 +4224,7 @@ function createActionButtons(instance, word, definition, modelName, promptName, 
       // in where the old one sat. The initial append happens below, alongside
       // the other action controls, after this function has returned.
       if (previousSelector && previousSelector.parentNode) {
+        listSelector.style.marginLeft = 'auto';
         previousSelector.parentNode.replaceChild(listSelector, previousSelector);
       }
 
@@ -4206,9 +4239,6 @@ function createActionButtons(instance, word, definition, modelName, promptName, 
     const finalSaveButton = document.createElement('button');
     finalSaveButton.textContent = 'Save';
     finalSaveButton.className = 'ai-popup-button';
-    finalSaveButton.style.marginLeft = 'auto';
-    // Removed manual margin-left, relying on flex gap
-
 
     finalSaveButton.addEventListener('click', (ev) => {
       ev.stopPropagation();
@@ -4261,17 +4291,12 @@ function createActionButtons(instance, word, definition, modelName, promptName, 
           showPopupToast(instance, 'Saved to list');
         }
       });
-
-      // --- REMOVED: Auto-close logic ---
-      // We keep the popup open so the user can continue interacting.
-      // window.getSelection().removeAllRanges();
-      // setTimeout(() => removePopup(), 800);
     });
 
-    // 4. Add the new controls directly to the container
+    // 4. Add controls directly to the container: TTS & PDF on left, list & Save on right
     actionsContainer.appendChild(speakButton); // Add speaker first
     actionsContainer.appendChild(pdfButton); // Add PDF button next
-    actionsContainer.appendChild(pinButton); // Add Pin button next
+    listSelector.style.marginLeft = 'auto';
     actionsContainer.appendChild(listSelector);
     actionsContainer.appendChild(finalSaveButton);
   });
@@ -4325,12 +4350,15 @@ function createFollowupInput(instance, word) {
   input.placeholder = 'Ask a follow-up question...';
 
   const sendBtn = document.createElement('button');
+  sendBtn.type = 'button';
   sendBtn.className = 'ai-popup-followup-send';
-  sendBtn.textContent = 'Send';
+  sendBtn.innerHTML = iconSvg('send', 13);
+  sendBtn.title = 'Send question';
 
   const micBtn = document.createElement('button');
+  micBtn.type = 'button';
   micBtn.className = 'ai-popup-followup-mic';
-  micBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>';
+  micBtn.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>';
   micBtn.title = 'Type by speaking';
   const inputWrapper = document.createElement('div');
   inputWrapper.style.position = 'relative';
@@ -4339,9 +4367,9 @@ function createFollowupInput(instance, word) {
   inputWrapper.style.alignItems = 'center';
   inputWrapper.appendChild(input);
   inputWrapper.appendChild(micBtn);
+  inputWrapper.appendChild(sendBtn);
 
   container.appendChild(inputWrapper);
-  container.appendChild(sendBtn);
   popup.appendChild(container);
 
   // Interaction handlers to avoid popup closing while typing
