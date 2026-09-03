@@ -3714,9 +3714,23 @@ function renderSidebar() {
     visibleHighlights.forEach(hl => {
         if (filterPage === null && hl.pageNumber !== dividerPage) {
             dividerPage = hl.pageNumber;
+            const targetPage = dividerPage;
             const divider = document.createElement('div');
             divider.className = 'sidebar-page-divider';
-            divider.textContent = `Page ${dividerPage} · ${countsPerPage.get(dividerPage) || 1}`;
+            divider.tabIndex = 0;
+            divider.setAttribute('role', 'button');
+            divider.setAttribute('aria-label', `Jump to page ${targetPage}`);
+            divider.title = `Jump to page ${targetPage}`;
+            divider.textContent = `Page ${targetPage} · ${countsPerPage.get(targetPage) || 1}`;
+            divider.addEventListener('click', () => {
+                scrollToPage(targetPage);
+            });
+            divider.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    scrollToPage(targetPage);
+                }
+            });
             sidebarContent.appendChild(divider);
         }
         const item = document.createElement('div');

@@ -758,6 +758,19 @@ body, html {
     color: var(--text-muted);
     border-bottom: 1px solid var(--border);
     box-sizing: border-box;
+    cursor: pointer;
+    user-select: none;
+    transition: color 0.15s, background-color 0.15s;
+}
+
+.sidebar-page-divider:hover {
+    color: var(--accent);
+    background-color: var(--control-hover-bg);
+}
+
+.sidebar-page-divider:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
 }
 
 #sidebar-content-comments > .sidebar-item:first-child {
