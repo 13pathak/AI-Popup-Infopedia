@@ -45,6 +45,43 @@ function updateActivePopupsTheme() {
 const googleSansUrl = chrome.runtime.getURL('fonts/GoogleSans-VariableFont_GRAD,opsz,wght.ttf');
 const googleSansItalicUrl = chrome.runtime.getURL('fonts/GoogleSans-Italic-VariableFont_GRAD,opsz,wght.ttf');
 
+function ensurePopupFontsInjected() {
+  if (document.getElementById('ai-popup-font-face')) return;
+  try {
+    const style = document.createElement('style');
+    style.id = 'ai-popup-font-face';
+    style.textContent = `
+      @font-face {
+        font-family: 'Google Sans';
+        src: url('${googleSansUrl}') format('truetype');
+        font-weight: 100 900;
+        font-style: normal;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: 'Google Sans';
+        src: url('${googleSansItalicUrl}') format('truetype');
+        font-weight: 100 900;
+        font-style: italic;
+        font-display: swap;
+      }
+    `;
+    (document.head || document.documentElement).appendChild(style);
+  } catch (e) {}
+
+  if (typeof FontFace !== 'undefined' && document.fonts) {
+    try {
+      const fNormal = new FontFace('Google Sans', `url('${googleSansUrl}')`, { weight: '100 900', style: 'normal' });
+      const fItalic = new FontFace('Google Sans', `url('${googleSansItalicUrl}')`, { weight: '100 900', style: 'italic' });
+      fNormal.load().then((f) => document.fonts.add(f)).catch(() => {});
+      fItalic.load().then((f) => document.fonts.add(f)).catch(() => {});
+    } catch (_) {}
+  }
+}
+
+// Preload fonts into the document
+ensurePopupFontsInjected();
+
 const popupStyles = `
   @font-face {
     font-family: 'Google Sans';
@@ -160,6 +197,10 @@ const popupStyles = `
       --popup-error-text: #dc2626;
       color-scheme: light;
     }
+  }
+
+  button, input, textarea, select {
+    font-family: inherit;
   }
 
   #ai-definition-popup {
@@ -1036,8 +1077,7 @@ const popupStyles = `
     background: var(--popup-text-muted);
     flex-shrink: 0;
   }
-  .ai-compare-dot.streaming,
-  .ai-compare-dot.waiting {
+  .ai-compare-dot.streaming {
     background: rgba(var(--popup-accent-rgb), 1);
     animation: ai-popup-dot-bounce 1.2s ease-in-out infinite;
   }
@@ -1167,8 +1207,8 @@ const popupStyles = `
   }
   .ai-compare-nav-btn:disabled { opacity: 0.15; cursor: default; }
   .ai-compare-nav-btn:not(:disabled):hover {
+    opacity: 0.9;
     color: var(--popup-text);
-    opacity: 1;
     transform: scale(1.1);
   }
   .ai-compare-dots {
@@ -1182,11 +1222,10 @@ const popupStyles = `
     border-radius: 50%;
     border: 1px solid var(--popup-field-border);
     background: var(--popup-field-bg);
-    cursor: pointer;
     padding: 0;
-    transition: all 140ms ease;
+    cursor: pointer;
+    transition: all 150ms ease;
   }
-  .ai-compare-dotnav.streaming { border-color: rgba(var(--popup-accent-rgb), 1); }
   .ai-compare-dotnav.done { border-color: rgba(52, 211, 153, 0.8); }
   .ai-compare-dotnav.error { border-color: var(--popup-error-text); }
   .ai-compare-dotnav.active {
@@ -1868,6 +1907,7 @@ function collectSourceMetadata() {
 
 // --- NEW: Function to show intermediate 'Open' button ---
 function showOpenButtonPopup(rect, selectedText, implicitContext) {
+  ensurePopupFontsInjected();
   const popupContainer = document.createElement('div');
   popupContainer.style.all = 'initial';
   popupContainer.style.position = 'fixed';
@@ -2487,6 +2527,7 @@ function buildLoadingHtml(label) {
 
 // --- UPDATED showPopup ---
 function showPopup(x, y, content) {
+  ensurePopupFontsInjected();
   // Do NOT remove existing popups. Stack them.
 
   // Create the isolated container
