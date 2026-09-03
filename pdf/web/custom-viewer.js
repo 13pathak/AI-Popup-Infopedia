@@ -3891,13 +3891,19 @@ function focusSidebarComment(hlId) {
     const container = document.getElementById('sidebar-content-comments');
     let item = container && container.querySelector(`.sidebar-item[data-hl-id="${hlId}"]`);
     if (!item && commentsCurrentPageOnly) {
-        // The current-page filter is hiding this card (the click landed on
-        // a partially visible neighbouring page). Drop the filter and
-        // re-render. Safe re-render-wise: clicking in the page already
-        // blurred — and change-committed — any note textarea.
-        commentsCurrentPageOnly = false;
-        renderSidebar();
-        item = container && container.querySelector(`.sidebar-item[data-hl-id="${hlId}"]`);
+        // The current-page filter was hiding this card because the clicked
+        // highlight is on an adjacent visible page. Rather than silently
+        // deactivating the user's filter for the rest of the session, follow
+        // the user's focus: switch the filter to that page and keep
+        // commentsCurrentPageOnly active.
+        const targetHl = highlights.find(h => h.id === hlId);
+        if (targetHl && targetHl.pageNumber) {
+            autoSavedLastPage = targetHl.pageNumber;
+            const pageNumInput = document.getElementById('page_num');
+            if (pageNumInput) pageNumInput.value = targetHl.pageNumber;
+            renderSidebar();
+            item = container && container.querySelector(`.sidebar-item[data-hl-id="${hlId}"]`);
+        }
     }
     // Still missing means the list was never rendered for this highlight;
     // beyond the filter case above, never force a re-render here — it
