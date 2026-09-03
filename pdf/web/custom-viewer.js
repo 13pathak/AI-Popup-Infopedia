@@ -3508,6 +3508,9 @@ function switchTab(tabName) {
     contentOutline.classList.add('hidden');
     contentBookmarks.classList.add('hidden');
     
+    const headerActions = document.getElementById('sidebar-header-actions');
+    if (headerActions) headerActions.innerHTML = '';
+    
     if (tabName === 'comments') {
         tabComments.classList.add('active');
         contentComments.classList.remove('hidden');
@@ -3534,6 +3537,8 @@ document.getElementById('close_sidebar').addEventListener('click', () => {
     tabComments.classList.remove('active');
     tabOutline.classList.remove('active');
     tabBookmarks.classList.remove('active');
+    const headerActions = document.getElementById('sidebar-header-actions');
+    if (headerActions) headerActions.innerHTML = '';
     window.dispatchEvent(new Event('resize'));
 });
 
@@ -3608,7 +3613,11 @@ function renderSidebar() {
     const prevScrollTop = sidebarContent.scrollTop;
     sidebarContent.innerHTML = '';
     
+    const headerActions = document.getElementById('sidebar-header-actions');
+    const isCommentsActive = tabComments && tabComments.classList.contains('active');
+
     if (highlights.length === 0) {
+        if (headerActions && isCommentsActive) headerActions.innerHTML = '';
         sidebarContent.innerHTML = sidebarEmptyHtml('messageSquare', 'No comments or highlights yet.', 'Select text in the document to highlight it, then add a comment.');
         return;
     }
@@ -3629,24 +3638,30 @@ function renderSidebar() {
         ? sortedHighlights
         : sortedHighlights.filter(hl => hl.pageNumber === filterPage);
 
-    if (sidebarTitle && tabComments.classList.contains('active')) {
+    if (sidebarTitle && isCommentsActive) {
         sidebarTitle.textContent = filterPage === null
             ? `Comments (${sortedHighlights.length})`
             : `Comments (${visibleHighlights.length} of ${sortedHighlights.length})`;
     }
 
-    // Filter chip rides above the cards. Clicking re-renders through this
-    // same path; the filter-page change below resets the list to the top.
+    // Filter chip rides in the pinned header actions bar so it never scrolls
+    // away out of view as users browse comments deep into the document.
     const chip = document.createElement('button');
     chip.type = 'button';
     chip.className = 'sidebar-filter-chip' + (filterPage === null ? '' : ' active');
     chip.textContent = filterPage === null ? 'Current page' : `Current page (${filterPage})`;
     chip.title = 'Show only the comments on the page you are viewing';
+    chip.setAttribute('aria-pressed', String(filterPage !== null));
+    chip.setAttribute('aria-label', filterPage === null ? 'Filter comments to current page' : `Filtering comments to page ${filterPage}`);
     chip.addEventListener('click', () => {
         commentsCurrentPageOnly = !commentsCurrentPageOnly;
         renderSidebar();
     });
-    sidebarContent.appendChild(chip);
+
+    if (headerActions && isCommentsActive) {
+        headerActions.innerHTML = '';
+        headerActions.appendChild(chip);
+    }
 
     // New content class under the filter (chip toggled, or the viewer
     // moved to a different page) restarts the list at the top; plain

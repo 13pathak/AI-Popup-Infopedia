@@ -473,6 +473,15 @@ body, html {
     font-size: 14px;
     font-weight: 600;
     color: var(--text);
+    white-space: nowrap;
+}
+
+#sidebar-header-actions {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
 }
 
 #sidebar-header-actions button {
@@ -693,30 +702,52 @@ body, html {
     }
 }
 
-/* Current-page filter chip above the comments list (renderSidebar) */
+/* Current-page filter chip in the pinned sidebar header (renderSidebar) */
 .sidebar-filter-chip {
     display: inline-flex;
     align-items: center;
     font-family: inherit;
     font-size: 11px;
+    font-weight: 500;
     border: 1px solid var(--border-control);
     background: var(--surface-raised);
     color: var(--text-muted);
     border-radius: 999px;
-    padding: 4px 12px;
-    margin: 12px 0 12px;
+    padding: 3px 10px;
+    margin: 0;
     cursor: pointer;
+    line-height: 1.3;
+    white-space: nowrap;
+    box-sizing: border-box;
+    transition: color 0.15s, border-color 0.15s, background-color 0.15s;
 }
 
-.sidebar-filter-chip:hover {
+#sidebar-header-actions .sidebar-filter-chip {
+    font-size: 11px;
+    padding: 3px 10px;
+    border: 1px solid var(--border-control);
+    background: var(--surface-raised);
+    color: var(--text-muted);
+    border-radius: 999px;
+    line-height: 1.3;
+}
+
+#sidebar-header-actions .sidebar-filter-chip:hover {
     border-color: var(--border-control-strong);
     color: var(--text);
+    background: var(--control-hover-bg);
 }
 
-.sidebar-filter-chip.active {
+#sidebar-header-actions .sidebar-filter-chip.active {
     border-color: var(--accent);
     color: var(--accent);
-    background: rgba(var(--accent-rgb), 0.1);
+    background: rgba(var(--accent-rgb), 0.12);
+    font-weight: 600;
+}
+
+#sidebar-header-actions .sidebar-filter-chip:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
 }
 
 /* Sticky "Page N" group header between comment cards. Edge-to-edge margins
@@ -726,7 +757,7 @@ body, html {
     top: 0;
     z-index: 2;
     background: var(--surface-alt);
-    margin: 4px -14px 8px -14px;
+    margin: 0 -14px 8px -14px;
     padding: 7px 14px 6px 14px;
     font-size: 10.5px;
     font-weight: 700;
@@ -735,6 +766,10 @@ body, html {
     color: var(--text-muted);
     border-bottom: 1px solid var(--border);
     box-sizing: border-box;
+}
+
+#sidebar-content-comments > .sidebar-item:first-child {
+    margin-top: 12px;
 }
 
 .sidebar-item-header {
