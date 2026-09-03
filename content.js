@@ -67,7 +67,7 @@ const popupStyles = `
     font-family: var(--popup-font-family);
     --popup-bg: linear-gradient(145deg, #252a35 0%, #171b24 100%);
     --popup-text: #eef3f8;
-    --popup-text-muted: #94a3b8;
+    --popup-text-muted: #a8b8cc;
     --popup-text-header: #f8fafc;
     --popup-border: rgba(255, 255, 255, 0.1);
     --popup-card-bg: #111c2c;
@@ -88,8 +88,8 @@ const popupStyles = `
     --popup-dropdown-hover: #334155;
     --popup-dropdown-border: #475569;
     --popup-focus-ring-rgb: 45, 212, 191;
-    --popup-context-label: #94a3b8; /* muted: blue is reserved for links */
-    --popup-role-user: #94a3b8;
+    --popup-context-label: #a8b8cc; /* muted: blue is reserved for links */
+    --popup-role-user: #a8b8cc;
     --popup-role-ai: #2dd4bf; /* mint accent */
     --popup-link-color: #a5d6ff;
     --popup-error-text: #f87171;
@@ -168,7 +168,7 @@ const popupStyles = `
     color: var(--popup-text);
     border: 1px solid var(--popup-border);
     border-radius: 20px;
-    padding: 16px 14px 14px 14px;
+    padding: 18px 16px 16px 16px;
     font-family: var(--popup-font-family);
     font-size: 14px;
     line-height: 1.5;
@@ -178,7 +178,7 @@ const popupStyles = `
     max-height: 85vh; /* Keep the popup within screen bounds */
     display: flex;
     flex-direction: column;
-    box-shadow: 0 18px 42px var(--popup-shadow-1), 0 3px 12px var(--popup-shadow-2), inset 0 1px 0 rgba(255, 255, 255, 0.09);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 18px 42px var(--popup-shadow-1), 0 3px 12px var(--popup-shadow-2), inset 0 1px 0 rgba(255, 255, 255, 0.09);
     pointer-events: auto; /* Re-enable pointer events for the popup itself */
     z-index: 1; /* z-index is now relative to its container */
     animation: ai-popup-enter 180ms ease-out;
@@ -292,7 +292,7 @@ const popupStyles = `
   .custom-select-container { position: relative; flex-grow: 1; min-width: 110px; }
   .custom-select {
       display: flex; align-items: center; justify-content: space-between;
-      height: 30px; box-sizing: border-box;
+      height: 33px; box-sizing: border-box;
       padding: 0 10px; background-color: var(--popup-field-bg);
       border: 1px solid var(--popup-field-border); border-radius: 999px;
       cursor: pointer; user-select: none; color: var(--popup-field-text);
@@ -300,6 +300,7 @@ const popupStyles = `
   }
   .custom-select-value {
       min-width: 0;
+      flex: 1 1 auto;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
