@@ -402,7 +402,9 @@ const popupStyles = `
   #ai-popup-content {
     overflow-y: auto; /* Scroll if content overflows */
     padding: 2px 5px 2px 1px; /* Spacing for the scrollbar */
-    line-height: 1.62;
+    font-size: 14px;
+    line-height: 1.68;
+    text-align: left;
   }
 
   /* Thin rounded scrollbars, accent-muted (shared pattern with options page and PDF viewer) */
@@ -427,6 +429,7 @@ const popupStyles = `
   #ai-popup-content p {
     margin-top: 0;
     margin-bottom: 12px;
+    text-align: left;
   }
 
   #ai-popup-content p:last-child {
@@ -562,15 +565,17 @@ const popupStyles = `
   }
 
   /* --- STYLES FOR BUTTONS --- */
+  /* Save-row: transparent (not a crowded pill). Icon buttons sit left,
+     list picker + primary Save group right via margin-left:auto. */
   .ai-popup-actions {
     display: flex;
     align-items: center; /* Vertically center items */
-    gap: 6px;
+    gap: 8px;
     margin-top: 10px;
-    padding: 6px 8px;
-    background: rgba(var(--popup-accent-rgb), 0.04);
-    border: 1px solid var(--popup-border);
-    border-radius: 16px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    border-radius: 0;
   }
 
   .ai-popup-button {
@@ -596,7 +601,24 @@ const popupStyles = `
   .ai-popup-button:hover {
     background: rgba(var(--popup-accent-rgb), 0.24);
     border-color: rgba(var(--popup-accent-rgb), 0.55);
-    transform: translateY(-1px);
+  }
+
+  /* Primary Save: solid accent, pairs with the 33px list picker. */
+  .ai-popup-button-save {
+    background: var(--popup-accent-btn-bg);
+    color: var(--popup-accent-btn-text);
+    border-color: var(--popup-accent-btn-border);
+    height: 34px;
+    padding: 0 18px;
+    font-size: 13px;
+  }
+  .ai-popup-button-save:hover {
+    background: var(--popup-accent-btn-hover);
+    border-color: var(--popup-accent-btn-hover);
+  }
+  .ai-popup-button:disabled {
+    opacity: 0.6;
+    cursor: default;
   }
 
   /* Resume button under the empty hotkey popup's greeting (Issue #26):
@@ -626,8 +648,8 @@ const popupStyles = `
 
   /* SPEECH & PDF BUTTONS */
   #ai-popup-speak-btn, #ai-popup-pdf-btn {
-    width: 28px;
-    height: 28px;
+    width: 32px;
+    height: 32px;
     padding: 0;
     font-size: 15px;
     color: var(--popup-btn-icon-color);
@@ -637,14 +659,14 @@ const popupStyles = `
     justify-content: center;
     flex-shrink: 0;
     background: transparent;
-    border: none;
+    border: 1px solid transparent;
     border-radius: 50%;
-    transition: transform 140ms ease, background-color 140ms ease;
+    transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease, transform 140ms ease;
   }
   #ai-popup-speak-btn:hover, #ai-popup-pdf-btn:hover {
     color: var(--popup-btn-icon-hover);
-    background: rgba(var(--popup-accent-rgb), 0.15);
-    transform: translateY(-1px);
+    background: rgba(var(--popup-accent-rgb), 0.12);
+    border-color: rgba(var(--popup-accent-rgb), 0.4);
   }
   #ai-popup-speak-btn:active, #ai-popup-pdf-btn:active {
     transform: translateY(0) scale(0.98);
@@ -686,6 +708,8 @@ const popupStyles = `
     display: flex;
     position: relative;
     margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--popup-border);
     align-items: center;
   }
   
@@ -695,13 +719,20 @@ const popupStyles = `
     color: var(--popup-field-text);
     border: 1px solid var(--popup-field-border);
     border-radius: 999px;
-    padding: 8px 66px 8px 14px;
+    padding: 10px 74px 10px 16px;
     font-family: inherit;
     font-size: 12.5px;
     outline: none;
     width: 100%;
     box-sizing: border-box;
     transition: border-color 140ms ease, box-shadow 140ms ease;
+  }
+
+  /* Mouse users get the same ring keyboard users get via :focus-visible. */
+  #ai-popup-followup-input:focus {
+    outline: none;
+    border-color: rgba(var(--popup-focus-ring-rgb), 0.9);
+    box-shadow: 0 0 0 3px rgba(var(--popup-focus-ring-rgb), 0.35);
   }
   
   #ai-popup-followup-input::placeholder {
@@ -717,8 +748,8 @@ const popupStyles = `
     color: var(--popup-accent-btn-text);
     border: none;
     border-radius: 50%;
-    width: 26px;
-    height: 26px;
+    width: 30px;
+    height: 30px;
     padding: 0;
     cursor: pointer;
     display: inline-flex;
@@ -738,12 +769,13 @@ const popupStyles = `
   /* --- Follow-up Mic Button --- */
   .ai-popup-followup-mic {
     position: absolute;
-    right: 35px;
+    right: 39px;
     top: 50%;
     transform: translateY(-50%);
     background: transparent;
     color: var(--popup-text-muted);
-    border: none;
+    border: 1px solid transparent;
+    box-sizing: border-box;
     padding: 4px;
     cursor: pointer;
     font-size: 13px;
@@ -759,6 +791,7 @@ const popupStyles = `
   .ai-popup-followup-mic:hover {
     color: var(--popup-field-text);
     background: rgba(var(--popup-accent-rgb), 0.15);
+    border-color: rgba(var(--popup-accent-rgb), 0.4);
   }
 
   .ai-popup-followup-mic.recording {
@@ -859,7 +892,7 @@ const popupStyles = `
   .ai-feedback-btn {
     background: var(--popup-field-bg);
     border: 1px solid var(--popup-field-border);
-    border-radius: 8px;
+    border-radius: 10px;
     color: var(--popup-text);
     padding: 5px 9px;
     font-size: 11px;
@@ -896,7 +929,7 @@ const popupStyles = `
     background: var(--popup-accent-btn-bg);
     color: var(--popup-accent-btn-text);
     border: 1px solid var(--popup-accent-btn-border);
-    border-radius: 8px;
+    border-radius: 10px;
     cursor: pointer;
     padding: 4px 8px;
     font-size: 12px;
@@ -1038,7 +1071,9 @@ const popupStyles = `
   .ai-compare-status.is-error { color: var(--popup-error-text); }
   .ai-compare-status.is-error svg { opacity: 1; }
   .ai-compare-body {
-    font-size: 13.5px;
+    font-size: 14px;
+    line-height: 1.68;
+    text-align: left;
     overflow-y: auto;
     overscroll-behavior: contain;
     max-height: 38vh;
@@ -1052,7 +1087,7 @@ const popupStyles = `
     background: rgba(var(--popup-accent-rgb), 0.4);
     border-radius: 8px;
   }
-  .ai-compare-body p { margin-top: 0; margin-bottom: 8px; }
+  .ai-compare-body p { margin-top: 0; margin-bottom: 12px; text-align: left; }
   .ai-compare-body p:last-child { margin-bottom: 0; }
   /* Stacked conversation turns: follow-up answers land below earlier ones,
      separated by a hairline so the thread reads clearly. */
