@@ -3649,10 +3649,14 @@ function renderSidebar() {
     const chip = document.createElement('button');
     chip.type = 'button';
     chip.className = 'sidebar-filter-chip' + (filterPage === null ? '' : ' active');
-    chip.textContent = filterPage === null ? 'Current page' : `Current page (${filterPage})`;
-    chip.title = 'Show only the comments on the page you are viewing';
+    chip.textContent = filterPage === null ? 'Current page' : `Page ${filterPage} only`;
+    chip.title = filterPage === null
+        ? `Show only comments on current page (Page ${autoSavedLastPage})`
+        : `Showing Page ${filterPage} only — click to show all comments`;
     chip.setAttribute('aria-pressed', String(filterPage !== null));
-    chip.setAttribute('aria-label', filterPage === null ? 'Filter comments to current page' : `Filtering comments to page ${filterPage}`);
+    chip.setAttribute('aria-label', filterPage === null
+        ? `Filter comments to current page (Page ${autoSavedLastPage})`
+        : `Filter active: showing Page ${filterPage} only. Click to show all comments.`);
     chip.addEventListener('click', () => {
         commentsCurrentPageOnly = !commentsCurrentPageOnly;
         renderSidebar();
