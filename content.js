@@ -292,7 +292,8 @@ const popupStyles = `
   .custom-select-container { position: relative; flex-grow: 1; min-width: 110px; }
   .custom-select {
       display: flex; align-items: center; justify-content: space-between;
-      padding: 6px 9px; background-color: var(--popup-field-bg);
+      height: 30px; box-sizing: border-box;
+      padding: 0 10px; background-color: var(--popup-field-bg);
       border: 1px solid var(--popup-field-border); border-radius: 8px;
       cursor: pointer; user-select: none; color: var(--popup-field-text);
       font-size: 12.5px; font-family: inherit;
@@ -555,7 +556,12 @@ const popupStyles = `
     background: rgba(var(--popup-accent-rgb), 0.14);
     border: 1px solid rgba(var(--popup-accent-rgb), 0.35);
     border-radius: 7px;
-    padding: 5px 12px;
+    height: 30px;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 12px;
     white-space: nowrap; /* Prevent wrapping */
     flex-shrink: 0; /* Prevent button from shrinking */
     transition: all 140ms ease;
@@ -683,9 +689,9 @@ const popupStyles = `
     background: var(--popup-accent-btn-bg);
     color: var(--popup-accent-btn-text);
     border: none;
-    border-radius: 6px;
-    width: 25px;
-    height: 25px;
+    border-radius: 50%;
+    width: 26px;
+    height: 26px;
     padding: 0;
     cursor: pointer;
     display: inline-flex;
