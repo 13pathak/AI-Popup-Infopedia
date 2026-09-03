@@ -14,7 +14,9 @@ const VIEWER_ICON_PATHS = {
   list: '<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>',
   trash: '<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
   edit: '<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>',
-  user: '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>'
+  user: '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+  chevronDown: '<polyline points="6 9 12 15 18 9"/>',
+  chevronUp: '<polyline points="18 15 12 9 6 15"/>'
 };
 
 function viewerIconSvg(name, size = 14) {
@@ -3583,6 +3585,18 @@ function refreshCommentsForPageFilter() {
     renderSidebar();
 }
 
+// Heuristic check for whether text likely overflows maxLines in the sidebar.
+// CJK and full-width characters count as 2 Latin visual units.
+// Used as fallback when renderSidebar runs while the sidebar is hidden.
+function estimateTextExceedsLines(str, maxLines = 3) {
+    if (!str) return false;
+    let weight = 0;
+    for (let i = 0; i < str.length; i++) {
+        weight += str.charCodeAt(i) > 0x2e80 ? 2 : 1;
+    }
+    return weight > maxLines * 38;
+}
+
 function renderSidebar() {
     const sidebarContent = document.getElementById('sidebar-content-comments');
     if (!sidebarContent) return;
@@ -3670,6 +3684,9 @@ function renderSidebar() {
         }
         const item = document.createElement('div');
         item.className = 'sidebar-item';
+        item.tabIndex = 0;
+        item.setAttribute('role', 'article');
+        item.setAttribute('aria-label', `${typeLabel}, Page ${hl.pageNumber}`);
         // Locates this card from a page-side highlight click
         // (focusSidebarComment); renderSidebar runs on every mutation via
         // saveHighlights, so the attribute always matches the live list.
@@ -3748,21 +3765,40 @@ function renderSidebar() {
         item.appendChild(header);
         
         // Highlighted text snippet
+        let quoteToggleBtn = null;
+        let quoteTextDiv = null;
         if (hl.text) {
-            const textDiv = document.createElement('div');
-            textDiv.className = 'sidebar-item-text';
-            textDiv.style.borderLeftColor = hl.color || 'var(--accent)';
-            // The quote is clamped to its first four words so long
-            // sentences can't fill the card; the full text stays one hover
-            // away (title tooltip) and, of course, highlighted in the page.
-            // Display-only — hl.text itself is never modified, so exports
-            // and the AI popup keep the complete sentence.
-            const words = String(hl.text).trim().split(/\s+/);
-            textDiv.textContent = words.length > 4
-                ? words.slice(0, 4).join(' ') + '…'
-                : String(hl.text).trim();
-            textDiv.title = hl.text;
-            item.appendChild(textDiv);
+            const trimmed = String(hl.text).trim();
+            quoteTextDiv = document.createElement('div');
+            quoteTextDiv.className = 'sidebar-item-text';
+            quoteTextDiv.style.borderLeftColor = hl.color || 'var(--accent)';
+            // The full text remains in textContent and title. Visual clamping
+            // to 3 lines is handled by CSS (-webkit-line-clamp: 3) so that context
+            // is preserved and non-Latin scripts (CJK, Thai) are clamped correctly
+            // by the browser typography engine.
+            quoteTextDiv.textContent = trimmed;
+            quoteTextDiv.title = trimmed;
+            item.appendChild(quoteTextDiv);
+
+            // In-place expand/collapse button for quotes that exceed the 3-line clamp.
+            // Accessible to touchscreens (direct tap target) and keyboard navigation.
+            quoteToggleBtn = document.createElement('button');
+            quoteToggleBtn.type = 'button';
+            quoteToggleBtn.className = 'sidebar-item-text-toggle';
+            quoteToggleBtn.style.display = 'none';
+            quoteToggleBtn.setAttribute('aria-expanded', 'false');
+            quoteToggleBtn.setAttribute('aria-label', 'Show full quote');
+            quoteToggleBtn.innerHTML = `Show more ${viewerIconSvg('chevronDown', 12)}`;
+            quoteToggleBtn.addEventListener('click', (e) => {
+                e.stopPropagation(); // prevent jumping to page highlight
+                const isExpanded = quoteTextDiv.classList.toggle('is-expanded');
+                quoteToggleBtn.setAttribute('aria-expanded', String(isExpanded));
+                quoteToggleBtn.setAttribute('aria-label', isExpanded ? 'Show less quote' : 'Show full quote');
+                quoteToggleBtn.innerHTML = isExpanded
+                    ? `Show less ${viewerIconSvg('chevronUp', 12)}`
+                    : `Show more ${viewerIconSvg('chevronDown', 12)}`;
+            });
+            item.appendChild(quoteToggleBtn);
         }
         
         // Note Input (Auto-growing textarea)
@@ -3792,9 +3828,32 @@ function renderSidebar() {
             }
             scrollToHighlight(hl);
         });
+
+        // Keyboard navigation: Enter or Space on card jumps to highlight
+        item.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                if (e.target.tagName.toLowerCase() === 'textarea' || e.target.closest('button')) {
+                    return; // Let user type or activate button
+                }
+                e.preventDefault();
+                scrollToHighlight(hl);
+            }
+        });
         
         sidebarContent.appendChild(item);
         autoResize();
+
+        // Reveal the "Show more" toggle if the quote text overflows 3 lines.
+        // Measures actual scrollHeight if connected to a visible container,
+        // or uses a script-aware character weight estimation as fallback.
+        if (quoteTextDiv && quoteToggleBtn) {
+            const trimmed = String(hl.text).trim();
+            const isOverflowing = quoteTextDiv.scrollHeight > quoteTextDiv.clientHeight + 1;
+            const isLikelyLong = estimateTextExceedsLines(trimmed, 3);
+            if ((quoteTextDiv.clientHeight > 0 && isOverflowing) || (quoteTextDiv.clientHeight === 0 && isLikelyLong)) {
+                quoteToggleBtn.style.display = 'inline-flex';
+            }
+        }
     });
 
     sidebarContent.scrollTop = filterSwitched ? 0 : prevScrollTop;
