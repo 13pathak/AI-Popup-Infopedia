@@ -364,12 +364,12 @@ const popupStyles = `
     min-width: 0;
   }
   #ai-popup-selectors-container .custom-select-container:first-child {
-    flex: 0 1 45%;
-    min-width: 110px;
+    flex: 0 1 38%;
+    min-width: 105px;
   }
   #ai-popup-selectors-container .custom-select-container:last-child {
-    flex: 1 1 55%;
-    min-width: 120px;
+    flex: 1 1 62%;
+    min-width: 135px;
   }
 
   /* Wrapper for the AI-generated text */
