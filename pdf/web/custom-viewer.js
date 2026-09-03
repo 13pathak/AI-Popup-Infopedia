@@ -231,6 +231,14 @@ const MAX_SCALE = 5.0;
 const viewerContainer = document.getElementById('viewer');
 const pageCountSpan = document.getElementById('page_count');
 const zoomLevelSpan = document.getElementById('zoom_level');
+const sidebar = document.getElementById('sidebar');
+const tabComments = document.getElementById('icon-tab-comments');
+const tabOutline = document.getElementById('icon-tab-outline');
+const tabBookmarks = document.getElementById('icon-tab-bookmarks');
+const contentComments = document.getElementById('sidebar-content-comments');
+const contentOutline = document.getElementById('sidebar-content-outline');
+const contentBookmarks = document.getElementById('sidebar-content-bookmarks');
+const sidebarTitle = document.getElementById('sidebar-title');
 
 // Store highlights in memory: { id: 1, pageNum: 1, rects: [], color: '#FFFF98', text: '...' }
 let highlights = [];
@@ -2900,12 +2908,14 @@ document.getElementById('save_pdf').addEventListener('click', async () => {
             
             if (quadPoints.length === 0) return;
 
+            const isMarkupLine = hl.markupType === 'Underline' || hl.markupType === 'StrikeOut';
             const annotObj = {
                 Type: 'Annot',
                 Subtype: hl.markupType || 'Highlight',
                 Rect: [minX, minY, maxX, maxY], // Bounding box of all quads
                 QuadPoints: quadPoints,
                 C: [colorRgb.r, colorRgb.g, colorRgb.b],
+                CA: isMarkupLine ? 1.0 : 0.5, // Match CSS 0.5 opacity for highlights
                 F: 4 // Print flag
             };
 
@@ -3504,15 +3514,6 @@ function scrollToPage(pageNumber) {
 }
 
 // ==================== Sidebar & Outline Feature ====================
-const sidebar = document.getElementById('sidebar');
-const tabComments = document.getElementById('icon-tab-comments');
-const tabOutline = document.getElementById('icon-tab-outline');
-const tabBookmarks = document.getElementById('icon-tab-bookmarks');
-const contentComments = document.getElementById('sidebar-content-comments');
-const contentOutline = document.getElementById('sidebar-content-outline');
-const contentBookmarks = document.getElementById('sidebar-content-bookmarks');
-const sidebarTitle = document.getElementById('sidebar-title');
-
 function switchTab(tabName) {
     if (sidebar.classList.contains('hidden')) {
         sidebar.classList.remove('hidden');
@@ -3733,6 +3734,16 @@ function renderSidebar() {
             });
             sidebarContent.appendChild(divider);
         }
+        let toolIconName = 'highlighter';
+        let typeLabel = 'Highlighted Text';
+        if (hl.markupType === 'Underline') {
+            toolIconName = 'edit';
+            typeLabel = 'Underline';
+        } else if (hl.markupType === 'StrikeOut') {
+            toolIconName = 'edit';
+            typeLabel = 'Strikethrough';
+        }
+
         const item = document.createElement('div');
         item.className = 'sidebar-item';
         item.tabIndex = 0;
@@ -3755,16 +3766,6 @@ function renderSidebar() {
         avatar.className = 'sidebar-item-avatar';
         avatar.style.borderColor = hl.color || 'var(--border-control)';
         avatar.style.backgroundColor = hl.color ? `${hl.color}22` : 'var(--surface-inset)';
-        
-        let toolIconName = 'highlighter';
-        let typeLabel = 'Highlighted Text';
-        if (hl.markupType === 'Underline') {
-            toolIconName = 'edit';
-            typeLabel = 'Underline';
-        } else if (hl.markupType === 'StrikeOut') {
-            toolIconName = 'edit';
-            typeLabel = 'Strikethrough';
-        }
         avatar.innerHTML = viewerIconSvg(toolIconName, 13);
         avatar.style.color = hl.color || 'var(--accent)';
         
