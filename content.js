@@ -167,8 +167,8 @@ const popupStyles = `
     background: var(--popup-bg);
     color: var(--popup-text);
     border: 1px solid var(--popup-border);
-    border-radius: 12px;
-    padding: 14px 14px 14px 14px;
+    border-radius: 20px;
+    padding: 16px 14px 14px 14px;
     font-family: var(--popup-font-family);
     font-size: 14px;
     line-height: 1.5;
@@ -293,8 +293,8 @@ const popupStyles = `
   .custom-select {
       display: flex; align-items: center; justify-content: space-between;
       height: 30px; box-sizing: border-box;
-      padding: 0 10px; background-color: var(--popup-field-bg);
-      border: 1px solid var(--popup-field-border); border-radius: 8px;
+      padding: 0 12px; background-color: var(--popup-field-bg);
+      border: 1px solid var(--popup-field-border); border-radius: 999px;
       cursor: pointer; user-select: none; color: var(--popup-field-text);
       font-size: 12.5px; font-family: inherit;
   }
@@ -326,10 +326,10 @@ const popupStyles = `
   .custom-options {
       position: absolute; bottom: 100%; left: 0; right: 0;
       background-color: var(--popup-dropdown-bg); border: 1px solid var(--popup-dropdown-border);
-      border-radius: 8px; margin-bottom: 6px; max-height: 250px; overflow-y: auto;
+      border-radius: 16px; margin-bottom: 6px; max-height: 250px; overflow-y: auto;
       z-index: 2000; display: none; box-shadow: 0 -4px 10px var(--popup-shadow-1);
       font-size: 13px; font-family: inherit;
-      padding: 5px; transform-origin: bottom center;
+      padding: 6px; transform-origin: bottom center;
   }
   /* Top-row selectors (model/prompt) drop down instead of up */
   .custom-options.drop-down {
@@ -343,7 +343,7 @@ const popupStyles = `
     from { opacity: 0; transform: scale(0.98); }
     to { opacity: 1; transform: scale(1); }
   }
-  .custom-option { padding: 7px 9px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; min-width: 0; color: var(--popup-field-text); }
+  .custom-option { padding: 7px 10px; border-radius: 10px; cursor: pointer; display: flex; align-items: center; min-width: 0; color: var(--popup-field-text); }
   .custom-option:hover { background-color: var(--popup-dropdown-hover); }
   .custom-option.selected { background-color: rgba(var(--popup-accent-rgb), 0.18); }
   .custom-option-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -544,7 +544,7 @@ const popupStyles = `
     padding: 6px 8px;
     background: rgba(var(--popup-accent-rgb), 0.04);
     border: 1px solid var(--popup-border);
-    border-radius: 9px;
+    border-radius: 16px;
   }
 
   .ai-popup-button {
@@ -555,13 +555,13 @@ const popupStyles = `
     cursor: pointer;
     background: rgba(var(--popup-accent-rgb), 0.14);
     border: 1px solid rgba(var(--popup-accent-rgb), 0.35);
-    border-radius: 7px;
+    border-radius: 999px;
     height: 30px;
     box-sizing: border-box;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 0 12px;
+    padding: 0 14px;
     white-space: nowrap; /* Prevent wrapping */
     flex-shrink: 0; /* Prevent button from shrinking */
     transition: all 140ms ease;
@@ -587,6 +587,7 @@ const popupStyles = `
     justify-content: center;
     gap: 7px;
     flex-shrink: 1;
+    border-radius: 999px;
   }
   .ai-popup-restore-btn:hover {
     background: var(--popup-field-bg);
@@ -611,7 +612,7 @@ const popupStyles = `
     flex-shrink: 0;
     background: transparent;
     border: none;
-    border-radius: 7px;
+    border-radius: 50%;
     transition: transform 140ms ease, background-color 140ms ease;
   }
   #ai-popup-speak-btn:hover, #ai-popup-pdf-btn:hover {
@@ -636,7 +637,7 @@ const popupStyles = `
     flex-shrink: 0;
     background: var(--popup-field-bg);
     border: 1px solid var(--popup-field-border);
-    border-radius: 7px;
+    border-radius: 50%;
     transition: transform 140ms ease, background-color 140ms ease, border-color 140ms ease, color 140ms ease;
   }
   #ai-popup-pin-btn:hover {
@@ -667,8 +668,8 @@ const popupStyles = `
     background-color: var(--popup-field-bg);
     color: var(--popup-field-text);
     border: 1px solid var(--popup-field-border);
-    border-radius: 9px;
-    padding: 7px 62px 7px 11px;
+    border-radius: 999px;
+    padding: 8px 66px 8px 14px;
     font-family: inherit;
     font-size: 12.5px;
     outline: none;
@@ -683,7 +684,7 @@ const popupStyles = `
 
   .ai-popup-followup-send {
     position: absolute;
-    right: 4px;
+    right: 5px;
     top: 50%;
     transform: translateY(-50%);
     background: var(--popup-accent-btn-bg);
@@ -711,7 +712,7 @@ const popupStyles = `
   /* --- Follow-up Mic Button --- */
   .ai-popup-followup-mic {
     position: absolute;
-    right: 33px;
+    right: 35px;
     top: 50%;
     transform: translateY(-50%);
     background: transparent;
@@ -724,7 +725,9 @@ const popupStyles = `
     align-items: center;
     justify-content: center;
     transition: all 0.2s;
-    border-radius: 6px;
+    border-radius: 50%;
+    width: 26px;
+    height: 26px;
   }
 
   .ai-popup-followup-mic:hover {
@@ -952,8 +955,8 @@ const popupStyles = `
     flex-direction: column;
     border: 1px solid var(--popup-border);
     background: var(--popup-card-bg);
-    border-radius: 10px;
-    padding: 10px 12px;
+    border-radius: 16px;
+    padding: 12px 14px;
   }
   .ai-compare-header {
     display: flex;
@@ -1073,7 +1076,7 @@ const popupStyles = `
     justify-content: center;
     width: 24px;
     height: 24px;
-    border-radius: 6px;
+    border-radius: 50%;
     border: 1px solid var(--popup-field-border);
     background: var(--popup-field-bg);
     color: var(--popup-text);
