@@ -1066,37 +1066,42 @@ const popupStyles = `
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 8px;
-    padding: 6px 0 2px 0;
+    gap: 4px;
+    padding: 3px 0 1px 0;
     user-select: none;
   }
   .ai-compare-nav-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 24px;
-    height: 24px;
-    border-radius: 50%;
-    border: 1px solid var(--popup-field-border);
-    background: var(--popup-field-bg);
-    color: var(--popup-text);
+    width: 16px;
+    height: 16px;
+    border: none;
+    background: transparent;
+    color: var(--popup-text-muted);
     cursor: pointer;
     padding: 0;
-    transition: all 120ms ease;
+    opacity: 0.45;
+    transition: opacity 120ms ease, color 120ms ease, transform 120ms ease;
   }
-  .ai-compare-nav-btn:disabled { opacity: 0.35; cursor: default; }
+  .ai-compare-nav-btn svg {
+    width: 11px;
+    height: 11px;
+  }
+  .ai-compare-nav-btn:disabled { opacity: 0.15; cursor: default; }
   .ai-compare-nav-btn:not(:disabled):hover {
-    border-color: rgba(var(--popup-accent-rgb), 0.6);
-    background: rgba(var(--popup-accent-rgb), 0.1);
+    opacity: 0.9;
+    color: var(--popup-text);
+    transform: scale(1.1);
   }
   .ai-compare-dots {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 4px;
   }
   .ai-compare-dotnav {
-    width: 8px;
-    height: 8px;
+    width: 5px;
+    height: 5px;
     border-radius: 50%;
     border: 1px solid var(--popup-field-border);
     background: var(--popup-field-bg);
@@ -1107,8 +1112,8 @@ const popupStyles = `
   .ai-compare-dotnav.done { border-color: rgba(52, 211, 153, 0.8); }
   .ai-compare-dotnav.error { border-color: var(--popup-error-text); }
   .ai-compare-dotnav.active {
-    width: 20px;
-    border-radius: 4px;
+    width: 11px;
+    border-radius: 999px;
     background: rgba(var(--popup-accent-rgb), 0.9);
     border-color: transparent;
   }
