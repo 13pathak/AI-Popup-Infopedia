@@ -353,15 +353,49 @@ const popupStyles = `
   .expand-toggle:hover { color: var(--popup-text-header); }
   .indent-spacer { display: inline-block; width: 16px; }
 
-  /* --- Styles for selectors --- */
+  /* --- Styles for selectors: labeled Model (primary) + Prompt (ghost) --- */
   #ai-popup-selectors-container {
     display: flex;
-    gap: 8px;
+    gap: 10px;
     margin-bottom: 12px;
   }
-  #ai-popup-selectors-container .custom-select-container {
+  #ai-popup-selectors-container .selector-field {
     flex: 1 1 50%;
     min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  #ai-popup-selectors-container .custom-select-container {
+    flex: 1 1 auto;
+    min-width: 0;
+    width: 100%;
+  }
+  .selector-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--popup-text-muted);
+    line-height: 1;
+    padding-left: 10px;
+    user-select: none;
+  }
+  .custom-select-leading-icon {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+    margin-right: 6px;
+    opacity: 0.75;
+  }
+  .custom-select-container.is-model .custom-select-leading-icon {
+    color: rgba(var(--popup-accent-rgb), 1);
+    opacity: 1;
+  }
+  .custom-select-container.is-model .custom-select {
+    background: rgba(var(--popup-accent-rgb), 0.14);
+    border-color: rgba(var(--popup-accent-rgb), 0.4);
+    font-weight: 600;
   }
 
   /* Wrapper for the AI-generated text */
@@ -3838,17 +3872,23 @@ function createSelectors(instance, models, prompts, currentModelId, currentPromp
   contextCopy.append(contextQuery);
 
   // Top-right window Pin button (stays pinned on screen)
+  // Kept in the title header row (#ai-popup-context) so it reads as part of
+  // the header, not a floating control. No DOM move — alignment only.
   const pinButton = document.createElement('button');
   pinButton.type = 'button';
   pinButton.id = 'ai-popup-pin-btn';
   pinButton.innerHTML = iconSvg('pin', 15);
   pinButton.title = instance.isPinned ? 'Unpin popup' : 'Pin popup on screen';
+  pinButton.setAttribute('aria-label', pinButton.title);
+  pinButton.setAttribute('aria-pressed', instance.isPinned ? 'true' : 'false');
   pinButton.classList.toggle('pinned', !!instance.isPinned);
   pinButton.onclick = (e) => {
     e.stopPropagation();
     instance.isPinned = !instance.isPinned;
     pinButton.classList.toggle('pinned', instance.isPinned);
     pinButton.title = instance.isPinned ? 'Unpin popup' : 'Pin popup on screen';
+    pinButton.setAttribute('aria-label', pinButton.title);
+    pinButton.setAttribute('aria-pressed', instance.isPinned ? 'true' : 'false');
   };
 
   context.append(contextCopy, pinButton);
@@ -3928,11 +3968,42 @@ function createSelectors(instance, models, prompts, currentModelId, currentPromp
   // Keep the historical ids: follow-up sends read the live model via
   // popup.querySelector('#ai-popup-model-selector').value, and the component
   // exposes the same .value contract on its container element.
+  // Wrapping in .selector-field preserves the ids and .value — the wrapper
+  // is layout-only and never queried for a value.
   modelSelector.id = 'ai-popup-model-selector';
   promptSelector.id = 'ai-popup-prompt-selector';
 
-  container.appendChild(modelSelector);
-  container.appendChild(promptSelector);
+  // P0 hierarchy: Model = primary (accent fill + zap icon), Prompt = ghost.
+  // Labels disambiguate the two pills without changing value semantics.
+  modelSelector.classList.add('is-model');
+  promptSelector.classList.add('is-prompt');
+
+  const addLeadingIcon = (dropdownEl, iconName, ariaLabel) => {
+    const btn = dropdownEl.querySelector('.custom-select');
+    if (!btn || btn.querySelector('.custom-select-leading-icon')) return;
+    const icon = document.createElement('span');
+    icon.className = 'custom-select-leading-icon';
+    icon.setAttribute('aria-hidden', 'true');
+    icon.innerHTML = iconSvg(iconName, 13);
+    btn.prepend(icon);
+    if (ariaLabel) btn.setAttribute('aria-label', ariaLabel);
+  };
+  addLeadingIcon(modelSelector, 'zap', 'AI model');
+  addLeadingIcon(promptSelector, 'messageCircle', 'Prompt style');
+
+  const wrapWithLabel = (dropdownEl, labelText) => {
+    const field = document.createElement('div');
+    field.className = 'selector-field';
+    const label = document.createElement('div');
+    label.className = 'selector-label';
+    label.textContent = labelText;
+    label.setAttribute('aria-hidden', 'true');
+    field.append(label, dropdownEl);
+    return field;
+  };
+
+  container.appendChild(wrapWithLabel(modelSelector, 'Model'));
+  container.appendChild(wrapWithLabel(promptSelector, 'Prompt'));
 
   // Keep the selected text and active model visible above the controls.
   popup.prepend(container);
