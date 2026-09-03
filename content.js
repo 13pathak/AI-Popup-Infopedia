@@ -982,35 +982,47 @@ const popupStyles = `
     border: 1px solid var(--popup-border);
     background: var(--popup-card-bg);
     border-radius: 16px;
-    padding: 12px 14px;
+    padding: 14px 16px;
   }
   .ai-compare-header {
     display: flex;
     align-items: center;
-    gap: 8px;
-    margin-bottom: 8px;
+    gap: 7px;
+    margin-bottom: 10px;
+    padding: 5px 11px;
+    background: rgba(var(--popup-accent-rgb), 0.06);
+    border: 1px solid var(--popup-border);
+    border-radius: 999px;
     min-width: 0;
   }
   .ai-compare-dot {
-    width: 8px;
-    height: 8px;
+    width: 7px;
+    height: 7px;
     border-radius: 50%;
     background: var(--popup-text-muted);
     flex-shrink: 0;
   }
-  .ai-compare-dot.streaming {
+  .ai-compare-dot.streaming,
+  .ai-compare-dot.waiting {
     background: rgba(var(--popup-accent-rgb), 1);
     animation: ai-popup-dot-bounce 1.2s ease-in-out infinite;
   }
   .ai-compare-dot.done { background: rgba(52, 211, 153, 1); }
   .ai-compare-dot.error { background: var(--popup-error-text); }
   .ai-compare-model {
-    font-weight: 700;
-    font-size: 13px;
-    color: var(--popup-text-header);
+    font-weight: 600;
+    font-size: 11.5px;
+    color: var(--popup-text-muted);
+    flex: 1 1 auto;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .ai-compare-model::after {
+    content: '•';
+    margin-left: 7px;
+    opacity: 0.45;
   }
   .ai-compare-status {
     margin-left: auto;
@@ -1018,10 +1030,13 @@ const popupStyles = `
     color: var(--popup-text-muted);
     display: inline-flex;
     align-items: center;
-    gap: 5px;
+    gap: 4px;
     flex-shrink: 0;
   }
   .ai-compare-status svg { opacity: 0.9; flex-shrink: 0; }
+  .ai-compare-status.is-done svg { color: rgba(52, 211, 153, 1); opacity: 1; }
+  .ai-compare-status.is-error { color: var(--popup-error-text); }
+  .ai-compare-status.is-error svg { opacity: 1; }
   .ai-compare-body {
     font-size: 13.5px;
     overflow-y: auto;
@@ -1070,7 +1085,7 @@ const popupStyles = `
   .ai-compare-actions button {
     flex: 1;
     padding: 6px 8px;
-    border-radius: 7px;
+    border-radius: 10px;
     border: 1px solid var(--popup-field-border);
     background: var(--popup-field-bg);
     color: var(--popup-text);
@@ -1092,56 +1107,67 @@ const popupStyles = `
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 4px;
-    padding: 3px 0 1px 0;
+    gap: 6px;
+    padding: 4px 0 2px 0;
     user-select: none;
   }
   .ai-compare-nav-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 16px;
-    height: 16px;
+    width: 24px;
+    height: 24px;
     border: none;
     background: transparent;
     color: var(--popup-text-muted);
     cursor: pointer;
     padding: 0;
-    opacity: 0.45;
+    opacity: 0.65;
     transition: opacity 120ms ease, color 120ms ease, transform 120ms ease;
   }
   .ai-compare-nav-btn svg {
-    width: 11px;
-    height: 11px;
+    width: 13px;
+    height: 13px;
   }
   .ai-compare-nav-btn:disabled { opacity: 0.15; cursor: default; }
   .ai-compare-nav-btn:not(:disabled):hover {
-    opacity: 0.9;
     color: var(--popup-text);
+    opacity: 1;
     transform: scale(1.1);
   }
   .ai-compare-dots {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: 5px;
   }
   .ai-compare-dotnav {
-    width: 5px;
-    height: 5px;
+    width: 6px;
+    height: 6px;
     border-radius: 50%;
     border: 1px solid var(--popup-field-border);
     background: var(--popup-field-bg);
-    padding: 0;
     cursor: pointer;
-    transition: all 150ms ease;
+    padding: 0;
+    transition: all 140ms ease;
   }
+  .ai-compare-dotnav.streaming { border-color: rgba(var(--popup-accent-rgb), 1); }
   .ai-compare-dotnav.done { border-color: rgba(52, 211, 153, 0.8); }
   .ai-compare-dotnav.error { border-color: var(--popup-error-text); }
   .ai-compare-dotnav.active {
-    width: 11px;
+    width: 16px;
+    height: 6px;
     border-radius: 999px;
     background: rgba(var(--popup-accent-rgb), 0.9);
     border-color: transparent;
+  }
+  .ai-compare-counter {
+    font-size: 11px;
+    color: var(--popup-text-muted);
+    font-variant-numeric: tabular-nums;
+    min-width: 28px;
+    text-align: center;
+    line-height: 1;
+    user-select: none;
   }
 
   /* --- Reduced motion: show elements at rest, no enter/bounce/pulse --- */
@@ -3363,10 +3389,13 @@ function buildCompareCard(instance, card, slot) {
   const status = document.createElement('span');
   status.className = 'ai-compare-status';
   if (slot.status === 'done') {
+    status.classList.add('is-done');
     status.innerHTML = iconSvg('checkCircle', 12) + '<span>done</span>';
   } else if (slot.status === 'error') {
+    status.classList.add('is-error');
     status.innerHTML = iconSvg('xCircle', 12) + '<span>failed</span>';
   } else if (slot.status === 'streaming' || slot.status === 'waiting') {
+    status.classList.add('is-busy');
     status.textContent = 'answering…';
   } else {
     status.textContent = 'not asked yet';
@@ -3515,8 +3544,14 @@ function buildCompareNav(instance) {
     slideCompareTo(instance, (instance.compareIndex || 0) + 1, true);
   });
 
+  const counter = document.createElement('span');
+  counter.className = 'ai-compare-counter';
+  counter.setAttribute('aria-hidden', 'true');
+  counter.textContent = `${(instance.compareIndex || 0) + 1} / ${instance.compareSlots.length}`;
+
   nav.appendChild(prev);
   nav.appendChild(dots);
+  nav.appendChild(counter);
   nav.appendChild(next);
   return nav;
 }
@@ -3553,10 +3588,12 @@ function updateCompareNav(instance) {
   const prev = popup.querySelector('.ai-compare-nav-prev');
   const next = popup.querySelector('.ai-compare-nav-next');
   const dots = popup.querySelectorAll('.ai-compare-dotnav');
+  const counter = popup.querySelector('.ai-compare-counter');
   const idx = instance.compareIndex || 0;
   const n = instance.compareSlots.length;
   if (prev) prev.disabled = idx <= 0;
   if (next) next.disabled = idx >= n - 1;
+  if (counter) counter.textContent = `${idx + 1} / ${n}`;
   dots.forEach((d, i) => {
     d.classList.toggle('active', i === idx);
     const slot = instance.compareSlots[i];
@@ -3801,7 +3838,7 @@ function ensureCompareToolbar(instance) {
     // --- Save: the visible card's answer into the chosen list ---
     const finalSaveButton = document.createElement('button');
     finalSaveButton.textContent = 'Save';
-    finalSaveButton.className = 'ai-popup-button';
+    finalSaveButton.className = 'ai-popup-button ai-popup-button-save';
     finalSaveButton.addEventListener('click', (ev) => {
       ev.stopPropagation();
       const slot = visibleSlot();
@@ -4315,7 +4352,7 @@ function createActionButtons(instance, word, definition, modelName, promptName, 
     // 4. Create the final "Save" button
     const finalSaveButton = document.createElement('button');
     finalSaveButton.textContent = 'Save';
-    finalSaveButton.className = 'ai-popup-button';
+    finalSaveButton.className = 'ai-popup-button ai-popup-button-save';
 
     finalSaveButton.addEventListener('click', (ev) => {
       ev.stopPropagation();
