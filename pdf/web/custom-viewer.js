@@ -2232,6 +2232,8 @@ document.querySelectorAll('.color-btn').forEach(btn => {
         // split at mouseup, and each group stores as an ordinary
         // single-page highlight — storage, export, and click-detection
         // all assume one page per highlight.
+        let lastCreatedHlId = null;
+        let lastCreatedPage = null;
         currentSelection.groups.forEach(group => {
             const hl = {
                 id: ++highlightCounter,
@@ -2250,8 +2252,24 @@ document.querySelectorAll('.color-btn').forEach(btn => {
             // may zoom while the picker is open, and the stored PDF-space
             // rects only land correctly through the page's live _viewport.
             drawHighlight(hl, group.pageDiv, group.pageDiv._viewport || group.viewport);
+            lastCreatedHlId = hl.id;
+            lastCreatedPage = hl.pageNumber;
         });
+
+        // When creating a highlight on a partially visible neighbouring page while
+        // the current-page filter is active, follow the user's focus so the newly
+        // added card is visible in the sidebar rather than being filtered out.
+        if (lastCreatedPage !== null && commentsCurrentPageOnly && autoSavedLastPage !== lastCreatedPage) {
+            autoSavedLastPage = lastCreatedPage;
+            const pageNumInput = document.getElementById('page_num');
+            if (pageNumInput) pageNumInput.value = lastCreatedPage;
+        }
+
         saveHighlights();
+
+        if (lastCreatedHlId !== null) {
+            focusSidebarComment(lastCreatedHlId);
+        }
 
         // Clear browser selection
         window.getSelection().removeAllRanges();
