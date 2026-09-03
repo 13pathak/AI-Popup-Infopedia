@@ -172,8 +172,8 @@ const popupStyles = `
     font-family: var(--popup-font-family);
     font-size: 14px;
     line-height: 1.5;
-    width: min(350px, calc(100vw - 28px));
-    max-width: 350px;
+    width: min(365px, calc(100vw - 24px));
+    max-width: 365px;
     box-sizing: border-box;
     max-height: 85vh; /* Keep the popup within screen bounds */
     display: flex;
@@ -293,10 +293,10 @@ const popupStyles = `
   .custom-select {
       display: flex; align-items: center; justify-content: space-between;
       height: 30px; box-sizing: border-box;
-      padding: 0 12px; background-color: var(--popup-field-bg);
+      padding: 0 10px; background-color: var(--popup-field-bg);
       border: 1px solid var(--popup-field-border); border-radius: 999px;
       cursor: pointer; user-select: none; color: var(--popup-field-text);
-      font-size: 12.5px; font-family: inherit;
+      font-size: 12px; letter-spacing: -0.01em; font-family: inherit;
   }
   .custom-select-value {
       min-width: 0;
@@ -304,7 +304,7 @@ const popupStyles = `
       text-overflow: ellipsis;
       white-space: nowrap;
   }
-  .custom-select > span:last-child { flex-shrink: 0; margin-left: 8px; }
+  .custom-select > span:last-child { flex-shrink: 0; margin-left: 4px; }
   .custom-select:focus { outline: none; border-color: rgba(var(--popup-accent-rgb), 0.8); }
 
   /* --- Keyboard focus rings (matches the options page's ring pattern) --- */
@@ -360,16 +360,8 @@ const popupStyles = `
     margin-bottom: 12px;
   }
   #ai-popup-selectors-container .custom-select-container {
-    flex: 1 1 0;
+    flex: 1 1 50%;
     min-width: 0;
-  }
-  #ai-popup-selectors-container .custom-select-container:first-child {
-    flex: 0 1 38%;
-    min-width: 105px;
-  }
-  #ai-popup-selectors-container .custom-select-container:last-child {
-    flex: 1 1 62%;
-    min-width: 135px;
   }
 
   /* Wrapper for the AI-generated text */
