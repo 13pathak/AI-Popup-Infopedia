@@ -16,7 +16,9 @@ const VIEWER_ICON_PATHS = {
   edit: '<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>',
   user: '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
   chevronDown: '<polyline points="6 9 12 15 18 9"/>',
-  chevronUp: '<polyline points="18 15 12 9 6 15"/>'
+  chevronUp: '<polyline points="18 15 12 9 6 15"/>',
+  maximize: '<polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>',
+  minimize: '<polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/>'
 };
 
 function viewerIconSvg(name, size = 14) {
@@ -2834,9 +2836,20 @@ document.getElementById('edit-btn-note').addEventListener('click', () => {
     
     const noteEl = document.getElementById('note-textarea');
     setRichNoteContent(noteEl, hl);
+    noteEl.style.height = ''; // reset any manual drag height on open
     
     editPopup.classList.add('hidden');
     notePopup.classList.remove('hidden');
+
+    const isExpanded = localStorage.getItem('pdf_note_popup_expanded') === 'true';
+    notePopup.classList.toggle('expanded', isExpanded);
+    const expandBtn = document.getElementById('note-btn-expand');
+    if (expandBtn) {
+        expandBtn.innerHTML = viewerIconSvg(isExpanded ? 'minimize' : 'maximize', 13);
+        expandBtn.title = isExpanded ? 'Shrink writing area' : 'Expand writing area';
+        expandBtn.setAttribute('aria-label', isExpanded ? 'Shrink writing area' : 'Expand writing area');
+    }
+
     // The note editor is taller than the edit popup it inherits its
     // position from; clamp with its own real dimensions.
     clampPopupToViewport(notePopup);
@@ -2846,6 +2859,28 @@ document.getElementById('edit-btn-note').addEventListener('click', () => {
 const noteEditorEl = document.getElementById('note-textarea');
 if (noteEditorEl) {
     attachRichEditor(noteEditorEl);
+}
+
+const noteExpandBtn = document.getElementById('note-btn-expand');
+if (noteExpandBtn) {
+    noteExpandBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const notePopup = document.getElementById('note-editor-popup');
+        if (!notePopup) return;
+        const willBeExpanded = !notePopup.classList.contains('expanded');
+        notePopup.classList.toggle('expanded', willBeExpanded);
+        
+        const noteEl = document.getElementById('note-textarea');
+        if (noteEl) noteEl.style.height = ''; // clear any manual drag height
+        
+        noteExpandBtn.innerHTML = viewerIconSvg(willBeExpanded ? 'minimize' : 'maximize', 13);
+        noteExpandBtn.title = willBeExpanded ? 'Shrink writing area' : 'Expand writing area';
+        noteExpandBtn.setAttribute('aria-label', willBeExpanded ? 'Shrink writing area' : 'Expand writing area');
+        localStorage.setItem('pdf_note_popup_expanded', String(willBeExpanded));
+        
+        clampPopupToViewport(notePopup);
+        if (noteEl) noteEl.focus();
+    });
 }
 
 document.getElementById('note-btn-cancel').addEventListener('click', () => {

@@ -109,8 +109,13 @@
     <div id="note-editor-popup" class="hidden">
         <div id="note-textarea" class="note-editor-content is-empty" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="Add a note..."></div>
         <div id="note-editor-actions">
-            <button id="note-btn-cancel">Cancel</button>
-            <button id="note-btn-save">Save</button>
+            <button id="note-btn-expand" class="note-action-icon-btn" type="button" title="Expand writing area" aria-label="Expand writing area">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+            </button>
+            <div class="note-editor-actions-right">
+                <button id="note-btn-cancel">Cancel</button>
+                <button id="note-btn-save">Save</button>
+            </div>
         </div>
     </div>
 
