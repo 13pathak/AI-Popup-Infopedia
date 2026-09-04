@@ -531,6 +531,12 @@ function attachRichEditor(el, { getInitial, onSave } = {}) {
     });
 
     el.addEventListener('keydown', (e) => {
+        // Prevent document-level keyboard shortcuts (e.g. arrow-key page navigation) from hijacking cursor movement
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'Home' || e.key === 'End') {
+            e.stopPropagation();
+            return;
+        }
+
         // Intercept Enter to insert uniform <br> line break via execCommand (recorded in undo stack)
         if (e.key === 'Enter') {
             e.preventDefault();
@@ -3552,8 +3558,13 @@ function renderAllSearchHighlights() {
 
 // Intercept Keyboard Shortcuts
 document.addEventListener('keydown', (e) => {
-    // Ignore if typing in input/textarea (except Escape)
-    const isInput = document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA');
+    // Ignore if typing in input/textarea/contenteditable (except Escape)
+    const isInput = document.activeElement && (
+        document.activeElement.tagName === 'INPUT' ||
+        document.activeElement.tagName === 'TEXTAREA' ||
+        document.activeElement.isContentEditable ||
+        !!(document.activeElement.closest && document.activeElement.closest('[contenteditable="true"]'))
+    );
     
     if (e.key === 'Escape') {
         // Progressive dismissal, closest overlay first: an open annotation
