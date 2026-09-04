@@ -2883,6 +2883,16 @@ if (noteExpandBtn) {
     });
 }
 
+const notePopupEl = document.getElementById('note-editor-popup');
+if (notePopupEl && typeof ResizeObserver !== 'undefined') {
+    const notePopupResizeObserver = new ResizeObserver(() => {
+        if (!notePopupEl.classList.contains('hidden')) {
+            clampPopupToViewport(notePopupEl);
+        }
+    });
+    notePopupResizeObserver.observe(notePopupEl);
+}
+
 document.getElementById('note-btn-cancel').addEventListener('click', () => {
     hidePopups();
 });

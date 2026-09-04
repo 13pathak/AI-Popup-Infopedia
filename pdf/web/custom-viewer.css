@@ -323,7 +323,6 @@ button, input, textarea, select {
     align-items: stretch;
     width: 320px;
     padding: 12px;
-    transition: width 0.2s ease;
 }
 
 #note-editor-popup.expanded {
@@ -352,7 +351,7 @@ button, input, textarea, select {
     line-height: 1.5;
     margin-bottom: 10px;
     outline: none;
-    transition: border-color 0.15s ease, box-shadow 0.15s ease, min-height 0.2s ease;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 #note-editor-popup.expanded #note-textarea {
