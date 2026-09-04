@@ -2402,9 +2402,17 @@ let noteAutoSaveTimeout = null;
 let noteStatusFadeTimeout = null;
 let isNoteDirty = false;
 
+function getNotePopupTargetHighlight() {
+    const notePopup = document.getElementById('note-editor-popup');
+    if (!notePopup) return null;
+    const rawId = notePopup.dataset.hlId;
+    if (!rawId) return null;
+    const targetId = parseInt(rawId, 10);
+    return highlights.find(h => h.id === targetId) || null;
+}
+
 function handleFloatingNoteInput() {
-    if (activeHighlightId === null) return;
-    const hl = highlights.find(h => h.id === activeHighlightId);
+    const hl = getNotePopupTargetHighlight();
     if (!hl) return;
 
     const noteEl = document.getElementById('note-textarea');
@@ -2414,7 +2422,7 @@ function handleFloatingNoteInput() {
     const hadNote = !!hl.note;
     const hasNote = !!cleanContent;
 
-    // 1. Instant in-memory sync (0 ms lag)
+    // 1. Instant in-memory sync (0 ms lag) strictly to bound highlight
     hl.note = cleanContent;
     hl.noteFmt = cleanContent ? 'html' : undefined;
     isNoteDirty = true;
@@ -2451,12 +2459,18 @@ function flushFloatingNoteSave() {
         noteAutoSaveTimeout = null;
     }
 
-    if (!isNoteDirty || activeHighlightId === null) return;
+    if (!isNoteDirty) return;
+
+    const hl = getNotePopupTargetHighlight();
+    if (!hl) {
+        isNoteDirty = false;
+        return;
+    }
+
     isNoteDirty = false;
 
-    const hl = highlights.find(h => h.id === activeHighlightId);
     const noteEl = document.getElementById('note-textarea');
-    if (hl && noteEl) {
+    if (noteEl) {
         const cleanContent = getRichNoteContent(noteEl);
         hl.note = cleanContent;
         hl.noteFmt = cleanContent ? 'html' : undefined;
@@ -2485,15 +2499,16 @@ function hidePopups() {
     
     const notePopup = document.getElementById('note-editor-popup');
     if (notePopup && !notePopup.classList.contains('hidden')) {
+        const targetHl = getNotePopupTargetHighlight();
         flushFloatingNoteSave();
-        if (activeHighlightId !== null) {
-            const hl = highlights.find(h => h.id === activeHighlightId);
-            if (hl) updateHighlightIndicatorsOnPage(hl);
+        if (targetHl) {
+            updateHighlightIndicatorsOnPage(targetHl);
         }
+        delete notePopup.dataset.hlId;
+        notePopup.classList.add('hidden');
     }
     
     document.getElementById('color-picker-popup').classList.add('hidden');
-    if (notePopup) notePopup.classList.add('hidden');
     currentSelection = null;
     activeHighlightId = null;
     document.querySelectorAll('.custom-highlight.active').forEach(el => el.classList.remove('active'));
@@ -2703,7 +2718,10 @@ document.addEventListener('click', (e) => {
     }
 
     const pageDiv = e.target.closest('.page');
-    if (!pageDiv || !pageDiv._viewport) return;
+    if (!pageDiv || !pageDiv._viewport) {
+        hidePopups();
+        return;
+    }
 
     let clickedIdx = -1;
 
@@ -2742,6 +2760,9 @@ document.addEventListener('click', (e) => {
     }
 
     if (clickedIdx !== -1) {
+        // Close and flush any previously open popup (e.g. note editor) before activating a new highlight
+        hidePopups();
+
         const hl = highlights[clickedIdx];
         activeHighlightId = hl.id;
 
@@ -2927,6 +2948,7 @@ document.getElementById('edit-btn-note').addEventListener('click', () => {
     const editPopup = document.getElementById('edit-highlight-popup');
     const notePopup = document.getElementById('note-editor-popup');
     
+    notePopup.dataset.hlId = String(hl.id);
     notePopup.style.left = editPopup.style.left;
     notePopup.style.top = editPopup.style.top;
     
@@ -3019,20 +3041,10 @@ if (notePopupEl && typeof ResizeObserver !== 'undefined') {
 }
 
 document.getElementById('note-btn-cancel').addEventListener('click', () => {
-    flushFloatingNoteSave();
-    if (activeHighlightId !== null) {
-        const hl = highlights.find(h => h.id === activeHighlightId);
-        if (hl) updateHighlightIndicatorsOnPage(hl);
-    }
     hidePopups();
 });
 
 document.getElementById('note-btn-save').addEventListener('click', () => {
-    flushFloatingNoteSave();
-    if (activeHighlightId !== null) {
-        const hl = highlights.find(h => h.id === activeHighlightId);
-        if (hl) updateHighlightIndicatorsOnPage(hl);
-    }
     hidePopups();
 });
 
@@ -3064,12 +3076,19 @@ document.getElementById('edit-btn-color').addEventListener('click', () => {
 document.getElementById('edit-btn-trash').addEventListener('click', () => {
     if (activeHighlightId === null) return;
     
-    highlights = highlights.filter(h => h.id !== activeHighlightId);
+    const deletingId = activeHighlightId;
+    const notePopup = document.getElementById('note-editor-popup');
+    if (notePopup && parseInt(notePopup.dataset.hlId, 10) === deletingId) {
+        isNoteDirty = false;
+        delete notePopup.dataset.hlId;
+    }
+
+    highlights = highlights.filter(h => h.id !== deletingId);
     saveHighlights();
     
     // Remove divs from DOM
-    document.querySelectorAll(`.custom-highlight[data-hl-id="${activeHighlightId}"]`).forEach(el => el.remove());
-    document.querySelectorAll(`.note-indicator[data-hl-id="${activeHighlightId}"]`).forEach(el => el.remove());
+    document.querySelectorAll(`.custom-highlight[data-hl-id="${deletingId}"]`).forEach(el => el.remove());
+    document.querySelectorAll(`.note-indicator[data-hl-id="${deletingId}"]`).forEach(el => el.remove());
     
     hidePopups();
 });
@@ -4233,7 +4252,12 @@ function renderSidebar() {
             document.querySelectorAll(`.note-indicator[data-hl-id="${hl.id}"]`).forEach(el => el.remove());
 
             // If popups are anchored to the deleted highlight, close them
-            if (activeHighlightId === hl.id) hidePopups();
+            const notePopup = document.getElementById('note-editor-popup');
+            if (activeHighlightId === hl.id || (notePopup && parseInt(notePopup.dataset.hlId, 10) === hl.id)) {
+                isNoteDirty = false;
+                if (notePopup) delete notePopup.dataset.hlId;
+                hidePopups();
+            }
         });
         
         header.appendChild(deleteBtn);
