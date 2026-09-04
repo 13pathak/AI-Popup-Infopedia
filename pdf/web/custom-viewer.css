@@ -70,6 +70,7 @@ body, html {
     background-color: var(--viewer-bg);
     font-family: var(--viewer-font-family);
     overflow: hidden; /* Prevent body scroll, use viewerContainer */
+    touch-action: pan-x pan-y; /* Disables browser pinch-to-zoom on touchscreens while allowing panning */
 }
 
 button, input, textarea, select {

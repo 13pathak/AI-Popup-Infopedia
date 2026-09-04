@@ -3652,24 +3652,36 @@ document.addEventListener('keydown', (e) => {
         return;
     }
     
-    // Zoom shortcuts
-    if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) {
+    // Zoom shortcuts (Ctrl/Cmd + Plus/Minus/Zero, numpad and all keyboard layouts included)
+    const isZoomInKey = (e.ctrlKey || e.metaKey) && (
+        e.key === '=' || e.key === '+' || e.key === 'Add' ||
+        e.code === 'Equal' || e.code === 'NumpadAdd'
+    );
+    if (isZoomInKey) {
         e.preventDefault();
-        document.getElementById('zoom_in').click();
+        const zoomInBtn = document.getElementById('zoom_in');
+        if (zoomInBtn) zoomInBtn.click();
         return;
     }
     
-    if ((e.ctrlKey || e.metaKey) && e.key === '-') {
+    const isZoomOutKey = (e.ctrlKey || e.metaKey) && (
+        e.key === '-' || e.key === '_' || e.key === 'Subtract' ||
+        e.code === 'Minus' || e.code === 'NumpadSubtract'
+    );
+    if (isZoomOutKey) {
         e.preventDefault();
-        document.getElementById('zoom_out').click();
+        const zoomOutBtn = document.getElementById('zoom_out');
+        if (zoomOutBtn) zoomOutBtn.click();
         return;
     }
     
-    // Actual-size reset (Ctrl+0 / Cmd+0, numpad included). The wheel
-    // handler above intercepts ctrl+wheel, so browser zoom never engages
-    // on this page and this chord is the only quick way back to 100%.
-    if ((e.ctrlKey || e.metaKey) && e.key === '0') {
+    // Actual-size reset (Ctrl+0 / Cmd+0, numpad included).
+    const isZoomResetKey = (e.ctrlKey || e.metaKey) && (
+        e.key === '0' || e.code === 'Digit0' || e.code === 'Numpad0'
+    );
+    if (isZoomResetKey) {
         e.preventDefault();
+        resetBrowserTabZoom();
         if (!pdfDoc) return;
         currentZoomMode = 'custom';
         if (scale === 1) return; // already actual size, nothing to re-render
@@ -4481,7 +4493,56 @@ function renderOutline(outline) {
     renderItems(outline, contentOutline);
 }
 
-// --- Trackpad Pinch-to-Zoom Support ---
+// --- Tab Zoom Enforcement & Reset ---
+function resetBrowserTabZoom() {
+    if (typeof chrome !== 'undefined' && chrome.tabs && typeof chrome.tabs.getCurrent === 'function') {
+        try {
+            chrome.tabs.getCurrent((tab) => {
+                if (chrome.runtime.lastError || !tab) return;
+                if (typeof chrome.tabs.setZoom === 'function') {
+                    chrome.tabs.setZoom(tab.id, 1.0, () => {
+                        void chrome.runtime.lastError;
+                    });
+                }
+            });
+        } catch (e) {}
+    }
+}
+
+function enforceTabZoom() {
+    if (typeof chrome !== 'undefined' && chrome.tabs && typeof chrome.tabs.getCurrent === 'function') {
+        try {
+            chrome.tabs.getCurrent((tab) => {
+                if (chrome.runtime.lastError || !tab) return;
+                
+                // If this tab was already zoomed from a previous session, reset it to 100%
+                if (typeof chrome.tabs.getZoom === 'function' && typeof chrome.tabs.setZoom === 'function') {
+                    chrome.tabs.getZoom(tab.id, (currentZoom) => {
+                        if (chrome.runtime.lastError) return;
+                        if (typeof currentZoom === 'number' && Math.abs(currentZoom - 1.0) > 0.01) {
+                            chrome.tabs.setZoom(tab.id, 1.0, () => {
+                                void chrome.runtime.lastError;
+                            });
+                        }
+                    });
+                }
+
+                // Lock zoom settings to disabled so Chrome never zooms the entire web page
+                if (typeof chrome.tabs.setZoomSettings === 'function') {
+                    chrome.tabs.setZoomSettings(tab.id, {
+                        mode: 'disabled',
+                        scope: 'per-tab'
+                    }, () => {
+                        void chrome.runtime.lastError;
+                    });
+                }
+            });
+        } catch (e) {}
+    }
+}
+enforceTabZoom();
+
+// --- Trackpad Pinch-to-Zoom & Ctrl+Wheel Support ---
 let pinchZoomTimeout = null;
 let currentPinchScale = 1.0;
 let initialScaleBeforePinch = 1.0;
@@ -4489,9 +4550,11 @@ let isPinching = false;
 let pinchOriginClientX = 0;
 let pinchOriginClientY = 0;
 
-document.getElementById('viewerContainer').addEventListener('wheel', (e) => {
+// Listen on window so Ctrl+wheel and pinch gestures anywhere (e.g. over sidebar,
+// comments, toolbar, popups) never leak through to Chrome's native page zoom.
+window.addEventListener('wheel', (e) => {
     if (e.ctrlKey) {
-        e.preventDefault(); // Prevent default browser zoom
+        e.preventDefault(); // Prevent default browser zoom across the entire window
         // No document yet (load-error / password screen): nothing to
         // zoom, and mutating scale here would silently change the zoom
         // level the next successful load starts from.
@@ -4501,12 +4564,24 @@ document.getElementById('viewerContainer').addEventListener('wheel', (e) => {
         // window resize would snap back to the fitted scale.
         currentZoomMode = 'custom';
 
+        const scrollContainer = document.getElementById('viewerContainer');
+        const containerRect = scrollContainer ? scrollContainer.getBoundingClientRect() : null;
+
         if (pinchZoomTimeout === null) {
-             initialScaleBeforePinch = scale;
-             // Where the gesture is anchored, in viewport coordinates —
-             // the snap-back below keeps this point fixed on screen.
-             pinchOriginClientX = e.clientX;
-             pinchOriginClientY = e.clientY;
+            initialScaleBeforePinch = scale;
+            // If the gesture happens within the viewer, anchor at the cursor;
+            // otherwise (e.g. over sidebar, toolbar, popups), anchor to the center of the viewer
+            if (containerRect && e.clientX >= containerRect.left && e.clientX <= containerRect.right &&
+                e.clientY >= containerRect.top && e.clientY <= containerRect.bottom) {
+                pinchOriginClientX = e.clientX;
+                pinchOriginClientY = e.clientY;
+            } else if (containerRect) {
+                pinchOriginClientX = containerRect.left + containerRect.width / 2;
+                pinchOriginClientY = containerRect.top + containerRect.height / 2;
+            } else {
+                pinchOriginClientX = e.clientX;
+                pinchOriginClientY = e.clientY;
+            }
         }
 
         // Adjust scale smoothly based on delta
@@ -4525,10 +4600,9 @@ document.getElementById('viewerContainer').addEventListener('wheel', (e) => {
         currentPinchScale = scale / initialScaleBeforePinch;
         const viewer = document.getElementById('viewer');
         if (viewer) {
-            // Set transform origin based on mouse position relative to viewer
             const rect = viewer.getBoundingClientRect();
-            const originX = e.clientX - rect.left;
-            const originY = e.clientY - rect.top;
+            const originX = pinchOriginClientX - rect.left;
+            const originY = pinchOriginClientY - rect.top;
 
             // Only set origin once at start of pinch to prevent jitter
             if (!viewer.style.transformOrigin || pinchZoomTimeout === null) {
@@ -4558,3 +4632,8 @@ document.getElementById('viewerContainer').addEventListener('wheel', (e) => {
         e.preventDefault();
     }
 }, { passive: false });
+
+// Prevent macOS / WebKit gesture pinch zooming the entire document
+window.addEventListener('gesturestart', (e) => e.preventDefault(), { passive: false });
+window.addEventListener('gesturechange', (e) => e.preventDefault(), { passive: false });
+
