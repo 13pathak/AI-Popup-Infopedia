@@ -5211,34 +5211,47 @@ function saveConversationAsPdf(instance, messagesOverride, subtitle) {
     : 'AI Conversation Transcript';
   let html = `<!DOCTYPE html><html><head><title>Conversation Backup</title>
   <style>
-    body { font-family: 'Google Sans', 'Google Sans Text', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 20px; max-width: 800px; margin: auto; line-height: 1.6; }
-    .message { margin-bottom: 20px; padding: 15px; border-radius: 8px; }
-    .user { background-color: #e3f2fd; border-left: 4px solid #1976d2; }
-    .ai { background-color: #f5f5f5; border-left: 4px solid #4caf50; }
-    .role { font-weight: bold; margin-bottom: 8px; font-size: 1.1em; }
-    .message p { margin: 8px 0; }
+    body { font-family: 'Google Sans', 'Google Sans Text', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 32px 24px; max-width: 820px; margin: auto; line-height: 1.68; color: #1e293b; background: #ffffff; }
+    .transcript-header { margin-bottom: 28px; padding-bottom: 16px; border-bottom: 1px solid #e2e8f0; }
+    .transcript-brand { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .transcript-logo { font-size: 13px; font-weight: 700; color: #0d9488; letter-spacing: 0.02em; }
+    .transcript-badge { font-size: 11px; font-weight: 600; background: rgba(45, 212, 191, 0.15); color: #0f766e; padding: 2px 8px; border-radius: 999px; }
+    .transcript-title { margin: 0; font-size: 22px; font-weight: 700; color: #0f172a; letter-spacing: -0.02em; }
+    .message { margin-bottom: 18px; padding: 18px 20px; border-radius: 16px; box-sizing: border-box; }
+    .user { background-color: #f8fafc; border: 1px solid #e2e8f0; border-left: 4px solid #94a3b8; }
+    .ai { background-color: #ffffff; border: 1px solid #e2e8f0; border-left: 4px solid #2dd4bf; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.03); }
+    .role { display: inline-block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; padding: 3px 10px; border-radius: 999px; margin-bottom: 10px; }
+    .user .role { background: #e2e8f0; color: #475569; }
+    .ai .role { background: rgba(45, 212, 191, 0.15); color: #0d9488; }
+    .message p { margin: 8px 0; font-size: 14px; }
     .message div > p:first-child { margin-top: 0; }
     .message div > p:last-child { margin-bottom: 0; }
-    .title { text-align: center; color: #333; margin-bottom: 30px; border-bottom: 2px solid #ccc; padding-bottom: 10px; }
-    .message code { font-family: Consolas, Menlo, 'Liberation Mono', monospace; font-size: 0.9em; background-color: #eceff1; border-radius: 3px; padding: 1px 4px; }
-    .message pre { background-color: #eceff1; border: 1px solid #ddd; border-radius: 6px; padding: 10px 12px; overflow-x: auto; }
-    .message pre code { background-color: transparent; padding: 0; border-radius: 0; }
+    .message code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.9em; background-color: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 4px; padding: 1px 5px; color: #0f172a; }
+    .message pre { background-color: #0f172a; color: #f8fafc; border-radius: 10px; padding: 14px 16px; overflow-x: auto; margin: 12px 0; }
+    .message pre code { background-color: transparent; border: none; padding: 0; color: inherit; }
     .message ul, .message ol { margin: 8px 0; padding-left: 22px; }
-    .message h1, .message h2, .message h3, .message h4 { margin: 12px 0 6px; line-height: 1.3; }
+    .message h1, .message h2, .message h3, .message h4 { margin: 14px 0 6px; line-height: 1.3; color: #0f172a; }
     .message h1 { font-size: 1.25em; } .message h2 { font-size: 1.15em; } .message h3 { font-size: 1.05em; }
-    .message blockquote { margin: 8px 0; padding: 2px 0 2px 12px; border-left: 3px solid #4caf50; color: #555; }
-    .message table { border-collapse: collapse; margin: 8px 0; }
-    .message th, .message td { border: 1px solid #ccc; padding: 4px 8px; text-align: left; vertical-align: top; }
-    .message th { background-color: #e8e8e8; }
-    .message hr { border: none; border-top: 1px solid #ccc; margin: 12px 0; }
+    .message blockquote { margin: 10px 0; padding: 8px 14px; border-left: 3px solid #2dd4bf; background: #f8fafc; border-radius: 0 8px 8px 0; color: #475569; }
+    .message table { border-collapse: separate; border-spacing: 0; margin: 12px 0; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; width: 100%; }
+    .message th, .message td { padding: 8px 12px; text-align: left; vertical-align: top; border-bottom: 1px solid #e2e8f0; }
+    .message th { background-color: #f1f5f9; font-weight: 600; color: #334155; }
+    .message tr:last-child td { border-bottom: none; }
+    .message hr { border: none; border-top: 1px solid #e2e8f0; margin: 14px 0; }
     @media print {
       body { max-width: 100%; padding: 0; }
-      .message { page-break-inside: avoid; }
+      .message { page-break-inside: avoid; box-shadow: none; }
       .message pre, .message table { page-break-inside: avoid; }
     }
   </style>
   </head><body>
-  <h2 class="title">${titleLine}</h2>`;
+  <div class="transcript-header">
+    <div class="transcript-brand">
+      <span class="transcript-logo">AI Popup Infopedia</span>
+      <span class="transcript-badge">Transcript</span>
+    </div>
+    <h1 class="transcript-title">${escapeHtmlText(titleLine)}</h1>
+  </div>`;
 
   const transcript = messagesOverride || instance.messages;
   transcript.forEach(msg => {
