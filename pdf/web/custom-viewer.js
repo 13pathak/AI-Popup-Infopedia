@@ -2841,7 +2841,7 @@ document.getElementById('edit-btn-note').addEventListener('click', () => {
     editPopup.classList.add('hidden');
     notePopup.classList.remove('hidden');
 
-    const isExpanded = localStorage.getItem('pdf_note_popup_expanded') === 'true';
+    const isExpanded = getStoredNotePopupExpanded();
     notePopup.classList.toggle('expanded', isExpanded);
     const expandBtn = document.getElementById('note-btn-expand');
     if (expandBtn) {
@@ -2855,6 +2855,20 @@ document.getElementById('edit-btn-note').addEventListener('click', () => {
     clampPopupToViewport(notePopup);
     noteEl.focus();
 });
+
+function getStoredNotePopupExpanded() {
+    try {
+        return localStorage.getItem('pdf_note_popup_expanded') === 'true';
+    } catch (e) {
+        return false;
+    }
+}
+
+function setStoredNotePopupExpanded(val) {
+    try {
+        localStorage.setItem('pdf_note_popup_expanded', String(val));
+    } catch (e) {}
+}
 
 const noteEditorEl = document.getElementById('note-textarea');
 if (noteEditorEl) {
@@ -2876,7 +2890,7 @@ if (noteExpandBtn) {
         noteExpandBtn.innerHTML = viewerIconSvg(willBeExpanded ? 'minimize' : 'maximize', 13);
         noteExpandBtn.title = willBeExpanded ? 'Shrink writing area' : 'Expand writing area';
         noteExpandBtn.setAttribute('aria-label', willBeExpanded ? 'Shrink writing area' : 'Expand writing area');
-        localStorage.setItem('pdf_note_popup_expanded', String(willBeExpanded));
+        setStoredNotePopupExpanded(willBeExpanded);
         
         clampPopupToViewport(notePopup);
         if (noteEl) noteEl.focus();
