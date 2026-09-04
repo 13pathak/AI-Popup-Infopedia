@@ -1018,7 +1018,12 @@ async function renderPageContent(pageDiv) {
         canvas.style.height = viewport.height + "px";
 
         const transform = outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : null;
-        const renderTask = page.render({ canvasContext: ctx, transform, viewport }).promise;
+        const renderTask = page.render({
+            canvasContext: ctx,
+            transform,
+            viewport,
+            annotationMode: (pdfjsLib.AnnotationMode ? pdfjsLib.AnnotationMode.DISABLE : 0)
+        }).promise;
         const textContent = await page.getTextContent();
 
         const textLayerDiv = document.createElement('div');
@@ -1723,7 +1728,11 @@ async function printPDF() {
             canvas.width = Math.floor(viewport.width);
             canvas.height = Math.floor(viewport.height);
 
-            await page.render({ canvasContext: ctx, viewport }).promise;
+            await page.render({
+                canvasContext: ctx,
+                viewport,
+                annotationMode: (pdfjsLib.AnnotationMode ? pdfjsLib.AnnotationMode.DISABLE : 0)
+            }).promise;
 
             // Composite this page's annotations onto the printed raster.
             drawPrintHighlights(ctx, viewport, pageNum);
@@ -3230,19 +3239,6 @@ document.getElementById('save_pdf').addEventListener('click', async () => {
             }
         }
 
-        // Fast path: If there are no highlights to bake into the PDF,
-        // download the in-memory bytes directly and avoid PDF-Lib overhead.
-        if (!highlights || highlights.length === 0) {
-            const blob = new Blob([existingPdfBytes], { type: "application/pdf" });
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.href = url;
-            link.download = documentBaseName() + ".pdf";
-            link.click();
-            revokeObjectUrlLater(url);
-            return;
-        }
-
         // Highlight coordinates were captured against the viewer's copy;
         // the fresh bytes below may have changed since it was opened.
         // Snapshot the viewer's page count before the parse await so the
@@ -3264,6 +3260,78 @@ document.getElementById('save_pdf').addEventListener('click', async () => {
         const pageCount = pdfLibDoc.getPageCount();
         const staleDocument = viewerPageCount !== null && pageCount !== viewerPageCount;
         let skippedStale = 0;
+
+        // Prune previous markup annotations from all pages before appending
+        // current highlights. This prevents duplicate annotations from stacking
+        // and darkening when overwriting the same file repeatedly, and ensures
+        // deleted highlights do not persist as zombies. Non-markup annotations
+        // (such as Links and Form Widgets) are strictly preserved.
+        const MARKUP_SUBTYPES = new Set(['/Highlight', '/Underline', '/StrikeOut', '/Squiggly']);
+        let prunedCount = 0;
+        for (let i = 0; i < pageCount; i++) {
+            const page = pdfLibDoc.getPage(i);
+            const annots = page.node.Annots();
+            if (annots && typeof annots.size === 'function') {
+                const prunedRefs = new Set();
+                const totalAnnots = annots.size();
+
+                // First pass: identify markup annotations and any linked popup references
+                for (let j = 0; j < totalAnnots; j++) {
+                    const item = annots.get(j);
+                    const dict = pdfLibDoc.context.lookup(item);
+                    if (dict instanceof PDFLib.PDFDict) {
+                        const subtype = dict.get(PDFLib.PDFName.of('Subtype'));
+                        if (subtype && MARKUP_SUBTYPES.has(subtype.asString())) {
+                            prunedRefs.add(item);
+                            const popup = dict.get(PDFLib.PDFName.of('Popup'));
+                            if (popup) prunedRefs.add(popup);
+                        }
+                    }
+                }
+
+                // Second pass: catch popup annotations whose Parent is one of the pruned annotations
+                for (let j = 0; j < totalAnnots; j++) {
+                    const item = annots.get(j);
+                    if (prunedRefs.has(item)) continue;
+                    const dict = pdfLibDoc.context.lookup(item);
+                    if (dict instanceof PDFLib.PDFDict) {
+                        const subtype = dict.get(PDFLib.PDFName.of('Subtype'));
+                        if (subtype && subtype.asString() === '/Popup') {
+                            const parent = dict.get(PDFLib.PDFName.of('Parent'));
+                            if (parent && prunedRefs.has(parent)) {
+                                prunedRefs.add(item);
+                            }
+                        }
+                    }
+                }
+
+                if (prunedRefs.size > 0) {
+                    prunedCount += prunedRefs.size;
+                    const keptAnnots = pdfLibDoc.context.obj([]);
+                    for (let j = 0; j < totalAnnots; j++) {
+                        const item = annots.get(j);
+                        if (!prunedRefs.has(item)) {
+                            keptAnnots.push(item);
+                        }
+                    }
+                    page.node.set(PDFLib.PDFName.of('Annots'), keptAnnots);
+                }
+            }
+        }
+
+        // Fast path: If there are no highlights to bake into the PDF AND no
+        // previous markup annotations were pruned, download the in-memory bytes
+        // directly and avoid PDF-Lib re-serialization overhead.
+        if ((!highlights || highlights.length === 0) && prunedCount === 0) {
+            const blob = new Blob([existingPdfBytes], { type: "application/pdf" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = documentBaseName() + ".pdf";
+            link.click();
+            revokeObjectUrlLater(url);
+            return;
+        }
 
         // Custom Author Name from the options page, stored in local
         // chrome.storage. Callback style + hasChromeStorage() guard to
