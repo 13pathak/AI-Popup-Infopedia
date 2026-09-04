@@ -510,7 +510,7 @@ function noteHtmlToPlainText(html) {
     return walk(div).replace(/\n{3,}/g, '\n\n').trim();
 }
 
-function attachRichEditor(el, { getInitial, onSave } = {}) {
+function attachRichEditor(el, { getInitial, onSave, onInput } = {}) {
     if (!el) return;
 
     let initialContent = '';
@@ -524,12 +524,19 @@ function attachRichEditor(el, { getInitial, onSave } = {}) {
         }
     };
 
+    const notifyInput = () => {
+        updateEmptyState();
+        if (typeof onInput === 'function') {
+            onInput(getRichNoteContent(el));
+        }
+    };
+
     el.addEventListener('focus', () => {
         initialContent = typeof getInitial === 'function' ? getInitial() : el.innerHTML;
     });
 
     el.addEventListener('input', () => {
-        updateEmptyState();
+        notifyInput();
     });
 
     el.addEventListener('keydown', (e) => {
@@ -543,7 +550,7 @@ function attachRichEditor(el, { getInitial, onSave } = {}) {
         if (e.key === 'Enter') {
             e.preventDefault();
             document.execCommand('insertLineBreak', false, null);
-            updateEmptyState();
+            notifyInput();
             return;
         }
 
@@ -551,7 +558,7 @@ function attachRichEditor(el, { getInitial, onSave } = {}) {
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
             e.preventDefault();
             document.execCommand('bold', false, null);
-            updateEmptyState();
+            notifyInput();
             return;
         }
 
@@ -559,7 +566,7 @@ function attachRichEditor(el, { getInitial, onSave } = {}) {
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'u') {
             e.preventDefault();
             document.execCommand('underline', false, null);
-            updateEmptyState();
+            notifyInput();
             return;
         }
     });
@@ -570,7 +577,7 @@ function attachRichEditor(el, { getInitial, onSave } = {}) {
         const text = (e.clipboardData || window.clipboardData).getData('text/plain');
         if (text) {
             document.execCommand('insertText', false, text);
-            updateEmptyState();
+            notifyInput();
         }
     });
 
@@ -2390,14 +2397,103 @@ function showColorPicker(x, y) {
     clampPopupToViewport(popup);
 }
 
+// --- Floating Note Editor Real-Time Auto-Save ---
+let noteAutoSaveTimeout = null;
+let noteStatusFadeTimeout = null;
+let isNoteDirty = false;
+
+function handleFloatingNoteInput() {
+    if (activeHighlightId === null) return;
+    const hl = highlights.find(h => h.id === activeHighlightId);
+    if (!hl) return;
+
+    const noteEl = document.getElementById('note-textarea');
+    if (!noteEl) return;
+
+    const cleanContent = getRichNoteContent(noteEl);
+    const hadNote = !!hl.note;
+    const hasNote = !!cleanContent;
+
+    // 1. Instant in-memory sync (0 ms lag)
+    hl.note = cleanContent;
+    hl.noteFmt = cleanContent ? 'html' : undefined;
+    isNoteDirty = true;
+
+    // If indicator presence toggled (empty <-> non-empty), update page indicator badge
+    if (hadNote !== hasNote) {
+        updateHighlightIndicatorsOnPage(hl);
+    }
+
+    // Sync to open sidebar card in real time if present
+    const sidebarNoteInput = document.querySelector(`.sidebar-item[data-hl-id="${hl.id}"] .sidebar-item-note-input`);
+    if (sidebarNoteInput && document.activeElement !== sidebarNoteInput) {
+        setRichNoteContent(sidebarNoteInput, hl);
+    }
+
+    // 2. Update status badge to "Saving…"
+    const statusEl = document.getElementById('note-save-status');
+    if (statusEl) {
+        if (noteStatusFadeTimeout) clearTimeout(noteStatusFadeTimeout);
+        statusEl.textContent = 'Saving…';
+        statusEl.classList.add('visible');
+    }
+
+    // 3. Debounced storage write (~300ms)
+    if (noteAutoSaveTimeout) clearTimeout(noteAutoSaveTimeout);
+    noteAutoSaveTimeout = setTimeout(() => {
+        flushFloatingNoteSave();
+    }, 300);
+}
+
+function flushFloatingNoteSave() {
+    if (noteAutoSaveTimeout) {
+        clearTimeout(noteAutoSaveTimeout);
+        noteAutoSaveTimeout = null;
+    }
+
+    if (!isNoteDirty || activeHighlightId === null) return;
+    isNoteDirty = false;
+
+    const hl = highlights.find(h => h.id === activeHighlightId);
+    const noteEl = document.getElementById('note-textarea');
+    if (hl && noteEl) {
+        const cleanContent = getRichNoteContent(noteEl);
+        hl.note = cleanContent;
+        hl.noteFmt = cleanContent ? 'html' : undefined;
+    }
+
+    // Persist to storage without destroying sidebar DOM
+    saveHighlights(false);
+
+    // Show "Saved" status and fade after 1.5s
+    const statusEl = document.getElementById('note-save-status');
+    if (statusEl) {
+        statusEl.textContent = 'Saved';
+        statusEl.classList.add('visible');
+        if (noteStatusFadeTimeout) clearTimeout(noteStatusFadeTimeout);
+        noteStatusFadeTimeout = setTimeout(() => {
+            statusEl.classList.remove('visible');
+        }, 1500);
+    }
+}
+
 function hidePopups() {
     const editPopup = document.getElementById('edit-highlight-popup');
     editPopup.style.display = '';
     editPopup.style.visibility = '';
     editPopup.classList.add('hidden');
     
+    const notePopup = document.getElementById('note-editor-popup');
+    if (notePopup && !notePopup.classList.contains('hidden')) {
+        flushFloatingNoteSave();
+        if (activeHighlightId !== null) {
+            const hl = highlights.find(h => h.id === activeHighlightId);
+            if (hl) updateHighlightIndicatorsOnPage(hl);
+        }
+    }
+    
     document.getElementById('color-picker-popup').classList.add('hidden');
-    document.getElementById('note-editor-popup').classList.add('hidden');
+    if (notePopup) notePopup.classList.add('hidden');
     currentSelection = null;
     activeHighlightId = null;
     document.querySelectorAll('.custom-highlight.active').forEach(el => el.classList.remove('active'));
@@ -2837,6 +2933,16 @@ document.getElementById('edit-btn-note').addEventListener('click', () => {
     const noteEl = document.getElementById('note-textarea');
     setRichNoteContent(noteEl, hl);
     noteEl.style.height = ''; // reset any manual drag height on open
+    isNoteDirty = false;
+    if (noteAutoSaveTimeout) {
+        clearTimeout(noteAutoSaveTimeout);
+        noteAutoSaveTimeout = null;
+    }
+    const statusEl = document.getElementById('note-save-status');
+    if (statusEl) {
+        statusEl.textContent = '';
+        statusEl.classList.remove('visible');
+    }
     
     editPopup.classList.add('hidden');
     notePopup.classList.remove('hidden');
@@ -2872,7 +2978,12 @@ function setStoredNotePopupExpanded(val) {
 
 const noteEditorEl = document.getElementById('note-textarea');
 if (noteEditorEl) {
-    attachRichEditor(noteEditorEl);
+    attachRichEditor(noteEditorEl, {
+        onInput: handleFloatingNoteInput,
+        onSave: () => {
+            flushFloatingNoteSave();
+        }
+    });
 }
 
 const noteExpandBtn = document.getElementById('note-btn-expand');
@@ -2908,32 +3019,30 @@ if (notePopupEl && typeof ResizeObserver !== 'undefined') {
 }
 
 document.getElementById('note-btn-cancel').addEventListener('click', () => {
+    flushFloatingNoteSave();
+    if (activeHighlightId !== null) {
+        const hl = highlights.find(h => h.id === activeHighlightId);
+        if (hl) updateHighlightIndicatorsOnPage(hl);
+    }
     hidePopups();
 });
 
 document.getElementById('note-btn-save').addEventListener('click', () => {
-    if (activeHighlightId === null) return;
-    const hl = highlights.find(h => h.id === activeHighlightId);
-    if (!hl) return;
-
-    const noteEl = document.getElementById('note-textarea');
-    const cleanContent = getRichNoteContent(noteEl);
-    hl.note = cleanContent;
-    hl.noteFmt = cleanContent ? 'html' : undefined;
-    saveHighlights(true);
-    
-    // Redraw this highlight's indicators
-    const pageDiv = document.querySelector(`.page[data-page-number="${hl.pageNumber}"]`);
-    if (pageDiv) {
-        pageDiv.querySelectorAll(`.note-indicator[data-hl-id="${hl.id}"]`).forEach(el => el.remove());
-        if (hl.note) {
-            // Completely redraw this highlight's rects and indicator
-            pageDiv.querySelectorAll(`.custom-highlight[data-hl-id="${hl.id}"]`).forEach(el => el.remove());
-            drawHighlight(hl, pageDiv, pageDiv._viewport);
-        }
+    flushFloatingNoteSave();
+    if (activeHighlightId !== null) {
+        const hl = highlights.find(h => h.id === activeHighlightId);
+        if (hl) updateHighlightIndicatorsOnPage(hl);
     }
-
     hidePopups();
+});
+
+window.addEventListener('beforeunload', () => {
+    flushFloatingNoteSave();
+});
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+        flushFloatingNoteSave();
+    }
 });
 
 document.getElementById('edit-btn-color').addEventListener('click', () => {

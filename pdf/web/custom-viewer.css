@@ -392,6 +392,26 @@ button, input, textarea, select {
     align-items: center;
 }
 
+.note-editor-actions-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.note-save-status {
+    font-size: 11px;
+    color: var(--text-hint);
+    font-style: normal;
+    user-select: none;
+    transition: opacity 0.2s ease;
+    opacity: 0;
+    white-space: nowrap;
+}
+
+.note-save-status.visible {
+    opacity: 1;
+}
+
 .note-editor-actions-right {
     display: flex;
     gap: 8px;
