@@ -335,6 +335,11 @@ button, input, textarea, select {
     border-radius: 10px;
     padding: 8px 10px;
     resize: none;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    user-select: text;
+    cursor: text;
     font-family: inherit;
     font-size: 13px;
     line-height: 1.5;
@@ -348,9 +353,25 @@ button, input, textarea, select {
     font-family: inherit;
 }
 
+#note-textarea.is-empty::before {
+    content: attr(data-placeholder);
+    color: var(--text-hint);
+    pointer-events: none;
+    display: block;
+}
+
 #note-textarea:focus {
     border-color: var(--accent);
     box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.25);
+}
+
+#note-textarea b,
+#note-textarea strong {
+    font-weight: 700;
+}
+
+#note-textarea u {
+    text-decoration: underline;
 }
 
 #note-editor-actions {
@@ -1020,6 +1041,29 @@ button, input, textarea, select {
     border-color: var(--accent);
     outline: none;
     box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.25);
+}
+
+div.sidebar-item-note-input {
+    white-space: pre-wrap;
+    word-break: break-word;
+    user-select: text;
+    cursor: text;
+}
+
+div.sidebar-item-note-input.is-empty::before {
+    content: attr(data-placeholder);
+    color: var(--text-hint);
+    pointer-events: none;
+    display: block;
+}
+
+div.sidebar-item-note-input b,
+div.sidebar-item-note-input strong {
+    font-weight: 700;
+}
+
+div.sidebar-item-note-input u {
+    text-decoration: underline;
 }
 
 .sidebar-item-actions {

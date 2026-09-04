@@ -374,12 +374,216 @@ async function loadStorageData() {
     });
 }
 
-function saveHighlights() {
+// ==================== Rich Text Comment Utilities ====================
+
+function escapeHtml(str) {
+    return String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+// Whitelist-only HTML sanitizer for comments: preserves <b>, <strong>, <u>, <i>, <em>, <br>, <div>, <p>, <span>
+// and strips all scripts, handlers, style attributes, and unwanted nodes.
+function sanitizeRichNote(html) {
+    if (!html || typeof html !== 'string') return '';
+    const template = document.createElement('template');
+    template.innerHTML = html;
+
+    const allowedTags = new Set(['b', 'strong', 'u', 'i', 'em', 'br', 'div', 'p', 'span']);
+    const dropTags = new Set(['script', 'style', 'noscript', 'iframe', 'object', 'embed']);
+
+    function cleanNode(node) {
+        if (node.nodeType === Node.TEXT_NODE) {
+            return document.createTextNode(node.nodeValue);
+        }
+        if (node.nodeType === Node.ELEMENT_NODE) {
+            const tag = node.tagName.toLowerCase();
+            if (dropTags.has(tag)) {
+                return null;
+            }
+            if (allowedTags.has(tag)) {
+                const cleanEl = document.createElement(tag);
+                for (const child of node.childNodes) {
+                    const cleanChild = cleanNode(child);
+                    if (cleanChild) cleanEl.appendChild(cleanChild);
+                }
+                return cleanEl;
+            } else {
+                // Unwrap disallowed tag, preserving child content
+                const frag = document.createDocumentFragment();
+                for (const child of node.childNodes) {
+                    const cleanChild = cleanNode(child);
+                    if (cleanChild) frag.appendChild(cleanChild);
+                }
+                return frag;
+            }
+        }
+        return null;
+    }
+
+    const frag = document.createDocumentFragment();
+    for (const child of template.content.childNodes) {
+        const cleanChild = cleanNode(child);
+        if (cleanChild) frag.appendChild(cleanChild);
+    }
+
+    const wrapper = document.createElement('div');
+    wrapper.appendChild(frag);
+    let result = wrapper.innerHTML.trim();
+    // Collapse redundant empty tags (e.g. <b></b>, <u></u>)
+    result = result.replace(/<([a-z]+)[^>]*>\s*<\/\1>/gi, '');
+    return result;
+}
+
+function setRichNoteContent(el, hl) {
+    if (!el) return;
+    const note = (hl && hl.note) || '';
+    if (!note) {
+        el.innerHTML = '';
+        el.classList.add('is-empty');
+        return;
+    }
+    if (hl && hl.noteFmt === 'html') {
+        el.innerHTML = sanitizeRichNote(note);
+    } else {
+        // Legacy plain text note: escape HTML entities and convert newlines to <br>
+        el.innerHTML = escapeHtml(note).replace(/\r\n|\r|\n/g, '<br>');
+    }
+    const isEmpty = !el.textContent.trim();
+    el.classList.toggle('is-empty', isEmpty);
+}
+
+function getRichNoteContent(el) {
+    if (!el) return null;
+    const text = el.textContent.trim();
+    if (!text) return null;
+    const cleanHtml = sanitizeRichNote(el.innerHTML);
+    return cleanHtml || null;
+}
+
+function noteHtmlToMarkdown(html) {
+    if (!html) return '';
+    const div = document.createElement('div');
+    div.innerHTML = html;
+
+    function walk(node) {
+        if (node.nodeType === Node.TEXT_NODE) return node.nodeValue;
+        if (node.nodeType === Node.ELEMENT_NODE) {
+            const tag = node.tagName.toLowerCase();
+            let inner = '';
+            for (const child of node.childNodes) inner += walk(child);
+            if (!inner.trim() && tag !== 'br') return '';
+            if (tag === 'b' || tag === 'strong') return `**${inner}**`;
+            if (tag === 'u') return `<u>${inner}</u>`;
+            if (tag === 'i' || tag === 'em') return `*${inner}*`;
+            if (tag === 'br') return '\n';
+            if (tag === 'div' || tag === 'p') return '\n' + inner;
+            return inner;
+        }
+        return '';
+    }
+    return walk(div).replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function noteHtmlToPlainText(html) {
+    if (!html) return '';
+    const div = document.createElement('div');
+    div.innerHTML = html;
+
+    function walk(node) {
+        if (node.nodeType === Node.TEXT_NODE) return node.nodeValue;
+        if (node.nodeType === Node.ELEMENT_NODE) {
+            const tag = node.tagName.toLowerCase();
+            let inner = '';
+            for (const child of node.childNodes) inner += walk(child);
+            if (tag === 'br') return '\n';
+            if (tag === 'div' || tag === 'p') return '\n' + inner;
+            return inner;
+        }
+        return '';
+    }
+    return walk(div).replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function attachRichEditor(el, { getInitial, onSave } = {}) {
+    if (!el) return;
+
+    let initialContent = '';
+
+    const updateEmptyState = () => {
+        const text = el.textContent.trim();
+        const isEmpty = !text;
+        el.classList.toggle('is-empty', isEmpty);
+        if (isEmpty && el.innerHTML !== '') {
+            el.innerHTML = '';
+        }
+    };
+
+    el.addEventListener('focus', () => {
+        initialContent = typeof getInitial === 'function' ? getInitial() : el.innerHTML;
+    });
+
+    el.addEventListener('input', () => {
+        updateEmptyState();
+    });
+
+    el.addEventListener('keydown', (e) => {
+        // Intercept Enter to insert uniform <br> line break via execCommand (recorded in undo stack)
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            document.execCommand('insertLineBreak', false, null);
+            updateEmptyState();
+            return;
+        }
+
+        // Intercept Ctrl+B / Cmd+B for bold
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
+            e.preventDefault();
+            document.execCommand('bold', false, null);
+            updateEmptyState();
+            return;
+        }
+
+        // Intercept Ctrl+U / Cmd+U for underline (CRITICAL: prevents Chrome opening "View Page Source")
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'u') {
+            e.preventDefault();
+            document.execCommand('underline', false, null);
+            updateEmptyState();
+            return;
+        }
+    });
+
+    // Intercept paste to ensure clipboard data pastes as clean text (preserving newlines) without foreign styling
+    el.addEventListener('paste', (e) => {
+        e.preventDefault();
+        const text = (e.clipboardData || window.clipboardData).getData('text/plain');
+        if (text) {
+            document.execCommand('insertText', false, text);
+            updateEmptyState();
+        }
+    });
+
+    el.addEventListener('blur', () => {
+        updateEmptyState();
+        if (typeof onSave === 'function') {
+            const currentClean = getRichNoteContent(el);
+            const initialClean = initialContent ? sanitizeRichNote(initialContent) : null;
+            if (currentClean !== initialClean) {
+                onSave(currentClean);
+            }
+        }
+    });
+}
+
+function saveHighlights(reRenderSidebar = true) {
     if (!hasChromeStorage()) return;
     const storageKey = SYNC_KEYS.highlights;
     const entry = rememberOwnWrite(storageKey, highlights);
     chrome.storage.local.set({ [storageKey]: highlights }, () => settlePendingWrite(entry));
-    if (typeof renderSidebar === 'function') renderSidebar();
+    if (reRenderSidebar && typeof renderSidebar === 'function') renderSidebar();
 }
 
 function saveBookmarks() {
@@ -560,6 +764,24 @@ function sanitizeStoredHighlights(list) {
                 delete r.cBR;
                 delete r.cBL;
             }
+        }
+        // Validate and sanitize note and note format flag
+        if (hl.note !== undefined && hl.note !== null) {
+            if (typeof hl.note !== 'string') {
+                delete hl.note;
+                delete hl.noteFmt;
+            } else if (hl.noteFmt === 'html') {
+                hl.note = sanitizeRichNote(hl.note);
+                if (!hl.note) {
+                    delete hl.note;
+                    delete hl.noteFmt;
+                }
+            } else {
+                delete hl.noteFmt;
+            }
+        } else {
+            delete hl.note;
+            delete hl.noteFmt;
         }
         cleaned.push(hl);
     }
@@ -2604,15 +2826,21 @@ document.getElementById('edit-btn-note').addEventListener('click', () => {
     notePopup.style.left = editPopup.style.left;
     notePopup.style.top = editPopup.style.top;
     
-    document.getElementById('note-textarea').value = hl.note || '';
+    const noteEl = document.getElementById('note-textarea');
+    setRichNoteContent(noteEl, hl);
     
     editPopup.classList.add('hidden');
     notePopup.classList.remove('hidden');
     // The note editor is taller than the edit popup it inherits its
     // position from; clamp with its own real dimensions.
     clampPopupToViewport(notePopup);
-    document.getElementById('note-textarea').focus();
+    noteEl.focus();
 });
+
+const noteEditorEl = document.getElementById('note-textarea');
+if (noteEditorEl) {
+    attachRichEditor(noteEditorEl);
+}
 
 document.getElementById('note-btn-cancel').addEventListener('click', () => {
     hidePopups();
@@ -2623,9 +2851,11 @@ document.getElementById('note-btn-save').addEventListener('click', () => {
     const hl = highlights.find(h => h.id === activeHighlightId);
     if (!hl) return;
 
-    const noteText = document.getElementById('note-textarea').value.trim();
-    hl.note = noteText || null;
-    saveHighlights();
+    const noteEl = document.getElementById('note-textarea');
+    const cleanContent = getRichNoteContent(noteEl);
+    hl.note = cleanContent;
+    hl.noteFmt = cleanContent ? 'html' : undefined;
+    saveHighlights(true);
     
     // Redraw this highlight's indicators
     const pageDiv = document.querySelector(`.page[data-page-number="${hl.pageNumber}"]`);
@@ -2747,7 +2977,8 @@ document.getElementById('export_md').addEventListener('click', () => {
         }
         
         if (hl.note) {
-            mdContent += `\n**Note:** ${hl.note}\n`;
+            const formattedNote = hl.noteFmt === 'html' ? noteHtmlToMarkdown(hl.note) : hl.note;
+            mdContent += `\n**Note:** ${formattedNote}\n`;
         }
         mdContent += "\n---\n\n";
     });
@@ -2921,7 +3152,8 @@ document.getElementById('save_pdf').addEventListener('click', async () => {
 
             if (hl.note) {
                 // PDF-lib supports text contents via PDFString
-                annotObj.Contents = PDFLib.PDFString.of(hl.note);
+                const plainNote = hl.noteFmt === 'html' ? noteHtmlToPlainText(hl.note) : hl.note;
+                annotObj.Contents = PDFLib.PDFString.of(plainNote);
             }
 
             if (authorName) {
@@ -3605,7 +3837,7 @@ function refreshCommentsForPageFilter() {
     if (!sidebar || sidebar.classList.contains('hidden')) return;
     if (!tabComments || !tabComments.classList.contains('active')) return;
     const ae = document.activeElement;
-    if (ae && ae.classList && ae.classList.contains('sidebar-item-note-input')) return;
+    if (ae && ae.closest && ae.closest('.sidebar-item-note-input')) return;
     renderSidebar();
 }
 
@@ -3853,29 +4085,30 @@ function renderSidebar() {
             item.appendChild(quoteToggleBtn);
         }
         
-        // Note Input (Auto-growing textarea)
-        const noteInput = document.createElement('textarea');
-        noteInput.className = 'sidebar-item-note-input';
-        noteInput.placeholder = 'Add a comment...';
-        noteInput.value = hl.note || '';
-        
-        const autoResize = () => {
-            noteInput.style.height = 'auto';
-            noteInput.style.height = `${Math.max(38, noteInput.scrollHeight)}px`;
-        };
-        
-        noteInput.addEventListener('input', autoResize);
-        noteInput.addEventListener('change', () => {
-            hl.note = noteInput.value.trim() || null;
-            saveHighlights();
-            updateHighlightIndicatorsOnPage(hl);
+        // Note Input (Rich-text contenteditable)
+        const noteInput = document.createElement('div');
+        noteInput.className = 'sidebar-item-note-input is-empty';
+        noteInput.contentEditable = 'true';
+        noteInput.setAttribute('role', 'textbox');
+        noteInput.setAttribute('aria-multiline', 'true');
+        noteInput.dataset.placeholder = 'Add a comment...';
+        setRichNoteContent(noteInput, hl);
+
+        attachRichEditor(noteInput, {
+            getInitial: () => hl.noteFmt === 'html' ? (hl.note || '') : (hl.note ? escapeHtml(hl.note).replace(/\r\n|\r|\n/g, '<br>') : ''),
+            onSave: (cleanedHtml) => {
+                hl.note = cleanedHtml || null;
+                hl.noteFmt = cleanedHtml ? 'html' : undefined;
+                saveHighlights(false); // Do NOT re-render sidebar on blur
+                updateHighlightIndicatorsOnPage(hl);
+            }
         });
-        
+
         item.appendChild(noteInput);
-        
+
         // Click to jump to highlight
         item.addEventListener('click', (e) => {
-            if (e.target.tagName.toLowerCase() === 'textarea' || e.target.closest('button')) {
+            if (e.target.closest('.sidebar-item-note-input') || e.target.closest('button')) {
                 return; // Let user type or click button
             }
             scrollToHighlight(hl);
@@ -3884,16 +4117,15 @@ function renderSidebar() {
         // Keyboard navigation: Enter or Space on card jumps to highlight
         item.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' || e.key === ' ') {
-                if (e.target.tagName.toLowerCase() === 'textarea' || e.target.closest('button')) {
+                if (e.target.closest('.sidebar-item-note-input') || e.target.closest('button')) {
                     return; // Let user type or activate button
                 }
                 e.preventDefault();
                 scrollToHighlight(hl);
             }
         });
-        
+
         sidebarContent.appendChild(item);
-        autoResize();
 
         // Reveal the "Show more" toggle if the quote text overflows 3 lines.
         // Measures actual scrollHeight if connected to a visible container,
