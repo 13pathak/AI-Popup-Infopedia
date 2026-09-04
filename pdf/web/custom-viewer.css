@@ -337,9 +337,15 @@ button, input, textarea, select {
     resize: none;
     font-family: inherit;
     font-size: 13px;
+    line-height: 1.5;
     margin-bottom: 10px;
     outline: none;
     transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+#note-textarea::placeholder {
+    color: var(--text-hint);
+    font-family: inherit;
 }
 
 #note-textarea:focus {
@@ -993,21 +999,27 @@ button, input, textarea, select {
     background: var(--field-bg);
     color: var(--text);
     font-size: 13px;
-    line-height: 1.45;
+    line-height: 1.5;
     font-family: inherit;
     padding: 8px 10px;
     border: 1px solid var(--border);
-    border-radius: 4px;
+    border-radius: 8px;
     resize: none;
     overflow: hidden;
     min-height: 38px;
-    transition: border-color 0.2s, box-shadow 0.2s;
+    outline: none;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.sidebar-item-note-input::placeholder {
+    color: var(--text-hint);
+    font-family: inherit;
 }
 
 .sidebar-item-note-input:focus {
     border-color: var(--accent);
     outline: none;
-    box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.2);
+    box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.25);
 }
 
 .sidebar-item-actions {
@@ -1471,4 +1483,103 @@ body.dark-mode .page {
 }
 #viewerContainer::-webkit-scrollbar-thumb:hover {
     background: rgba(var(--accent-rgb), 0.65);
+}
+
+/* ============================================================
+   PDF.js Native Highlight Comment Composer and Preview
+   ============================================================ */
+.pdfjsHighlightCommentComposer {
+    position: fixed;
+    z-index: 1000;
+    width: 280px;
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px;
+    box-shadow: var(--popup-shadow);
+    font-family: var(--viewer-font-family);
+    box-sizing: border-box;
+}
+
+.pdfjsHighlightCommentComposer label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-family: inherit;
+}
+
+.pdfjsHighlightCommentComposer textarea {
+    width: 100%;
+    box-sizing: border-box;
+    background: var(--field-bg);
+    color: var(--text);
+    border: 1px solid var(--border-input);
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 13px;
+    line-height: 1.5;
+    font-family: inherit;
+    resize: none;
+    outline: none;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.pdfjsHighlightCommentComposer textarea:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.25);
+}
+
+.pdfjsHighlightCommentComposer .actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.pdfjsHighlightCommentComposer button {
+    padding: 5px 14px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 550;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background 0.15s ease;
+}
+
+.pdfjsHighlightCommentComposer button.cancel {
+    background: var(--control-bg-3);
+    color: var(--text);
+    border: 1px solid var(--border-control);
+}
+
+.pdfjsHighlightCommentComposer button.submit {
+    background: var(--accent);
+    color: #072b2b;
+    border: none;
+    font-weight: 600;
+}
+
+.pdfjsHighlightCommentComposer button.submit:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.pdfjsHighlightCommentPreview {
+    position: fixed;
+    z-index: 999;
+    max-width: 280px;
+    background: var(--surface-raised);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 12.5px;
+    line-height: 1.45;
+    font-family: var(--viewer-font-family);
+    box-shadow: var(--popup-shadow);
+    white-space: pre-wrap;
+    word-break: break-word;
 }
