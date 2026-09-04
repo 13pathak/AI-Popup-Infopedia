@@ -3339,7 +3339,25 @@ function settleCompareSlot(instance, slot, response) {
     slot.errorText = null;
     slot.answerModelName = response.usedModelName || slot.modelName;
     slot.promptName = response.promptName || slot.promptName;
-    slot.messages.push({ role: 'assistant', content: response.definition, citations: response.citations || [] });
+    const assistantMsg = { role: 'assistant', content: response.definition, citations: response.citations || [] };
+    slot.messages.push(assistantMsg);
+
+    chrome.storage.sync.get(['enableHallucinationGuard'], (guardData) => {
+      if (!activePopups.includes(instance)) return;
+      if (guardData && guardData.enableHallucinationGuard) {
+        if (response.usedWebSearch) {
+          assistantMsg.searchGrounded = true;
+          renderCompareView(instance);
+        } else {
+          const userMsgs = slot.messages.filter(m => m.role === 'user');
+          const originalPrompt = userMsgs.length > 0
+            ? userMsgs[userMsgs.length - 1].content
+            : (instance.compareWord || instance.sourceWord || 'Definition');
+
+          triggerCompareVerification(instance, slot, assistantMsg, originalPrompt, response.definition);
+        }
+      }
+    });
   } else {
     slot.status = 'error';
     slot.errorText = String((response && response.error) || 'The model returned an empty response.');
@@ -3564,6 +3582,12 @@ function appendCompareConversation(instance, body, slot) {
       turn.innerHTML = renderMarkdownHtml(String(msg.content || ''));
       if (!msg.isStreaming && Array.isArray(msg.citations) && msg.citations.length > 0) {
         appendCitations(turn, msg.citations);
+      }
+      if (msg.searchGrounded) {
+        appendSearchGroundedBadge(turn);
+      }
+      if (msg.verification) {
+        appendVerificationBadge(turn, msg.verification);
       }
     }
     body.appendChild(turn);
@@ -5363,6 +5387,35 @@ function triggerVerification(popupInstance, originalPrompt, aiResponse, retryInf
       }
     }
     renderMessages(popupInstance);
+  });
+}
+
+function triggerCompareVerification(instance, slot, msg, originalPrompt, aiResponse) {
+  if (!instance || !instance.popup) return;
+  if (!slot || !slot.messages.includes(msg)) return;
+
+  msg.verification = { state: 'pending' };
+  renderCompareView(instance);
+
+  chrome.runtime.sendMessage({
+    type: "verifyAiResponse",
+    originalPrompt: originalPrompt,
+    aiResponse: aiResponse,
+    context: instance.implicitContext || undefined
+  }, (response) => {
+    if (!activePopups.includes(instance)) return;
+    if (!slot.messages.includes(msg)) return;
+
+    if (chrome.runtime.lastError || !response || response.error) {
+      msg.verification = { state: 'failed' };
+    } else {
+      msg.verification = {
+        state: response.result && response.result.is_hallucinating ? 'hallucination' : 'verified',
+        reasoning: (response.result && response.result.reasoning) || '',
+        corrections: Array.isArray(response.result && response.result.corrections) ? response.result.corrections.map(String) : []
+      };
+    }
+    renderCompareView(instance);
   });
 }
 

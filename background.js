@@ -1402,15 +1402,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.type === "verifyAiResponse") {
     getSecretStorageConfig(['models', 'verificationModelId', 'enableImplicitContext']).then(async (data) => {
       const { models, verificationModelId } = data;
-      if (!models || !verificationModelId) {
-        sendResponse({ error: "Verification model not configured." });
+      if (!models || models.length === 0) {
+        sendResponse({ error: "No models available for verification." });
         return;
       }
 
-      const modelToUse = models.find(m => m.id === verificationModelId);
+      let modelToUse = models.find(m => m.id === verificationModelId);
       if (!modelToUse) {
-        sendResponse({ error: "Verification model not found." });
-        return;
+        modelToUse = models[0];
       }
 
       const { endpointUrl, modelName, apiKey } = modelToUse;
