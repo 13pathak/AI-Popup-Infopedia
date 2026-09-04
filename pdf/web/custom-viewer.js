@@ -3847,6 +3847,39 @@ document.addEventListener('keydown', (e) => {
         }
         return;
     }
+
+    // Delete selected highlight when pressing Delete or Backspace
+    if (!isInput && (e.key === 'Delete' || e.key === 'Backspace')) {
+        // Case A: A highlight is selected/active (clicked by user)
+        if (activeHighlightId !== null) {
+            e.preventDefault();
+            const trashBtn = document.getElementById('edit-btn-trash');
+            if (trashBtn) trashBtn.click();
+            return;
+        }
+
+        // Case B: The user has selected text that belongs to a highlight with the mouse
+        const selection = window.getSelection();
+        if (selection && !selection.isCollapsed) {
+            const selectedText = selection.toString().trim();
+            if (selectedText) {
+                const pageEl = selection.anchorNode && selection.anchorNode.parentElement ? selection.anchorNode.parentElement.closest('.page') : null;
+                const pageNum = pageEl ? parseInt(pageEl.dataset.pageNumber, 10) : null;
+
+                const matchingHl = highlights.find(h => (!pageNum || h.pageNumber === pageNum) && h.text && h.text.trim() === selectedText)
+                    || highlights.find(h => (!pageNum || h.pageNumber === pageNum) && h.text && selectedText.length >= 6 && h.text.includes(selectedText));
+
+                if (matchingHl) {
+                    e.preventDefault();
+                    activeHighlightId = matchingHl.id;
+                    const trashBtn = document.getElementById('edit-btn-trash');
+                    if (trashBtn) trashBtn.click();
+                    selection.removeAllRanges();
+                    return;
+                }
+            }
+        }
+    }
     
     // Zoom shortcuts (Ctrl/Cmd + Plus/Minus/Zero, numpad and all keyboard layouts included)
     const isZoomInKey = (e.ctrlKey || e.metaKey) && (
