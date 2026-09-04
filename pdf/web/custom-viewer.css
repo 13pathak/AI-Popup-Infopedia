@@ -1,3 +1,19 @@
+@font-face {
+    font-family: 'Google Sans';
+    src: url('../../fonts/GoogleSans-VariableFont_GRAD,opsz,wght.ttf') format('truetype');
+    font-weight: 100 900;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'Google Sans';
+    src: url('../../fonts/GoogleSans-Italic-VariableFont_GRAD,opsz,wght.ttf') format('truetype');
+    font-weight: 100 900;
+    font-style: italic;
+    font-display: swap;
+}
+
 /* ============================================================
    Theme tokens. Light values live on :root; body.dark-mode
    (bottom of file) re-declares the same custom properties.
@@ -33,15 +49,15 @@
     --control-hover-bg: #e2e6ea;       /* toolbar button hover */
     --findbar-btn-hover-bg: #d8d8d8;   /* findbar nav button hover */
     --btn-neutral-bg: #f1f3f4;         /* password cancel, modal secondary */
-    --accent: #0078D7;                 /* focus rings, active tab, list actions */
-    --accent-rgb: 0, 120, 215;         /* accent as RGB triplet for rgba() tints */
-    --markup-active-bg: #d0e8ff;       /* active highlight tool */
-    --danger: #d32f2f;                 /* destructive actions */
-    --toolbar-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-    --sidebar-shadow: -2px 0 5px rgba(0, 0, 0, 0.1);
+    --accent: #2dd4bf;                 /* signature mint accent matching popup */
+    --accent-rgb: 45, 212, 191;        /* accent as RGB triplet for rgba() tints */
+    --markup-active-bg: rgba(45, 212, 191, 0.2); /* active highlight tool */
+    --danger: #ef4444;                 /* destructive actions */
+    --toolbar-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+    --sidebar-shadow: -2px 0 6px rgba(0, 0, 0, 0.08);
     --item-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
     --item-shadow-hover: 0 2px 6px rgba(0, 0, 0, 0.1);
-    --popup-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    --popup-shadow: 0 16px 36px rgba(0, 0, 0, 0.2);
     --error-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
 }
 
@@ -51,39 +67,46 @@ body, html {
     width: 100%;
     height: 100%;
     background-color: var(--viewer-bg);
-    font-family: sans-serif;
+    font-family: 'Google Sans', 'Google Sans Text', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     overflow: hidden; /* Prevent body scroll, use viewerContainer */
 }
 
 #toolbar {
-    height: 40px;
+    height: 46px;
     background-color: var(--surface);
     color: var(--text);
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 0 20px;
+    padding: 0 16px;
     border-bottom: 1px solid var(--border);
     box-shadow: var(--toolbar-shadow);
     z-index: 1000;
     position: relative;
+    box-sizing: border-box;
 }
 
 #toolbar-right {
     display: flex;
     align-items: center;
-    gap: 5px;
+    gap: 6px;
 }
 
 #toolbar button {
     background: var(--control-bg);
     border: 1px solid var(--border-control);
     color: var(--text);
-    padding: 5px 10px;
+    padding: 5px 12px;
     cursor: pointer;
-    border-radius: 3px;
+    border-radius: 999px;
+    font-family: inherit;
     font-size: 12px;
-    transition: background 0.2s, border-color 0.2s, color 0.2s;
+    font-weight: 550;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    white-space: nowrap;
 }
 
 #toolbar button:hover {
@@ -92,26 +115,46 @@ body, html {
     color: var(--text-hover);
 }
 
+#toolbar button svg {
+    flex-shrink: 0;
+}
+
+#save_pdf {
+    background: var(--accent) !important;
+    color: #072b2b !important;
+    font-weight: 600 !important;
+    border: 1px solid var(--accent) !important;
+    padding: 5px 14px !important;
+}
+
+#save_pdf:hover {
+    background: #5eead4 !important;
+    border-color: #5eead4 !important;
+    color: #042020 !important;
+}
+
 #page_num {
-    width: 48px;
+    width: 44px;
     text-align: center;
     background: var(--control-bg);
     color: var(--text);
     border: 1px solid var(--border-control);
-    border-radius: 3px;
-    padding: 4px 2px;
+    border-radius: 999px;
+    padding: 4px 8px;
+    font-family: inherit;
     font-size: 12px;
     outline: none;
-    transition: border-color 0.2s;
+    transition: border-color 0.2s, box-shadow 0.2s;
 }
 
 #page_num:focus {
     border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.25);
 }
 
 #mainContainer {
     position: absolute;
-    top: 40px;
+    top: 46px;
     bottom: 0;
     left: 0;
     right: 0;
@@ -205,29 +248,31 @@ body, html {
     position: absolute;
     background: var(--surface-raised);
     color: var(--text);
-    border-radius: 6px;
+    border-radius: 16px;
     box-shadow: var(--popup-shadow);
     border: 1px solid var(--border);
     z-index: 10000;
     display: flex;
     gap: 8px;
-    padding: 6px;
+    padding: 8px 10px;
     align-items: center;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
 }
 
 #color-picker-popup {
     flex-direction: column;
     align-items: stretch;
-    padding: 8px;
+    padding: 10px 12px;
 }
 
 #markup-tools {
     display: flex;
-    gap: 5px;
-    margin-bottom: 5px;
+    gap: 6px;
+    margin-bottom: 6px;
     justify-content: center;
     border-bottom: 1px solid var(--border);
-    padding-bottom: 5px;
+    padding-bottom: 6px;
 }
 
 .markup-tool-btn {
@@ -236,8 +281,9 @@ body, html {
     color: var(--text);
     cursor: pointer;
     font-size: 14px;
-    padding: 2px 6px;
-    border-radius: 3px;
+    padding: 4px 8px;
+    border-radius: 999px;
+    transition: background 0.15s ease, color 0.15s ease;
 }
 .markup-tool-btn:hover {
     background: var(--control-bg-4);
@@ -246,6 +292,7 @@ body, html {
 .markup-tool-btn.active {
     background: var(--markup-active-bg);
     border: 1px solid var(--accent);
+    color: var(--accent);
 }
 
 /* Rendering styles for markups */
@@ -269,47 +316,67 @@ body, html {
 #note-editor-popup {
     flex-direction: column;
     align-items: stretch;
-    width: 250px;
-    padding: 10px;
+    width: 260px;
+    padding: 12px;
 }
 
 #note-textarea {
     width: 100%;
-    height: 80px;
+    height: 84px;
     box-sizing: border-box;
     background: var(--field-bg);
     color: var(--text);
     border: 1px solid var(--border-input);
-    border-radius: 4px;
-    padding: 6px;
+    border-radius: 10px;
+    padding: 8px 10px;
     resize: none;
-    font-family: sans-serif;
+    font-family: inherit;
     font-size: 13px;
-    margin-bottom: 8px;
+    margin-bottom: 10px;
+    outline: none;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+#note-textarea:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.25);
 }
 
 #note-editor-actions {
     display: flex;
     justify-content: flex-end;
-    gap: 6px;
+    gap: 8px;
 }
 
 #note-editor-actions button {
-    padding: 4px 12px;
+    padding: 5px 14px;
     border: none;
-    border-radius: 4px;
+    border-radius: 999px;
     cursor: pointer;
-    font-size: 13px;
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 550;
+    transition: background 0.15s ease, transform 0.15s ease;
 }
 
 #note-btn-save {
-    background: #0078D7; /* same in both themes */
-    color: white;
+    background: var(--accent);
+    color: #072b2b;
+    font-weight: 600;
+}
+
+#note-btn-save:hover {
+    background: #5eead4;
 }
 
 #note-btn-cancel {
     background: var(--control-bg-3);
     color: var(--text);
+    border: 1px solid var(--border-control);
+}
+
+#note-btn-cancel:hover {
+    background: var(--control-hover-bg);
 }
 
 .note-indicator {
@@ -326,14 +393,14 @@ body, html {
     background: transparent;
     border: none;
     cursor: pointer;
-    font-size: 18px;
-    width: 32px;
-    height: 32px;
-    border-radius: 4px;
+    font-size: 16px;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: background 0.2s;
+    transition: background 0.15s ease, transform 0.15s ease;
 }
 
 #edit-highlight-popup button:hover {
@@ -341,11 +408,16 @@ body, html {
 }
 
 .color-btn {
-    width: 24px;
-    height: 24px;
-    border: 1px solid #ccc; /* not themed: identical in dark mode */
+    width: 22px;
+    height: 22px;
+    border: 2px solid rgba(255, 255, 255, 0.25);
     border-radius: 50%;
     cursor: pointer;
+    transition: transform 0.15s ease;
+}
+
+.color-btn:hover {
+    transform: scale(1.15);
 }
 
 #close-color-picker {
@@ -354,39 +426,47 @@ body, html {
     cursor: pointer;
     font-weight: bold;
     color: var(--text-faint);
+    border-radius: 50%;
+    width: 24px;
+    height: 24px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
 
 /* Find Bar Styles */
 #findbar {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 4px;
     margin-right: 10px;
     background: var(--control-bg-2);
     border: 1px solid var(--border-control);
-    padding: 2px 6px;
-    border-radius: 4px;
+    padding: 3px 8px;
+    border-radius: 999px;
     color: var(--text);
 }
 
 #findbar input {
     background: var(--surface-raised);
     border: 1px solid var(--border-control);
-    border-radius: 2px;
-    padding: 3px 6px;
+    border-radius: 999px;
+    padding: 3px 10px;
+    font-family: inherit;
     font-size: 12px;
     width: 140px;
     outline: none;
     color: var(--text);
-    transition: border-color 0.2s;
+    transition: border-color 0.2s, box-shadow 0.2s;
 }
 
 #findbar input:focus {
     border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.25);
 }
 
 #findbar span {
-    font-size: 12px;
+    font-size: 11.5px;
     min-width: 35px;
     text-align: center;
     color: var(--text-muted);
@@ -396,9 +476,16 @@ body, html {
     background: var(--surface-raised) !important;
     border: 1px solid var(--border-control) !important;
     color: var(--text) !important;
-    padding: 2px 6px !important;
-    border-radius: 2px;
+    padding: 0 !important;
+    border-radius: 50%;
+    width: 22px;
+    height: 22px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     cursor: pointer;
+    font-size: 11px;
+    transition: background 0.15s, border-color 0.15s;
 }
 
 #findbar button:hover {
@@ -1294,41 +1381,41 @@ body, html {
    the variables above, plus the page canvas filter inversion.
    ============================================================ */
 body.dark-mode {
-    --viewer-bg: #121212;
-    --viewer-canvas: #1e1e1e;
-    --surface: #242526;
-    --surface-alt: #1e1e1e;
-    --surface-raised: #242526;
-    --surface-inset: #18191a;
-    --field-bg: #18191a;
-    --text: #e4e6eb;
-    --text-muted: #b0b3b8;
-    --text-faint: #b0b3b8;
+    --viewer-bg: #0b0f17;
+    --viewer-canvas: #0f172a;
+    --surface: #0f172a;
+    --surface-alt: #1e293b;
+    --surface-raised: #1e293b;
+    --surface-inset: #0b0f17;
+    --field-bg: #0b0f17;
+    --text: #f1f5f9;
+    --text-muted: #94a3b8;
+    --text-faint: #64748b;
     --text-hover: #ffffff;
-    --icon-muted: #7a7d82;
-    --text-hint: #9a9da3;
-    --border: #3a3b3c;
-    --border-input: #3a3b3c;
-    --border-control: #4e4f50;
-    --border-control-strong: #606266;
-    --border-item: #3a3b3c;
-    --control-bg: #3a3b3c;
-    --control-bg-2: #3a3b3c;
-    --control-bg-3: #3a3b3c;
-    --control-bg-4: #3a3b3c;
-    --control-bg-5: #3a3b3c;
-    --control-hover-bg: #4e4f50;
-    --findbar-btn-hover-bg: #4e4f50;
-    --btn-neutral-bg: #3a3b3c;
-    --accent: #4da3ff;
-    --accent-rgb: 77, 163, 255;
-    --markup-active-bg: #1a3a5c;
-    --danger: #ff6b6b;
-    --toolbar-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
-    --sidebar-shadow: -2px 0 5px rgba(0, 0, 0, 0.4);
+    --icon-muted: #64748b;
+    --text-hint: #64748b;
+    --border: rgba(255, 255, 255, 0.08);
+    --border-input: rgba(255, 255, 255, 0.12);
+    --border-control: rgba(255, 255, 255, 0.12);
+    --border-control-strong: rgba(255, 255, 255, 0.25);
+    --border-item: rgba(255, 255, 255, 0.08);
+    --control-bg: rgba(255, 255, 255, 0.06);
+    --control-bg-2: rgba(255, 255, 255, 0.04);
+    --control-bg-3: rgba(255, 255, 255, 0.08);
+    --control-bg-4: rgba(255, 255, 255, 0.12);
+    --control-bg-5: rgba(45, 212, 191, 0.15);
+    --control-hover-bg: rgba(255, 255, 255, 0.1);
+    --findbar-btn-hover-bg: rgba(255, 255, 255, 0.15);
+    --btn-neutral-bg: rgba(255, 255, 255, 0.08);
+    --accent: #2dd4bf;
+    --accent-rgb: 45, 212, 191;
+    --markup-active-bg: rgba(45, 212, 191, 0.2);
+    --danger: #ef4444;
+    --toolbar-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+    --sidebar-shadow: -2px 0 8px rgba(0, 0, 0, 0.4);
     --item-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
     --item-shadow-hover: 0 2px 6px rgba(0, 0, 0, 0.5);
-    --popup-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    --popup-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
     --error-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
 }
 
