@@ -2823,11 +2823,25 @@ function renderMarkdownHtml(raw) {
 }
 
 // Helper: calculate absolute scroll offset for an element inside a scrolling container
-function getElementScrollOffset(container, el) {
+function getAnchorScrollTop(container, el) {
   if (!container || !el) return 0;
-  const containerRect = container.getBoundingClientRect();
-  const elRect = el.getBoundingClientRect();
-  return Math.max(0, container.scrollTop + (elRect.top - containerRect.top));
+  let top = 0;
+  let curr = el;
+  let reached = false;
+  while (curr) {
+    if (curr === container) {
+      reached = true;
+      break;
+    }
+    top += curr.offsetTop;
+    curr = curr.offsetParent;
+  }
+  if (!reached) {
+    const cRect = container.getBoundingClientRect();
+    const eRect = el.getBoundingClientRect();
+    return Math.max(0, container.scrollTop + (eRect.top - cRect.top) - 8);
+  }
+  return Math.max(0, top - 8);
 }
 
 // Sources are external search results, so create every element through the DOM
@@ -3072,7 +3086,6 @@ function runCompareFollowup(instance, promptToSend, displayText) {
     slot.bodyPinned = false;
     slot.messages.push({ role: 'user', content: promptToSend, displayContent: displayText, followupId: followupId });
   });
-  renderCompareView(instance);
 
   const word = instance.compareWord || instance.sourceWord || 'Custom Question';
   activeSlots.forEach(slot => issueCompareRequest(instance, instance.compareGen, slot, word, null, true));
@@ -3089,6 +3102,9 @@ function issueCompareRequest(instance, gen, slot, word, customPrompt, isFollowup
   slot.status = 'streaming';
   slot.settled = false;
   slot.bodyPinned = false;
+  if (isFollowup && slot.latestFollowupId) {
+    slot.pendingFollowupScroll = true;
+  }
   slot.messages.push({ role: 'assistant', content: initLoadingQuote(instance), isThinking: true, followupId: slot.latestFollowupId });
   renderCompareView(instance);
   // A model just joined the conversation (late-visited card or retry): the
@@ -3281,7 +3297,7 @@ function renderCompareView(instance) {
   const oldBodies = contentWrapper.querySelectorAll('.ai-compare-card .ai-compare-body');
   if (oldBodies.length && instance.compareSlots) {
     instance.compareSlots.forEach((s, i) => {
-      if (oldBodies[i]) s.bodyScrollTop = oldBodies[i].scrollTop;
+      if (oldBodies[i] && !s.pendingFollowupScroll) s.bodyScrollTop = oldBodies[i].scrollTop;
     });
   }
   contentWrapper.innerHTML = '';
@@ -3315,19 +3331,34 @@ function renderCompareView(instance) {
     // Shift to new follow-up question and followed AI output upon submission
     const cardBodies = contentWrapper.querySelectorAll('.ai-compare-card .ai-compare-body');
     instance.compareSlots.forEach((slot, i) => {
-      if (slot.pendingFollowupScroll && cardBodies[i]) {
-        const anchorEl = cardBodies[i].querySelector('[data-followup-anchor="true"]');
+      const cb = cardBodies[i];
+      if (!cb) return;
+
+      if (slot.pendingFollowupScroll) {
+        const anchorEl = cb.querySelector('[data-followup-anchor="true"]');
         if (anchorEl) {
           const updateScroll = () => {
-            if (!cardBodies[i] || !anchorEl.isConnected) return;
-            const targetOffset = Math.max(0, getElementScrollOffset(cardBodies[i], anchorEl) - 8);
-            cardBodies[i].scrollTop = targetOffset;
-            slot.bodyScrollTop = targetOffset;
+            if (!cb || !anchorEl.isConnected) return;
+            const targetOffset = getAnchorScrollTop(cb, anchorEl);
+            cb.scrollTop = targetOffset;
+            slot.bodyScrollTop = cb.scrollTop;
+            if (cb.scrollTop >= targetOffset - 2 || slot.settled) {
+              slot.pendingFollowupScroll = false;
+            }
           };
           updateScroll();
           requestAnimationFrame(updateScroll);
-          slot.pendingFollowupScroll = false;
+          return;
         }
+      }
+
+      if (typeof slot.bodyScrollTop === 'number') {
+        cb.scrollTop = slot.bodyScrollTop;
+        requestAnimationFrame(() => {
+          if (cb && cb.isConnected && typeof slot.bodyScrollTop === 'number') {
+            cb.scrollTop = slot.bodyScrollTop;
+          }
+        });
       }
     });
   } catch (err) {
@@ -3390,6 +3421,15 @@ function buildCompareCard(instance, card, slot) {
     // Preserve manual reading position across stream re-renders
     slot.bodyScrollTop = body.scrollTop;
   });
+  body.addEventListener('wheel', () => {
+    slot.pendingFollowupScroll = false;
+  }, { passive: true });
+  body.addEventListener('touchmove', () => {
+    slot.pendingFollowupScroll = false;
+  }, { passive: true });
+  body.addEventListener('pointerdown', () => {
+    slot.pendingFollowupScroll = false;
+  }, { passive: true });
 
   appendCompareConversation(instance, body, slot);
 
