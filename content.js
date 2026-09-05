@@ -442,6 +442,7 @@ const popupStyles = `
 
   /* Wrapper for the AI-generated text */
   #ai-popup-content {
+    position: relative;
     overflow-y: auto; /* Scroll if content overflows */
     padding: 2px 5px 2px 1px; /* Spacing for the scrollbar */
     font-size: 14px;
@@ -1112,6 +1113,7 @@ const popupStyles = `
   .ai-compare-status.is-error { color: var(--popup-error-text); }
   .ai-compare-status.is-error svg { opacity: 1; }
   .ai-compare-body {
+    position: relative;
     font-size: 14px;
     line-height: 1.68;
     text-align: left;
@@ -1324,17 +1326,6 @@ function showPopupToast(instance, message, type = 'success') {
     toast.classList.add('toast-hiding');
     setTimeout(() => toast.remove(), 220);
   }, 2200);
-}
-
-// When the background's model fallback chain rescued an answer, tell the
-// user which models failed and who actually responded. Informational only —
-// the completed-state paths already switched to the responding model's
-// metadata, this just prevents the success from looking unconditional.
-function notifyModelFallback(instance, response) {
-  if (!response || !Array.isArray(response.fallbackFailedModels) || response.fallbackFailedModels.length === 0) return;
-  const failed = response.fallbackFailedModels.join(', ');
-  const answered = response.usedModelName || 'another model';
-  showPopupToast(instance, `${failed} failed — answered by ${answered}`);
 }
 
 // --- NEW: Custom Dropdown Helpers ---
@@ -1804,10 +1795,16 @@ function initiateEmptyPopupSequence() {
       const customPrompts = syncData.customPrompts || [];
       const defaultPromptId = syncData.defaultPromptId || null;
 
+      // The greeting stays in .messages (popupHasConversation treats a
+      // talking popup as occupied) but renders as a single bare bubble.
       popupInstance.messages = [
         { role: 'assistant', content: "Hi! What would you like to ask?" }
       ];
-      renderMessages(popupInstance);
+      const greetingEl = popupInstance.popup && popupInstance.popup.querySelector('#ai-popup-content');
+      if (greetingEl) {
+        greetingEl.innerHTML = '';
+        greetingEl.insertAdjacentHTML('beforeend', `<div>${renderMarkdownHtml("Hi! What would you like to ask?")}</div>`);
+      }
 
       if (models && models.length > 0) {
         popupInstance.models = models;
@@ -1839,9 +1836,8 @@ function initiateEmptyPopupSequence() {
           contentEl.appendChild(restoreBtn);
         });
       } else {
-        // No models: fall back to the legacy single flow, which surfaces the
-        // configuration error and keeps the full action row available.
-        popupInstance.compareEnabled = false;
+        // No models: keep the greeting and the action row; a typed question
+        // lands on the setup error instead of being silently swallowed.
         const defaultModelName = 'Unknown Model';
         createActionButtons(popupInstance, "Custom Question", "Conversation started from hotkey.", defaultModelName, "Default");
       }
@@ -2025,134 +2021,16 @@ function initiatePopupSequence(rect, selectedText, customPrompt, implicitContext
   // copy captured at selection time.
   popupInstance.implicitContext = implicitContext || null;
 
-  function performInitialFetch() {
-    const currentQuote = (typeof popupInstance.quoteIndex === 'number') 
-      ? LOADING_QUOTES[popupInstance.quoteIndex] 
-      : initLoadingQuote(popupInstance);
-    updatePopupContent(popupInstance, currentQuote);
-    startLoadingQuoteRotation(popupInstance);
-    
-    // Remove old action buttons if retrying
-    if (popupInstance.popup) {
-      const actions = popupInstance.popup.querySelector('.ai-popup-actions');
-      if (actions) actions.remove();
-    }
-
-    const stream = trackAiStream(popupInstance, () => {
-      const msgs = popupInstance.messages;
-      return msgs.length > 0 ? msgs[msgs.length - 1] : null;
-    });
-
-    const watchdog = createResponseWatchdog(() => {
-      if (!activePopups.includes(popupInstance)) return;
-      showRequestTimeoutError(popupInstance, () => performInitialFetch());
-    });
-
-    const payload = { type: "getAiDefinition", word: selectedText, requestId: stream.requestId, context: popupInstance.implicitContext || undefined };
-    if (customPrompt) payload.customPrompt = customPrompt;
-
-    chrome.runtime.sendMessage(payload, (response) => {
-      watchdog.done();
-      stream.done();
-      if (watchdog.fired()) return; // watchdog already took over the UI
-      // Verify instance still exists (user might have closed it)
-      if (!activePopups.includes(popupInstance)) {
-        stopLoadingQuoteRotation(popupInstance);
-        return;
-      }
-      popupInstance.isLoading = false;
-      stopLoadingQuoteRotation(popupInstance);
-
-      if (chrome.runtime.lastError) {
-        response = { error: chrome.runtime.lastError.message };
-      }
-
-      const popupEl = popupInstance.popup;
-
-      if (response && response.models && response.models.length > 0) {
-        createSelectors(popupInstance, response.models, response.customPrompts, response.defaultModelId, null, selectedText, response.defaultPromptId);
-      }
-
-      if (response && response.error) {
-        const errorId = 'error-' + Date.now();
-        const errorHtml = `<span class="ai-popup-error-text">Error: ${String(response.error).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;')}</span> <button id="${errorId}-retry" class="ai-popup-retry-btn ai-popup-error-reload">Reload</button>`;
-        
-        // Temporarily put error in messages to render it
-        popupInstance.messages = [
-           { role: 'assistant', content: errorHtml, isError: true }
-        ];
-        renderMessages(popupInstance);
-        
-        // Wait a tick for innerHTML to parse
-        setTimeout(() => {
-          if (popupInstance.popup) {
-            const retryBtn = popupInstance.popup.querySelector(`#${errorId}-retry`);
-            if (retryBtn) {
-              retryBtn.addEventListener('click', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                e.target.textContent = "Working...";
-                e.target.style.opacity = "0.7";
-                e.target.style.cursor = "wait";
-                setTimeout(() => performInitialFetch(), 150);
-              });
-            }
-          }
-        }, 0);
-      } else {
-        const definitionText = response ? response.definition : "Error resolving definition";
-
-        // --- NEW: Initialize conversation history ---
-        if (response && response.usedPrompt) {
-           popupInstance.messages = [
-             { role: 'user', content: response.usedPrompt },
-              { role: 'assistant', content: response.definition, citations: response.citations || [] }
-           ];
-        } else {
-           popupInstance.messages = [
-              { role: 'assistant', content: definitionText, citations: response?.citations || [] }
-           ];
-        }
-
-        renderMessages(popupInstance);
-
-        const modelName = (response && response.usedModelName)
-          || (response && response.models ? (response.models.find(m => m.id === response.defaultModelId)?.name || 'Unknown Model') : 'Unknown Model');
-        createActionButtons(popupInstance, selectedText, definitionText, modelName, response.promptName, response?.citations || []);
-        notifyModelFallback(popupInstance, response);
-        
-        // --- NEW: Trigger Hallucination Verification (with Smart Bypass) ---
-        chrome.storage.sync.get(['enableHallucinationGuard'], (guardData) => {
-          if (guardData.enableHallucinationGuard) {
-            if (response && response.usedWebSearch) {
-              showSearchGroundedIndicator(popupInstance);
-            } else {
-              triggerVerification(popupInstance, selectedText, definitionText, {
-                modelId: null,
-                word: selectedText,
-                refreshActions: true,
-                searchGroundingAvailable: !!(response && response.searchGroundingAvailable)
-              });
-            }
-          }
-        });
-
-        // --- Milestone-Based Feedback Prompt Check (5th successful lookup) ---
-        checkAndShowFeedbackPrompt(popupInstance);
-      }
-      adjustPopupPosition(popupInstance, rect);
-    });
-  }
-
   // --- Always-on compare (Issue #27) ---
   // Every lookup answers through the horizontal compare slider: the default
   // model and the one after it respond immediately, further models join when
   // their card is slid to. Models live in sync storage, or in local storage
   // while the local-only API-key mode is on — the same split the empty
-  // hotkey popup uses. With no models configured the legacy single-answer
-  // flow runs, because it renders the helpful configuration error.
+  // hotkey popup uses. With no models configured the popup renders the
+  // setup error below instead of asking anyone.
   chrome.storage.sync.get({ secretsLocalOnly: false, models: [], defaultModelId: null, customPrompts: [], defaultPromptId: null }, (syncData) => {
     if (!activePopups.includes(popupInstance)) return;
+
     const begin = (models, prompts, defaultModelId) => {
       if (!activePopups.includes(popupInstance)) return;
       if (models.length > 0) {
@@ -2161,21 +2039,59 @@ function initiatePopupSequence(rect, selectedText, customPrompt, implicitContext
         startCompareLookup(popupInstance, selectedText, null);
         adjustPopupPosition(popupInstance, rect);
       } else {
-        popupInstance.compareEnabled = false;
-        performInitialFetch();
+        showModelsNotConfiguredError();
       }
     };
-    if (syncData.secretsLocalOnly) {
-      chrome.storage.local.get(['models', 'defaultModelId'], (localData) => {
-        if (!activePopups.includes(popupInstance)) return;
-        // Only models/defaultModelId are secret-bearing; custom prompts and
-        // the default prompt id are ordinary sync data (same split the empty
-        // hotkey popup uses), so they come from syncData above.
-        begin(localData.models || [], syncData.customPrompts || [], localData.defaultModelId || null);
-      });
-    } else {
-      begin(syncData.models || [], syncData.customPrompts || [], syncData.defaultModelId || null);
+
+    // Only models/defaultModelId are secret-bearing; custom prompts and
+    // the default prompt id are ordinary sync data (same split the empty
+    // hotkey popup uses), so they come from syncData above.
+    const readCurrentModels = (cb) => {
+      if (syncData.secretsLocalOnly) {
+        chrome.storage.local.get(['models', 'defaultModelId'], (localData) => {
+          if (!activePopups.includes(popupInstance)) return;
+          cb(localData.models || [], localData.defaultModelId || null);
+        });
+      } else {
+        cb(syncData.models || [], syncData.defaultModelId || null);
+      }
+    };
+
+    // No models configured: the background would only refuse, so the popup
+    // renders the setup error itself. Reload re-checks storage — models
+    // configured in the meantime upgrade this popup into a compare lookup.
+    function showModelsNotConfiguredError() {
+      stopLoadingQuoteRotation(popupInstance);
+      popupInstance.isLoading = false;
+
+      const contentEl = popupInstance.popup && popupInstance.popup.querySelector('#ai-popup-content');
+      if (!contentEl) return;
+
+      const errorId = 'error-' + Date.now();
+      const errorText = 'Error: No default AI model configured. Please set one in the options page.';
+      popupInstance.messages = [{ role: 'assistant', content: errorText, isError: true }];
+      contentEl.innerHTML = '';
+      contentEl.insertAdjacentHTML('beforeend',
+        `<div class="ai-chat-row ai-chat-row-ai"><span class="ai-chat-icon">${iconSvg('sparkles', 13)}</span>` +
+        `<div class="ai-chat-text"><span class="ai-popup-error-text">${errorText}</span> ` +
+        `<button id="${errorId}-retry" class="ai-popup-retry-btn ai-popup-error-reload">Reload</button></div></div>`);
+      adjustPopupPosition(popupInstance, rect);
+
+      setTimeout(() => {
+        const retryBtn = popupInstance.popup && popupInstance.popup.querySelector(`#${errorId}-retry`);
+        if (!retryBtn) return;
+        retryBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          e.target.textContent = "Working...";
+          e.target.style.opacity = "0.7";
+          e.target.style.cursor = "wait";
+          readCurrentModels((models, defaultModelId) => begin(models, syncData.customPrompts || [], defaultModelId));
+        });
+      }, 0);
     }
+
+    readCurrentModels((models, defaultModelId) => begin(models, syncData.customPrompts || [], defaultModelId));
   });
 }
 
@@ -2398,40 +2314,6 @@ function createResponseWatchdog(onTimeout) {
   };
 }
 
-// Timeout twin of the flows' error branches: stop every loading affordance,
-// drop placeholder and stale error messages, and show an error line with a
-// retry button wired to retryFn.
-function showRequestTimeoutError(instance, retryFn) {
-  stopLoadingQuoteRotation(instance);
-  instance.isLoading = false;
-  if (instance.popup) {
-    const followupInput = instance.popup.querySelector('#ai-popup-followup-input');
-    const followupSend = instance.popup.querySelector('.ai-popup-followup-send');
-    if (followupInput) followupInput.disabled = false;
-    if (followupSend) followupSend.disabled = false;
-  }
-  const errorId = 'error-' + Date.now();
-  const errorHtml = `<span class="ai-popup-error-text">Error: The AI request timed out with no response — the provider or search pipeline may be stuck.</span> <button id="${errorId}-retry" class="ai-popup-retry-btn ai-popup-error-reload">Reload</button>`;
-  instance.messages = instance.messages.filter(m => !m.isThinking && !m.isStreaming && !m.isError);
-  instance.messages.push({ role: 'assistant', content: errorHtml, isError: true, errorId: errorId });
-  renderMessages(instance);
-  setTimeout(() => {
-    if (instance.popup) {
-      const retryBtn = instance.popup.querySelector(`#${errorId}-retry`);
-      if (retryBtn) {
-        retryBtn.addEventListener('click', (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          e.target.textContent = "Working...";
-          e.target.style.opacity = "0.7";
-          e.target.style.cursor = "wait";
-          setTimeout(() => retryFn(), 150);
-        });
-      }
-    }
-  }, 0);
-}
-
 // --- Streaming answer display ---
 // The background service worker streams answer deltas on a separate
 // tab-targeted message channel (sendResponse is one-shot). Callers register
@@ -2490,7 +2372,9 @@ function trackAiStream(instance, locateStreamingSlot, renderFn) {
       setTimeout(() => {
         renderScheduled = false;
         if (activePopups.includes(instance)) {
-          try { (renderFn || renderMessages)(instance); } catch (e) { console.error('crash in stream render', e); }
+          if (renderFn) {
+            try { renderFn(instance); } catch (e) { console.error('crash in stream render', e); }
+          }
         }
       }, 80);
     }
@@ -2579,11 +2463,8 @@ function showPopup(x, y, content) {
     messages: [],
     showUserQuestions: false, // Default to false
     // --- Multi-model compare state (Issue #27) ---
-    // Compare is the popup's normal answering mode — the horizontal card
-    // slider IS the answer view. compareEnabled only flips false when no
-    // models are configured, so the legacy single-answer flow can surface
-    // the configuration error.
-    compareEnabled: true,
+    // The horizontal card slider IS the answer view; with no models
+    // configured the popup renders a setup error instead of asking.
     compareSlots: null,      // one answer card per model while comparing
     compareGen: 0,           // fan-out generation; stale responses are dropped
     compareIndex: 0,         // which model's card is on screen
@@ -2907,124 +2788,12 @@ function renderMarkdownHtml(raw) {
   return htmlOut;
 }
 
-// --- NEW: renderMessages maps state to UI ---
-function renderMessages(instance) {
-  const popup = instance.popup;
-  if (!popup) return;
-
-  const contentWrapper = popup.querySelector('#ai-popup-content');
-  if (!contentWrapper) return;
-
-  const hasPendingLoading = instance.isLoading || instance.messages.some(m => m.isThinking || m.isStatus);
-  if (!hasPendingLoading) {
-    stopLoadingQuoteRotation(instance);
-  }
-
-  // Save current scroll position
-  const isNearBottom = contentWrapper.scrollHeight - contentWrapper.scrollTop - contentWrapper.clientHeight < 30;
-  const previousScrollTop = contentWrapper.scrollTop;
-
-  // Clear existing content
-  contentWrapper.innerHTML = '';
-
-  try {
-    instance.messages.forEach((msg, index) => {
-      let formattedContent = msg.displayContent || msg.content || "";
-      
-      // Defensively stringify to avoid replace() crashes on unexpected types
-      formattedContent = String(formattedContent);
-      
-      // Only format markdown if it's not an already HTML styled error/thinking message
-      if (!msg.isError && !msg.isThinking && !msg.needsRetry && !msg.isStatus) {
-        if (msg.role === 'user') {
-          // The user's own input is shown verbatim (escaped), not parsed as Markdown.
-          formattedContent = escapeHtmlText(formattedContent).replace(/\n/g, '<br>');
-        } else {
-          formattedContent = renderMarkdownHtml(formattedContent);
-        }
-      }
-
-      // Loading placeholders (isThinking/isStatus) render as an animated
-      // indicator; their content is a plain label, not markup to display.
-      if (msg.isThinking || msg.isStatus) {
-        const textToDisplay = (msg.content && msg.content !== 'Loading...' && msg.content !== 'Thinking...')
-          ? msg.content
-          : (typeof instance.quoteIndex === 'number' ? LOADING_QUOTES[instance.quoteIndex % LOADING_QUOTES.length] : initLoadingQuote(instance));
-        contentWrapper.insertAdjacentHTML('beforeend', buildLoadingHtml(textToDisplay));
-        // Static labels (e.g. "Hallucination detected — searching…") keep
-        // their text; ordinary thinking slots rotate quotes instead.
-        if (!msg.isStaticLabel) startLoadingQuoteRotation(instance);
-        return;
-      }
-
-      if (msg.role === 'user' && !instance.showUserQuestions) return; // Hide user prompts unless setting is true
-
-      const isMainDefinition = (index === 0 || index === 1) && instance.messages.length <= 2;
-
-      if (isMainDefinition && !msg.isError) {
-        // If it's the very first main definition, don't prefix with AI:
-        contentWrapper.insertAdjacentHTML('beforeend', `<div>${formattedContent}</div>`);
-      } else {
-        // Conversational flow UI for follow-ups: the user's question sits in a
-        // right-aligned tinted bubble, the AI's answer in a plain row marked
-        // by a small icon (no more "You:"/"AI:" text labels).
-        const retryBtnId = `retry-msg-${index}`;
-        const bodyHtml = msg.needsRetry
-          ? `<div class="ai-chat-retry"><button id="${retryBtnId}" class="ai-popup-retry-btn">${iconSvg('refresh', 12)} Retry with ${instance.lastModelName || 'New Model'}</button></div>`
-          : formattedContent;
-
-        if (msg.role === 'user') {
-          contentWrapper.insertAdjacentHTML('beforeend', `<div class="ai-chat-row ai-chat-row-user"><div class="ai-chat-bubble">${bodyHtml}</div></div>`);
-        } else {
-          contentWrapper.insertAdjacentHTML('beforeend', `<div class="ai-chat-row ai-chat-row-ai"><span class="ai-chat-icon">${iconSvg('sparkles', 13)}</span><div class="ai-chat-text">${bodyHtml}</div></div>`);
-        }
-
-        if (msg.needsRetry) {
-          // Attach listener
-          setTimeout(() => {
-             const btn = contentWrapper.querySelector(`#${retryBtnId}`);
-             if (btn) {
-                btn.addEventListener('click', () => {
-                   retryMessage(instance, index);
-                });
-             }
-          }, 0);
-        }
-      }
-
-      if (msg.role === 'assistant' && !msg.isError && !msg.isThinking && !msg.needsRetry && Array.isArray(msg.citations) && msg.citations.length > 0) {
-        appendCitations(contentWrapper, msg.citations);
-      }
-
-      // Verification and search-grounded badges live on the message so
-      // they survive this function's innerHTML rebuild; the old imperative
-      // appends were wiped by the next follow-up/retry, silently dropping
-      // in-flight verification results.
-      if (msg.role === 'assistant' && !msg.isError && !msg.isThinking && !msg.needsRetry) {
-        if (msg.searchGrounded) {
-          appendSearchGroundedBadge(contentWrapper);
-        }
-        if (msg.verification) {
-          appendVerificationBadge(contentWrapper, msg.verification);
-        }
-      }
-    });
-
-    // Auto-scroll logic
-    const lastMsg = instance.messages[instance.messages.length - 1];
-    const isNewMessage = lastMsg && (lastMsg.role === 'user' || lastMsg.isThinking);
-    
-    if (isNewMessage || isNearBottom) {
-       // Scroll to bottom if it's a new follow-up OR if the user was already at the bottom
-       contentWrapper.scrollTop = contentWrapper.scrollHeight;
-    } else {
-       // Otherwise, restore the user's previous scroll position
-       contentWrapper.scrollTop = previousScrollTop;
-    }
-  } catch (err) {
-    console.error("Popup render loop crashed:", err);
-    contentWrapper.insertAdjacentHTML('beforeend', `<div class="ai-popup-error-text">Error rendering messages: ${err.message}</div>`);
-  }
+// Helper: calculate absolute scroll offset for an element inside a scrolling container
+function getElementScrollOffset(container, el) {
+  if (!container || !el) return 0;
+  const containerRect = container.getBoundingClientRect();
+  const elRect = el.getBoundingClientRect();
+  return Math.max(0, container.scrollTop + (elRect.top - containerRect.top));
 }
 
 // Sources are external search results, so create every element through the DOM
@@ -3076,70 +2845,6 @@ function appendCitations(container, citations) {
   container.appendChild(details);
 }
 
-// Temporary compatibility function
-function updatePopupContent(instance, content) {
-  instance.messages = [{ role: 'assistant', content: content, isStatus: true }];
-  renderMessages(instance);
-}
-
-// --- NEW logic to handle Retrying a message ---
-function retryMessage(instance, messageIndex) {
-  if (!activePopups.includes(instance)) return;
-
-  // The conversation context we send should be everything UP TO the user's prompt (which is messageIndex - 1)
-  // because we are rewriting the assistant's previous answer at `messageIndex`.
-  // Error placeholders are raw display HTML, never real assistant replies, so drop them.
-  const messagesContext = instance.messages.slice(0, messageIndex).filter(m => !m.isError);
-  
-  // Set the message state to loading. isThinking routes it through the
-  // animated loading indicator (and keeps it out of the request context).
-  const initialQuote = initLoadingQuote(instance);
-  instance.messages[messageIndex] = { role: 'assistant', content: initialQuote, isThinking: true, isError: false, needsRetry: false };
-  renderMessages(instance);
-
-  const modelId = instance.lastModelId || null;
-
-  const stream = trackAiStream(instance, () => instance.messages[messageIndex]);
-
-  // On timeout, rewrite the slot in place (the shared error helper would
-  // push at the end and shift messageIndex).
-  const watchdog = createResponseWatchdog(() => {
-    if (!activePopups.includes(instance)) return;
-    stopLoadingQuoteRotation(instance);
-    instance.messages[messageIndex] = { role: 'assistant', content: '<span class="ai-popup-error-text">Error: The retry request timed out with no response.</span>', isError: true };
-    renderMessages(instance);
-  });
-
-  chrome.runtime.sendMessage(
-    { type: "getAiDefinition", word: instance.sourceWord, modelId: modelId, messages: messagesContext, requestId: stream.requestId, context: instance.implicitContext || undefined },
-    (response) => {
-      watchdog.done();
-      stream.done();
-      if (watchdog.fired()) return; // watchdog already took over the UI
-      if (!activePopups.includes(instance)) {
-        stopLoadingQuoteRotation(instance);
-        return;
-      }
-
-      if (chrome.runtime.lastError) {
-        response = { error: chrome.runtime.lastError.message };
-      }
-
-      if (response && !response.error) {
-        instance.messages[messageIndex] = { role: 'assistant', content: response.definition, citations: response.citations || [], isError: false, needsRetry: false };
-        notifyModelFallback(instance, response);
-      } else {
-        instance.messages[messageIndex] = { 
-           role: 'assistant', 
-           content: `<span class="ai-popup-error-text">Error retrying message: ${String(response?.error || 'Unknown error').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;')}</span>`,
-           isError: true 
-        };
-      }
-      renderMessages(instance);
-    }
-  );
-}
-
 // --- Multi-model compare mode (Issue #27) ---
 // One question, every configured model, all answering at once. The popup fans
 // out one getAiDefinition per model (each with its own requestId so the
@@ -3175,7 +2880,7 @@ function startCompareLookup(instance, word, customPrompt) {
     answerModelName: null,  // who actually answered (set from the response)
     promptName: null,
     lastRequest: null,
-    bodyPinned: true
+    bodyPinned: false
   }));
 
   instance.isLoading = true;
@@ -3226,6 +2931,61 @@ function ensureCompareSlotLoaded(instance, index) {
   }
 }
 
+// Zero-models fallback for a popup that already has its follow-up box (the
+// empty hotkey popup): there is nobody to ask, so the typed question gets a
+// persistent setup error under the greeting. Reload re-checks storage —
+// models configured in the meantime upgrade the popup straight into a
+// compare fan-out of the same question.
+function showSetupErrorForQuestion(instance, promptToSend, displayText) {
+  const contentEl = instance.popup && instance.popup.querySelector('#ai-popup-content');
+  if (!contentEl) return;
+
+  if (instance.showUserQuestions && displayText) {
+    contentEl.insertAdjacentHTML('beforeend',
+      `<div class="ai-chat-row ai-chat-row-user"><div class="ai-chat-bubble">${escapeHtmlText(displayText).replace(/\n/g, '<br>')}</div></div>`);
+  }
+
+  const errorId = 'error-' + Date.now();
+  const errorText = 'Error: No default AI model configured. Please set one in the options page.';
+  contentEl.insertAdjacentHTML('beforeend',
+    `<div class="ai-chat-row ai-chat-row-ai"><span class="ai-chat-icon">${iconSvg('sparkles', 13)}</span>` +
+    `<div class="ai-chat-text"><span class="ai-popup-error-text">${errorText}</span> ` +
+    `<button id="${errorId}-retry" class="ai-popup-retry-btn ai-popup-error-reload">Reload</button></div></div>`);
+
+  setTimeout(() => {
+    const retryBtn = instance.popup && instance.popup.querySelector(`#${errorId}-retry`);
+    if (!retryBtn) return;
+    retryBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      retryBtn.textContent = "Working...";
+      retryBtn.style.opacity = "0.7";
+      retryBtn.style.cursor = "wait";
+      chrome.storage.sync.get({ secretsLocalOnly: false, models: [], defaultModelId: null, customPrompts: [], defaultPromptId: null }, (syncData) => {
+        if (!activePopups.includes(instance)) return;
+        const got = (models) => {
+          if (!activePopups.includes(instance)) return;
+          if (models.length === 0) {
+            // Still unconfigured: restore the button; the error row stays.
+            retryBtn.textContent = "Reload";
+            retryBtn.style.opacity = "";
+            retryBtn.style.cursor = "";
+            return;
+          }
+          instance.models = models;
+          createSelectors(instance, models, syncData.customPrompts || [], syncData.defaultModelId || null, null, instance.sourceWord || 'Custom Question', syncData.defaultPromptId || null);
+          runCompareFollowup(instance, promptToSend, displayText);
+        };
+        if (syncData.secretsLocalOnly) {
+          chrome.storage.local.get(['models', 'defaultModelId'], (localData) => got(localData.models || []));
+        } else {
+          got(syncData.models || []);
+        }
+      });
+    });
+  }, 0);
+}
+
 // Sends the same question to every model ALREADY in the conversation. Models
 // the user has not slid to yet stay idle (un-billed); they join at the
 // original question whenever their card is first visited.
@@ -3236,10 +2996,12 @@ function runCompareFollowup(instance, promptToSend, displayText) {
     // kept as the join seed for late-visited cards.
     const models = (instance.models || []).slice(0, COMPARE_MODEL_CAP);
     if (models.length === 0) {
-      // No models to ask — unlock the box and say so; it must never stick
-      // disabled with the user's typed question swallowed.
+      // No models to ask — unlock the box, say so, and leave a persistent
+      // setup error under the greeting; the typed question must never be
+      // silently swallowed.
       updateCompareFollowupState(instance, false);
       showPopupToast(instance, 'No models configured to compare', 'error');
+      showSetupErrorForQuestion(instance, promptToSend, displayText);
       return;
     }
     instance.compareWord = instance.sourceWord || 'Custom Question';
@@ -3247,7 +3009,7 @@ function runCompareFollowup(instance, promptToSend, displayText) {
     instance.compareFirstMessages = [{ role: 'user', content: promptToSend, displayContent: displayText }];
     instance.compareSlots = models.map(m => ({
       modelId: m.id, modelName: m.name, messages: [], started: false, status: 'idle',
-      settled: false, errorText: null, answerModelName: null, promptName: null, lastRequest: null, bodyPinned: true
+      settled: false, errorText: null, answerModelName: null, promptName: null, lastRequest: null, bodyPinned: false
     }));
     instance.isLoading = true;
     startLoadingQuoteRotation(instance);
@@ -3268,8 +3030,13 @@ function runCompareFollowup(instance, promptToSend, displayText) {
   instance.isLoading = true;
   startLoadingQuoteRotation(instance);
 
+  const followupId = 'fu_' + Date.now();
+
   activeSlots.forEach(slot => {
-    slot.messages.push({ role: 'user', content: promptToSend, displayContent: displayText });
+    slot.latestFollowupId = followupId;
+    slot.pendingFollowupScroll = true;
+    slot.bodyPinned = false;
+    slot.messages.push({ role: 'user', content: promptToSend, displayContent: displayText, followupId: followupId });
   });
   renderCompareView(instance);
 
@@ -3286,7 +3053,8 @@ function issueCompareRequest(instance, gen, slot, word, customPrompt, isFollowup
   slot.lastRequest = { word: word, customPrompt: customPrompt || null, isFollowup: !!isFollowup };
   slot.status = 'streaming';
   slot.settled = false;
-  slot.messages.push({ role: 'assistant', content: initLoadingQuote(instance), isThinking: true });
+  slot.bodyPinned = false;
+  slot.messages.push({ role: 'assistant', content: initLoadingQuote(instance), isThinking: true, followupId: slot.latestFollowupId });
   renderCompareView(instance);
   // A model just joined the conversation (late-visited card or retry): the
   // follow-up box must lock while it works, exactly as during a fan-out.
@@ -3339,7 +3107,7 @@ function settleCompareSlot(instance, slot, response) {
     slot.errorText = null;
     slot.answerModelName = response.usedModelName || slot.modelName;
     slot.promptName = response.promptName || slot.promptName;
-    const assistantMsg = { role: 'assistant', content: response.definition, citations: response.citations || [] };
+    const assistantMsg = { role: 'assistant', content: response.definition, citations: response.citations || [], followupId: slot.latestFollowupId };
     slot.messages.push(assistantMsg);
 
     chrome.storage.sync.get(['enableHallucinationGuard'], (guardData) => {
@@ -3456,6 +3224,25 @@ function renderCompareView(instance) {
 
     makeCompareSlider(instance, contentWrapper);
     applyCompareScroll(instance, false);
+
+    // Shift to new follow-up question and followed AI output upon submission
+    const cardBodies = contentWrapper.querySelectorAll('.ai-compare-card .ai-compare-body');
+    instance.compareSlots.forEach((slot, i) => {
+      if (slot.pendingFollowupScroll && cardBodies[i]) {
+        const anchorEl = cardBodies[i].querySelector('[data-followup-anchor="true"]');
+        if (anchorEl) {
+          const updateScroll = () => {
+            if (!cardBodies[i] || !anchorEl.isConnected) return;
+            const targetOffset = Math.max(0, getElementScrollOffset(cardBodies[i], anchorEl) - 8);
+            cardBodies[i].scrollTop = targetOffset;
+            slot.bodyScrollTop = targetOffset;
+          };
+          updateScroll();
+          requestAnimationFrame(updateScroll);
+          slot.pendingFollowupScroll = false;
+        }
+      }
+    });
   } catch (err) {
     console.error('Compare render crashed:', err);
     contentWrapper.insertAdjacentHTML('beforeend', '<div class="ai-popup-error-text">Error rendering answers.</div>');
@@ -3463,7 +3250,7 @@ function renderCompareView(instance) {
 }
 
 // Fills one model's card: status header, answer body (live while streaming,
-// scrolled to bottom unless the reader scrolled up), and Save/Copy or Retry.
+// preserves reading position without pinning to bottom), and Save/Copy or Retry.
 // Cards of never-visited models render a quiet "not asked yet" placeholder —
 // sliding onto the card asks the model and replaces it.
 function buildCompareCard(instance, card, slot) {
@@ -3513,10 +3300,8 @@ function buildCompareCard(instance, card, slot) {
   const body = document.createElement('div');
   body.className = 'ai-compare-body';
   body.addEventListener('scroll', () => {
-    // Stop auto-following new tokens once the reader deliberately scrolled
-    // up, and remember the offset so re-renders do not yank them to the top.
+    // Preserve manual reading position across stream re-renders
     slot.bodyScrollTop = body.scrollTop;
-    slot.bodyPinned = body.scrollHeight - body.scrollTop - body.clientHeight < 24;
   });
 
   appendCompareConversation(instance, body, slot);
@@ -3527,9 +3312,7 @@ function buildCompareCard(instance, card, slot) {
     err.textContent = slot.errorText || 'Something went wrong.';
     body.appendChild(err);
   }
-  if (slot.bodyPinned !== false) {
-    body.scrollTop = body.scrollHeight;
-  } else if (typeof slot.bodyScrollTop === 'number') {
+  if (typeof slot.bodyScrollTop === 'number') {
     body.scrollTop = slot.bodyScrollTop;
   }
   card.appendChild(body);
@@ -3557,13 +3340,20 @@ function buildCompareCard(instance, card, slot) {
 // the same question on every card would be noise), and per-turn citations.
 function appendCompareConversation(instance, body, slot) {
   let drewAny = false;
+  let markedFollowupAnchor = false;
   slot.messages.forEach(msg => {
     if (!msg || msg.isError) return;
+
+    const isFollowupStart = slot.latestFollowupId && msg.followupId === slot.latestFollowupId && !markedFollowupAnchor;
 
     if (msg.role === 'user') {
       if (!instance.showUserQuestions) return;
       const row = document.createElement('div');
       row.className = 'ai-chat-row ai-chat-row-user';
+      if (isFollowupStart) {
+        row.setAttribute('data-followup-anchor', 'true');
+        markedFollowupAnchor = true;
+      }
       const bubble = document.createElement('div');
       bubble.className = 'ai-chat-bubble';
       bubble.innerHTML = escapeHtmlText(String(msg.displayContent || msg.content || '')).replace(/\n/g, '<br>');
@@ -3576,6 +3366,10 @@ function appendCompareConversation(instance, body, slot) {
 
     const turn = document.createElement('div');
     turn.className = 'ai-compare-turn' + (msg.isStreaming ? ' ai-compare-turn-live' : '');
+    if (isFollowupStart) {
+      turn.setAttribute('data-followup-anchor', 'true');
+      markedFollowupAnchor = true;
+    }
     if (msg.isThinking || msg.isStatus) {
       turn.innerHTML = buildLoadingHtml(msg.content);
     } else {
@@ -4059,7 +3853,7 @@ function createSelectors(instance, models, prompts, currentModelId, currentPromp
 
   // --- Prompt Selector ---
   // Item ids are prompt CONTENT strings ('' = System Default), matching what
-  // redefineWithModelAndPrompt expects as customPrompt — identical to the old
+  // startCompareLookup expects as customPrompt — identical to the old
   // <select>, which also used content as the option value.
   let promptSelector;
   let lastPromptValue;
@@ -4177,166 +3971,9 @@ function createSelectors(instance, models, prompts, currentModelId, currentPromp
       return;
     }
 
-    if (instance.compareEnabled) {
-      reorderModelsFirst(newModelId);
-      startCompareLookup(instance, selectedText, newPromptContent);
-      return;
-    }
-
-    redefineWithModelAndPrompt(instance, selectedText, newModelId, newPromptContent);
+    reorderModelsFirst(newModelId);
+    startCompareLookup(instance, selectedText, newPromptContent);
   }
-}
-
-// --- Function to get a new definition with a specific model and prompt ---
-function redefineWithModelAndPrompt(instance, word, modelId, promptContent) {
-  if (!activePopups.includes(instance)) {
-    // Unreachable while the popup is visible; if it ever fires, the popup DOM
-    // outlived its registration and every control inside would be dead. Say
-    // so instead of silently dropping the user's model/prompt switch.
-    console.error('[AI Popup] model/prompt switch ignored: popup instance is no longer active');
-    return;
-  }
-  const popup = instance.popup;
-
-  // Set the interaction flag
-  instance.isInteracting = true;
-
-  function performRedefineFetch() {
-    // Update UI to show loading state by adding a thinking indicator
-    const initialQuote = initLoadingQuote(instance);
-    instance.messages.push({ role: 'assistant', content: initialQuote, isThinking: true });
-    try { renderMessages(instance); } catch (e) { console.error('crash in pre redfr', e); }
-    
-    // Remove old action buttons
-    const actions = popup.querySelector('.ai-popup-actions');
-    if (actions) actions.remove();
-
-    // Send message to background
-    const stream = trackAiStream(instance, () => {
-      const msgs = instance.messages;
-      return msgs.length > 0 ? msgs[msgs.length - 1] : null;
-    });
-
-    const watchdog = createResponseWatchdog(() => {
-      if (!activePopups.includes(instance)) return;
-      showRequestTimeoutError(instance, () => performRedefineFetch());
-    });
-
-    chrome.runtime.sendMessage(
-      { type: "getAiDefinition", word: word, modelId: modelId, customPrompt: promptContent, requestId: stream.requestId, context: instance.implicitContext || undefined },
-      (response) => {
-        watchdog.done();
-        stream.done();
-        if (watchdog.fired()) return; // watchdog already took over the UI
-        if (!activePopups.includes(instance)) {
-          stopLoadingQuoteRotation(instance);
-          return;
-        }
-
-        // Remove the temporary thinking indicator or streamed partial answer
-        instance.messages = instance.messages.filter(m => !m.isThinking && !m.isStreaming);
-
-        if (chrome.runtime.lastError) {
-          response = { error: chrome.runtime.lastError.message };
-        }
-
-        // 1. Re-create selectors
-        if (response && response.models && response.models.length > 0) {
-          createSelectors(instance, response.models, response.customPrompts, modelId, promptContent, word, response.defaultPromptId);
-        }
-
-        if (response && response.error) {
-          const errorId = 'error-' + Date.now();
-          const errorHtml = `<span class="ai-popup-error-text">Error: ${String(response.error).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;')}</span> <button id="${errorId}-retry" class="ai-popup-retry-btn ai-popup-error-reload">Reload</button>`;
-          
-          // Temporarily put error in messages to render it
-          instance.messages = [
-             { role: 'assistant', content: errorHtml, isError: true }
-          ];
-          renderMessages(instance);
-          
-          setTimeout(() => {
-            if (popup) {
-              const retryBtn = popup.querySelector(`#${errorId}-retry`);
-              if (retryBtn) {
-                retryBtn.addEventListener('click', (e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  e.target.textContent = "Working...";
-                  e.target.style.opacity = "0.7";
-                  e.target.style.cursor = "wait";
-                  setTimeout(() => performRedefineFetch(), 150);
-                });
-              }
-            }
-          }, 0);
-        } else {
-          // Update the definition
-          const definitionText = response ? response.definition : "Error resolving definition";
-          const modelName = (response && response.usedModelName)
-            || (response && response.models ? (response.models.find(m => m.id === modelId)?.name || 'Unknown Model') : 'Unknown Model');
-
-          if (response && response.usedPrompt) {
-             // Instead of wiping the array, rebuild/modify the existing messages.
-             // If we already have follow-ups, preserve them.
-             if (instance.messages && instance.messages.length > 2) {
-                instance.messages[0] = { role: 'user', content: response.usedPrompt };
-                instance.messages[1] = { role: 'assistant', content: response.definition, citations: response.citations || [] };
-
-                // Flag subsequent AI messages as needing retry. Credit the
-                // model that actually answered when the fallback chain fired.
-                instance.lastModelId = (response.usedModelId || modelId);
-                instance.lastModelName = modelName;
-                instance.lastPromptContent = promptContent;
-                instance.sourceWord = word;
-                
-                for (let i = 2; i < instance.messages.length; i++) {
-                   if (instance.messages[i].role === 'assistant') {
-                      instance.messages[i].needsRetry = true;
-                   }
-                }
-             } else {
-                instance.messages = [
-                  { role: 'user', content: response.usedPrompt },
-                  { role: 'assistant', content: response.definition, citations: response.citations || [] }
-                ];
-             }
-          } else {
-             instance.messages = [
-                { role: 'assistant', content: definitionText, citations: response?.citations || [] }
-             ];
-          }
-
-          renderMessages(instance);
-
-          // Re-create the save button after model change
-          createActionButtons(instance, word, definitionText, modelName, response.promptName, response?.citations || []);
-          notifyModelFallback(instance, response);
-
-          // --- NEW: Trigger Hallucination Verification for Redefined Fetch (with Smart Bypass) ---
-          chrome.storage.sync.get(['enableHallucinationGuard'], (guardData) => {
-            if (guardData.enableHallucinationGuard) {
-              if (response && response.usedWebSearch) {
-                showSearchGroundedIndicator(instance);
-              } else {
-                triggerVerification(instance, word, definitionText, {
-                  modelId: modelId,
-                  word: word,
-                  refreshActions: true,
-                  searchGroundingAvailable: !!(response && response.searchGroundingAvailable)
-                });
-              }
-            }
-          });
-        }
-
-        // Reset the flag
-        setTimeout(() => { instance.isInteracting = false; }, 100);
-      }
-    );
-  }
-
-  performRedefineFetch();
 }
 
 // --- UPDATED to accept instance ---
@@ -4814,119 +4451,12 @@ function createFollowupInput(instance, word) {
          promptToSend += '\n\n' + settings.followupCustomMessage;
       }
 
-      // Compare mode: the question goes to every model's own conversation,
-      // rendered as fresh answer cards. The single-model history is not used.
-      if (instance.compareEnabled) {
-        runCompareFollowup(instance, promptToSend, text);
-        return;
-      }
-
-      // Add to history (use displayContent to hide the hidden prompt rule from the popup UI)
-      instance.messages.push({ role: 'user', content: promptToSend, displayContent: text });
-
-      performFetch();
+      // The question goes to every model's own conversation, rendered as
+      // fresh answer cards (or a setup error when no model is configured).
+      runCompareFollowup(instance, promptToSend, text);
     });
   }
 
-  function performFetch() {
-    input.disabled = true;
-    sendBtn.disabled = true;
-
-    try {
-      // Push thinking indicator and render to UI immediately
-      const initialQuote = initLoadingQuote(instance);
-      instance.messages.push({ role: 'assistant', content: initialQuote, isThinking: true });
-      renderMessages(instance);
-    } catch (e) {
-      console.error("render crashed on pre-fetch", e);
-    }
-
-    const selectedModelOpt = popup.querySelector('#ai-popup-model-selector');
-    const modelId = selectedModelOpt ? selectedModelOpt.value : null;
-
-    const stream = trackAiStream(instance, () => {
-      const msgs = instance.messages;
-      return msgs.length > 0 ? msgs[msgs.length - 1] : null;
-    });
-
-    const watchdog = createResponseWatchdog(() => {
-      if (!activePopups.includes(instance)) return;
-      showRequestTimeoutError(instance, () => performFetch());
-    });
-
-    chrome.runtime.sendMessage(
-      { type: "getAiDefinition", word: word, modelId: modelId, messages: instance.messages.filter(m => !m.isThinking && !m.isError && !m.isStreaming), requestId: stream.requestId, context: instance.implicitContext || undefined },
-      (response) => {
-        watchdog.done();
-        stream.done();
-        if (watchdog.fired()) return; // watchdog already took over the UI
-        if (!activePopups.includes(instance)) {
-          stopLoadingQuoteRotation(instance);
-          return;
-        }
-
-        input.disabled = false;
-        sendBtn.disabled = false;
-        input.focus();
-
-        // Remove the loading indicator or streamed partial answer
-        instance.messages = instance.messages.filter(m => !m.isThinking && !m.isStreaming);
-
-        if (response && !response.error) {
-          instance.messages.push({ role: 'assistant', content: response.definition, citations: response.citations || [] });
-          notifyModelFallback(instance, response);
-
-          // --- NEW: Trigger Hallucination Verification (with Smart Bypass) ---
-          chrome.storage.sync.get(['enableHallucinationGuard'], (guardData) => {
-            if (guardData.enableHallucinationGuard) {
-              if (response && response.usedWebSearch) {
-                showSearchGroundedIndicator(instance);
-              } else {
-                const userMsgs = instance.messages.filter(m => m.role === 'user');
-                const lastUserMsg = userMsgs.length > 0 ? userMsgs[userMsgs.length - 1].content : word;
-                triggerVerification(instance, lastUserMsg, response.definition, {
-                  modelId: modelId,
-                  word: word,
-                  refreshActions: false,
-                  searchGroundingAvailable: !!(response && response.searchGroundingAvailable)
-                });
-              }
-            }
-          });
-        } else {
-          // Add error message with retry button to history
-          const errorId = 'error-' + Date.now();
-          const errorHtml = `<span class="ai-popup-error-text">Error: ${String(response?.error || 'Unknown error').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;')}</span> <button id="${errorId}-retry" class="ai-popup-retry-btn ai-popup-error-reload">Reload</button>`;
-          instance.messages.push({ role: 'assistant', content: errorHtml, isError: true, errorId: errorId });
-
-          // Setup the error retry button (errorId is unique to this error)
-          setTimeout(() => {
-            const retryBtn = popup.querySelector(`#${errorId}-retry`);
-            if (retryBtn) {
-              retryBtn.addEventListener('click', (e) => {
-                 e.preventDefault();
-                 e.stopPropagation();
-                 e.target.textContent = "Working...";
-                 e.target.style.opacity = "0.7";
-                 e.target.style.cursor = "wait";
-                 setTimeout(() => {
-                   // Remove only this error message — anything appended after it
-                   // (a newer follow-up, indicators) must survive.
-                   const idx = instance.messages.findIndex(m => m.errorId === errorId);
-                   if (idx !== -1) instance.messages.splice(idx, 1);
-                   performFetch();
-                 }, 150);
-              });
-            }
-          }, 0);
-        }
-
-        try {
-          renderMessages(instance);
-        } catch(e) { console.error("render crashed on post-fetch", e); }
-      }
-    );
-  }
 }
 
 
@@ -5056,7 +4586,6 @@ function restoreConversationFromStash(instance, stash, models) {
 function reopenLastConversationPopup() {
   const popupInstance = showPopup(0, 0, 'Restoring your last conversation…');
   popupInstance.isLoading = true;
-  popupInstance.compareEnabled = true;
 
   chrome.runtime.sendMessage({ type: 'getLastConversation' }, (resp) => {
     if (chrome.runtime.lastError) resp = null;
@@ -5303,35 +4832,11 @@ function saveConversationAsPdf(instance, messagesOverride, subtitle) {
   chrome.runtime.sendMessage({ type: "openPdfTab", htmlContent: html });
 }
 
-// --- NEW: Search Grounded Indicator (Smart Bypass) ---
-// The badge is message state (like citations), painted by renderMessages.
-// The previous imperative append was destroyed by the next renderMessages
-// call (any follow-up, retry or model switch), so it only ever showed
-// until the user's next interaction.
-function showSearchGroundedIndicator(popupInstance) {
-  if (!popupInstance || !popupInstance.popup) return;
-  const msg = lastAssistantMessage(popupInstance);
-  if (!msg) return;
-  msg.searchGrounded = true;
-  renderMessages(popupInstance);
-}
-
 function appendSearchGroundedBadge(container) {
   const indicator = document.createElement('div');
   indicator.className = 'ai-popup-citations';
   indicator.innerHTML = `<span style="color:var(--popup-context-label);">${iconSvg('globe', 13)}</span> <strong style="color:var(--popup-context-label);">Search Grounded</strong> <span style="opacity:0.8">· Response is based on live web results. Hallucination Guard bypassed.</span>`;
   container.appendChild(indicator);
-}
-
-// --- NEW: Hallucination Verification UI Logic ---
-// Same state-driven approach: triggerVerification marks the verified
-// message pending and updates it when the background check resolves, so
-// the badge survives any number of re-renders in between.
-function lastAssistantMessage(popupInstance) {
-  const candidates = popupInstance.messages.filter(m =>
-    m.role === 'assistant' && !m.isError && !m.isThinking && !m.needsRetry
-  );
-  return candidates.length > 0 ? candidates[candidates.length - 1] : null;
 }
 
 // Module-level twin of the transcript's escapeHtml (which is function-
@@ -5344,50 +4849,6 @@ function escapeVerifyText(str) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
-}
-
-function triggerVerification(popupInstance, originalPrompt, aiResponse, retryInfo) {
-  if (!popupInstance || !popupInstance.popup) return;
-  const msg = lastAssistantMessage(popupInstance);
-  if (!msg) return;
-
-  msg.verification = { state: 'pending' };
-  renderMessages(popupInstance);
-
-  chrome.runtime.sendMessage({
-    type: "verifyAiResponse",
-    originalPrompt: originalPrompt,
-    aiResponse: aiResponse,
-    // The verifier needs the same context the answering model saw, or it
-    // flags context-derived facts as claims the model couldn't know.
-    context: popupInstance.implicitContext || undefined
-  }, (response) => {
-    if (!activePopups.includes(popupInstance)) return;
-    // The message may have been replaced since (e.g. a redefine rebuilt
-    // instance.messages); painting the stale result on a different
-    // response would be wrong, so only update if it is still live.
-    if (!popupInstance.messages.includes(msg)) return;
-
-    if (chrome.runtime.lastError || !response || response.error) {
-      msg.verification = { state: 'failed' };
-    } else {
-      msg.verification = {
-        state: response.result && response.result.is_hallucinating ? 'hallucination' : 'verified',
-        reasoning: (response.result && response.result.reasoning) || '',
-        corrections: Array.isArray(response.result && response.result.corrections) ? response.result.corrections.map(String) : []
-      };
-      // Auto-recovery: the guard just proved the term sits outside the
-      // model's knowledge — exactly the case where a grounded search is
-      // needed but the model didn't feel uncertain enough to make one.
-      // When regenerate declines (stale message, no user turn), fall
-      // through and paint the badge as before.
-      if (msg.verification.state === 'hallucination' && retryInfo && retryInfo.searchGroundingAvailable
-          && regenerateWithGroundedSearch(popupInstance, msg, retryInfo)) {
-        return;
-      }
-    }
-    renderMessages(popupInstance);
-  });
 }
 
 function triggerCompareVerification(instance, slot, msg, originalPrompt, aiResponse) {
@@ -5419,124 +4880,6 @@ function triggerCompareVerification(instance, slot, msg, originalPrompt, aiRespo
   });
 }
 
-// Re-asks a guard-flagged answer with the web_search tool forced. The
-// popup's conversation (minus the flagged reply) is replayed verbatim, so
-// initial lookups, redefines, and follow-ups all regenerate correctly —
-// the first user message already carries the templated/custom prompt. The
-// replacement answer is either search-grounded (badge) or verified again
-// with no retryInfo, so a second hallucination cannot loop. Returns true
-// when it took over the popup (caller skips its own re-render).
-function regenerateWithGroundedSearch(popupInstance, flaggedMsg, retryInfo) {
-  // Only regenerate when the flagged answer is still the live last message;
-  // a follow-up typed during verification makes it stale.
-  const msgs = popupInstance.messages;
-  if (!msgs.length || msgs[msgs.length - 1] !== flaggedMsg) return false;
-  const convo = msgs.filter(m => !m.isThinking && !m.isError && !m.isStreaming && m !== flaggedMsg);
-  if (!convo.some(m => m.role === 'user')) return false;
-
-  const setFollowupDisabled = (disabled) => {
-    if (!popupInstance.popup) return;
-    const followupInput = popupInstance.popup.querySelector('#ai-popup-followup-input');
-    const followupSend = popupInstance.popup.querySelector('.ai-popup-followup-send');
-    if (followupInput) followupInput.disabled = disabled;
-    if (followupSend) followupSend.disabled = disabled;
-  };
-
-  popupInstance.isLoading = true;
-  setFollowupDisabled(true);
-
-  // Retire the save actions bound to the hallucinated text, then swap the
-  // flagged answer for a thinking slot the retry streams into.
-  if (popupInstance.popup) {
-    const actions = popupInstance.popup.querySelector('.ai-popup-actions');
-    if (actions) actions.remove();
-  }
-  msgs.splice(msgs.indexOf(flaggedMsg), 1, { role: 'assistant', content: 'Hallucination detected — searching the web for a grounded answer...', isThinking: true, isStaticLabel: true });
-  renderMessages(popupInstance);
-
-  const stream = trackAiStream(popupInstance, () => {
-    const current = popupInstance.messages;
-    return current.length > 0 ? current[current.length - 1] : null;
-  });
-
-  // A forced-search pass runs several sequential provider calls (tool round,
-  // Tavily, answer round); if the whole thing never comes back, restore the
-  // flagged answer and offer a retry instead of spinning forever.
-  const watchdog = createResponseWatchdog(() => {
-    if (!activePopups.includes(popupInstance)) return;
-    popupInstance.messages = popupInstance.messages.filter(m => !m.isThinking && !m.isStreaming);
-    popupInstance.messages.push(flaggedMsg);
-    showRequestTimeoutError(popupInstance, () => {
-      popupInstance.messages = popupInstance.messages.filter(m => !m.isError);
-      regenerateWithGroundedSearch(popupInstance, flaggedMsg, retryInfo);
-    });
-  });
-
-  const payload = {
-    type: "getAiDefinition",
-    word: retryInfo.word,
-    requestId: stream.requestId,
-    context: popupInstance.implicitContext || undefined,
-    messages: convo,
-    forceSearch: true
-  };
-  if (retryInfo.modelId) payload.modelId = retryInfo.modelId;
-
-  chrome.runtime.sendMessage(payload, (response) => {
-    watchdog.done();
-    stream.done();
-    if (watchdog.fired()) return; // watchdog already took over the UI
-    if (!activePopups.includes(popupInstance)) {
-      stopLoadingQuoteRotation(popupInstance);
-      return;
-    }
-    popupInstance.isLoading = false;
-    setFollowupDisabled(false);
-
-    // Remove the thinking placeholder or streamed partial answer
-    popupInstance.messages = popupInstance.messages.filter(m => !m.isThinking && !m.isStreaming);
-
-    if (chrome.runtime.lastError) {
-      response = { error: chrome.runtime.lastError.message };
-    }
-
-    if (!response || response.error) {
-      // Put the flagged answer (with its badge) back rather than leaving
-      // the popup empty.
-      popupInstance.messages.push(flaggedMsg);
-      renderMessages(popupInstance);
-      return;
-    }
-
-    const definitionText = response.definition;
-    popupInstance.messages.push({ role: 'assistant', content: definitionText, citations: response.citations || [] });
-    renderMessages(popupInstance);
-    notifyModelFallback(popupInstance, response);
-
-    if (retryInfo.refreshActions) {
-      const modelName = (response && response.usedModelName) || 'Unknown Model';
-      createActionButtons(popupInstance, retryInfo.word, definitionText, modelName, response.promptName, response.citations || []);
-    }
-
-    chrome.storage.sync.get(['enableHallucinationGuard'], (guardData) => {
-      if (!guardData.enableHallucinationGuard) return;
-      if (response.usedWebSearch) {
-        showSearchGroundedIndicator(popupInstance);
-      } else {
-        // A fallback model answered without searching; verify normally.
-        // No retryInfo here — at most one auto-regeneration per answer.
-        const userMsgs = popupInstance.messages.filter(m => m.role === 'user');
-        const lastUserMsg = userMsgs.length > 0 ? userMsgs[userMsgs.length - 1].content : retryInfo.word;
-        triggerVerification(popupInstance, lastUserMsg, definitionText, null);
-      }
-    });
-  });
-
-  // Handed over to the caller: the popup UI is ours now (it skipped its own
-  // re-render), and the request above is already in flight.
-  return true;
-}
-
 function appendVerificationBadge(container, verification) {
   const ind = document.createElement('div');
   ind.className = 'ai-popup-verification';
@@ -5557,7 +4900,7 @@ function appendVerificationBadge(container, verification) {
 
   // Reasoning folds via native <details> (like citations do): no toggle
   // listener wiring is needed, and the fold state is simply rebuilt on
-  // every renderMessages call.
+  // every re-render.
   const reasoningHtml = verification.reasoning
     ? `<details style="margin-top: 8px; font-size: 11px; opacity: 0.9; border-top: 1px solid rgba(128,128,128,0.3); padding-top: 6px;"><summary style="cursor:pointer; text-decoration: underline; opacity: 0.7;">View reasoning</summary><div style="margin-top: 6px;"><strong>Reasoning:</strong> ${escapeVerifyText(verification.reasoning)}</div></details>`
     : '';

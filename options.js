@@ -6167,7 +6167,12 @@ function initBrandVersion() {
     fetch(`https://chromewebstore.google.com/detail/${chrome.runtime.id}`)
       .then(r => (r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then(html => {
-        const m = html.match(/"version"\s*:\s*"([\d.]+)"/) || html.match(/itemprop="version"[^>]*>\s*([\d.]+)/);
+        // Store markup drifts; try the locale-independent escaped-manifest JSON
+        // first, then the rendered "Version" details row, then legacy itemprop.
+        const m = html.match(/\\\"version\\\"\s*:\s*\\\"([\d.]+)\\\"/)
+          || html.match(/>Version<\/div>\s*<div[^>]*>\s*([\d.]+)</)
+          || html.match(/"version"\s*:\s*"([\d.]+)"/)
+          || html.match(/itemprop="version"[^>]*>\s*([\d.]+)/);
         const latest = m ? m[1] : null;
         chrome.storage.local.set({ latestVersionCheck: { at: now, latest } });
         renderUpdateHint(el, current, latest);
