@@ -3,21 +3,39 @@ chrome.action.onClicked.addListener((tab) => {
   chrome.runtime.openOptionsPage();
 });
 
+// In-flight generations keyed by the popup-chosen requestId (Issue #24). The
+// popup's Stop button aborts through here instead of waiting out the timeout
+// clocks. Entries live exactly as long as the getAiDefinition handler runs.
+const activeGenerations = new Map();
+
 // Prevent a provider or search request from leaving a popup on "Loading..."
 // forever when the remote service stops responding.
-async function fetchWithTimeout(url, options, timeoutMs = 30000) {
+async function fetchWithTimeout(url, options, timeoutMs = 30000, externalSignal = null) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  let externallyCancelled = false;
+  const onExternalAbort = () => {
+    externallyCancelled = true;
+    controller.abort();
+  };
+  if (externalSignal) {
+    if (externalSignal.aborted) onExternalAbort();
+    else externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+  }
 
   try {
     return await fetch(url, { ...options, signal: controller.signal });
   } catch (error) {
     if (error.name === 'AbortError') {
+      if (externallyCancelled) {
+        throw new Error('Generation stopped.');
+      }
       throw new Error('Request timed out after 30 seconds. Please try again.');
     }
     throw error;
   } finally {
     clearTimeout(timeoutId);
+    if (externalSignal) externalSignal.removeEventListener('abort', onExternalAbort);
   }
 }
 
@@ -31,7 +49,7 @@ async function fetchWithTimeout(url, options, timeoutMs = 30000) {
 // response (choices[0].message with reconstructed tool_calls), so the
 // orchestrator loop needs no branching. Falls back transparently when a
 // provider ignores stream:true and answers with plain JSON.
-async function streamChatWithTimeout(url, options, timeoutMs = 30000, onDelta, totalMs = 120000) {
+async function streamChatWithTimeout(url, options, timeoutMs = 30000, onDelta, totalMs = 120000, externalSignal = null) {
   const controller = new AbortController();
   let abortReason = 'stall';
   const totalId = setTimeout(() => { abortReason = 'total'; controller.abort(); }, totalMs);
@@ -40,6 +58,16 @@ async function streamChatWithTimeout(url, options, timeoutMs = 30000, onDelta, t
     clearTimeout(timeoutId);
     timeoutId = setTimeout(() => { abortReason = 'stall'; controller.abort(); }, timeoutMs);
   };
+  // User-initiated abort (Issue #24): distinguished from both timeout clocks
+  // so the surfaced error reads "stopped", not "timed out".
+  const onExternalAbort = () => {
+    abortReason = 'cancelled';
+    controller.abort();
+  };
+  if (externalSignal) {
+    if (externalSignal.aborted) onExternalAbort();
+    else externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+  }
 
   try {
     const response = await fetch(url, { ...options, signal: controller.signal });
@@ -98,6 +126,9 @@ async function streamChatWithTimeout(url, options, timeoutMs = 30000, onDelta, t
     };
   } catch (error) {
     if (error.name === 'AbortError') {
+      if (abortReason === 'cancelled') {
+        throw new Error('Generation stopped.');
+      }
       if (abortReason === 'total') {
         throw new Error(`The response stream ran for over ${Math.round(totalMs / 1000)} seconds without finishing and was cut off. Please try again.`);
       }
@@ -107,6 +138,7 @@ async function streamChatWithTimeout(url, options, timeoutMs = 30000, onDelta, t
   } finally {
     clearTimeout(timeoutId);
     clearTimeout(totalId);
+    if (externalSignal) externalSignal.removeEventListener('abort', onExternalAbort);
   }
 }
 
@@ -623,6 +655,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // --- Case 1: Get a definition ---
   if (request.type === "getAiDefinition") {
 
+    // Cancellation hook (Issue #24): Stop in the popup aborts this controller
+    // through cancelAiRequest. Registered under the popup-chosen requestId for
+    // exactly the lifetime of this handler; the .finally below removes it on
+    // every exit path, so the map can never leak finished requests.
+    const cancelController = new AbortController();
+    if (typeof request.requestId === 'string' && request.requestId) {
+      activeGenerations.set(request.requestId, cancelController);
+    }
+
     // Get all saved models and the ID of the default one (routed through secret storage accessor)
     getSecretStorageConfig(['models', 'defaultModelId', 'customPrompts', 'defaultPromptId', 'tavilyApiKey', 'enableModelFallback', 'enableImplicitContext'], {
       models: [],
@@ -887,7 +928,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           method: 'POST',
           headers: headers, // Use the new headers object
           body: JSON.stringify(payload)
-        }, 30000, emitStreamDelta);
+        }, 30000, emitStreamDelta, 120000, cancelController.signal);
 
         // Some strict OpenAI-compatible servers 400 on stream_options instead
         // of ignoring it. Peek at the error (through a clone, so the regular
@@ -900,7 +941,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             method: 'POST',
             headers: headers,
             body: JSON.stringify(payload)
-          }, 30000, emitStreamDelta);
+          }, 30000, emitStreamDelta, 120000, cancelController.signal);
         }
 
         if (!result.ok) {
@@ -987,7 +1028,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ api_key: tavilyApiKey, query: query, max_results: 3 })
-              });
+              }, 30000, cancelController.signal);
               if (!tavilyResponse.ok) {
                 throw new Error(`Search request failed: ${tavilyResponse.status} ${tavilyResponse.statusText}`);
               }
@@ -1041,7 +1082,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 method: 'POST',
                 headers: headers,
                 body: JSON.stringify(payload)
-              }, 30000, emitStreamDelta);
+              }, 30000, emitStreamDelta, 120000, cancelController.signal);
 
                const nextResponse = nextResult.ok ? null : nextResult.response;
                if (!nextResult.ok) {
@@ -1066,7 +1107,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                        method: 'POST',
                        headers: headers,
                        body: JSON.stringify(payload)
-                     }, 30000, emitStreamDelta);
+                     }, 30000, emitStreamDelta, 120000, cancelController.signal);
 
                      if (!fallbackResult.ok) {
                        const fallbackResponse = fallbackResult.response;
@@ -1121,6 +1162,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           usedModel = modelChain[i];
           break;
         } catch (error) {
+          if (cancelController.signal.aborted) {
+            // The user pressed Stop: the whole request is dead — never
+            // advance the fallback chain after a cancellation (Issue #24).
+            sendResponse({ error: 'Generation stopped.', cancelled: true });
+            return;
+          }
           const failedName = modelChain[i].name || modelChain[i].modelName;
           console.error(`AI API call failed (${failedName}):`, error);
           failures.push({ name: failedName, message: error.message });
@@ -1128,6 +1175,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             emitStreamStandby(failedName);
           }
         }
+      }
+
+      if (cancelController.signal.aborted) {
+        sendResponse({ error: 'Generation stopped.', cancelled: true });
+        return;
       }
 
       if (!answer) {
@@ -1172,10 +1224,32 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         fallbackFailedModels: failures.map(f => f.name),
         usedPrompt: prompt, models: models, defaultModelId: defaultModelId, customPrompts: customPrompts || [], defaultPromptId: defaultPromptId, promptName: promptName
       });
+    }).finally(() => {
+      if (typeof request.requestId === 'string' && request.requestId) {
+        activeGenerations.delete(request.requestId);
+      }
     });
 
     // Return true to indicate that we will send a response asynchronously
     return true;
+  }
+
+  // --- Issue #24: abort an in-flight generation (popup Stop button) ---
+  if (request.type === "cancelAiRequest") {
+    const controller = (typeof request.requestId === 'string' && request.requestId)
+      ? activeGenerations.get(request.requestId)
+      : null;
+    if (controller) {
+      // Delete first so a double-click cannot abort a successor that reuses
+      // the id; aborting an already-finished controller is a harmless no-op.
+      activeGenerations.delete(request.requestId);
+      controller.abort();
+      sendResponse({ cancelled: true });
+    } else {
+      // Unknown or finished id — nothing in flight to stop.
+      sendResponse({ cancelled: false });
+    }
+    return;
   }
 
   // --- Case 2: Save an item to history ---

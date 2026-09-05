@@ -809,6 +809,40 @@ const popupStyles = `
     transform: translateY(-50%) scale(0.95);
   }
 
+  /* --- Stop Button (Issue #24) --- */
+  /* Sits exactly where the mic sits while a generation is in flight (the two
+     are never shown together), so the row's layout never shifts on stop. */
+  .ai-popup-followup-stop {
+    position: absolute;
+    right: 39px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: rgba(220, 38, 38, 0.92);
+    color: #fff;
+    border: none;
+    border-radius: 50%;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 120ms ease, background-color 120ms ease;
+  }
+  .ai-popup-followup-stop:hover {
+    background: rgba(185, 28, 28, 0.95);
+    transform: translateY(-50%) scale(1.05);
+  }
+  .ai-popup-followup-stop:active {
+    transform: translateY(-50%) scale(0.95);
+  }
+  .ai-popup-followup-stop:disabled {
+    opacity: 0.75;
+    cursor: default;
+    transform: translateY(-50%);
+  }
+
   /* --- Follow-up Mic Button --- */
   .ai-popup-followup-mic {
     position: absolute;
@@ -3050,6 +3084,7 @@ function runCompareFollowup(instance, promptToSend, displayText) {
 // the callers) makes "has this model been billed yet" single-sourced.
 function issueCompareRequest(instance, gen, slot, word, customPrompt, isFollowup) {
   slot.started = true;
+  slot.stopped = false;
   slot.lastRequest = { word: word, customPrompt: customPrompt || null, isFollowup: !!isFollowup };
   slot.status = 'streaming';
   slot.settled = false;
@@ -3060,14 +3095,27 @@ function issueCompareRequest(instance, gen, slot, word, customPrompt, isFollowup
   // follow-up box must lock while it works, exactly as during a fan-out.
   updateCompareFollowupState(instance, false);
 
+  // Request-scoped cancellation state (Issue #24). A slot flag alone cannot
+  // guard the sendMessage callback: stop → Regenerate reuses the slot, and a
+  // late response from the STOPPED request would settle the new one. The
+  // closure keeps its own ref, so only the request it belongs to ignores it.
+  const requestState = { requestId: null, cancelled: false };
+  slot.activeRequest = requestState;
+
   const stream = trackAiStream(instance, () => {
+    if (slot.settled || requestState.cancelled) return null;
     const msgs = slot.messages;
-    return msgs.length > 0 ? msgs[msgs.length - 1] : null;
+    const last = msgs.length > 0 ? msgs[msgs.length - 1] : null;
+    return (last && last.role === 'assistant') ? last : null;
   }, (inst) => renderCompareView(inst));
+  requestState.requestId = stream.requestId;
 
   const watchdog = createResponseWatchdog(() => {
     if (!activePopups.includes(instance)) return;
     if (gen !== instance.compareGen) return;
+    // Already settled (user Stop, or a Regenerate replaced this request):
+    // a late timeout must not rewrite the stopped card's state.
+    if (slot.settled || requestState.cancelled) return;
     settleCompareSlot(instance, slot, { error: 'The request timed out with no response.' });
   });
 
@@ -3091,6 +3139,7 @@ function issueCompareRequest(instance, gen, slot, word, customPrompt, isFollowup
     if (watchdog.fired()) return; // watchdog already took over this slot
     if (!activePopups.includes(instance)) return;
     if (gen !== instance.compareGen) return; // mode switched / superseded
+    if (requestState.cancelled) return; // stopped by the user (Issue #24)
     if (chrome.runtime.lastError) response = { error: chrome.runtime.lastError.message };
     settleCompareSlot(instance, slot, response);
   });
@@ -3100,6 +3149,7 @@ function issueCompareRequest(instance, gen, slot, word, customPrompt, isFollowup
 // busy-state bookkeeping that gates the follow-up input.
 function settleCompareSlot(instance, slot, response) {
   slot.settled = true;
+  slot.activeRequest = null; // its cancel path can never matter again
   slot.messages = slot.messages.filter(m => !m.isThinking && !m.isStreaming);
 
   if (response && !response.error && typeof response.definition === 'string') {
@@ -3156,7 +3206,44 @@ function updateCompareFollowupState(instance, wasFollowup) {
   const busy = slots.some(s => s.started && !s.settled);
   input.disabled = busy;
   send.disabled = busy;
+  // While any model is answering, the mic is useless (the box is locked) and
+  // Stop takes its place; idle restores the mic (Issue #24).
+  const mic = instance.popup.querySelector('.ai-popup-followup-mic');
+  const stop = instance.popup.querySelector('.ai-popup-followup-stop');
+  if (mic) mic.style.display = busy ? 'none' : '';
+  if (stop) {
+    stop.style.display = busy ? '' : 'none';
+    if (busy) stop.disabled = false;
+  }
   if (!busy && wasFollowup) input.focus();
+}
+
+// User-initiated abort (Issue #24): kill every in-flight generation of this
+// popup at once — the background request via cancelAiRequest, plus the local
+// watchdog/stream registrations so nothing fires afterwards. Each slot settles
+// through the normal machinery, which unlocks the follow-up box and leaves the
+// conversation intact for the card's Regenerate action.
+function stopCompareGeneration(instance) {
+  const slots = instance.compareSlots || [];
+  let stoppedAny = false;
+  slots.forEach(slot => {
+    if (!slot.started || slot.settled) return;
+    stoppedAny = true;
+    slot.stopped = true;
+    const requestState = slot.activeRequest;
+    if (requestState) {
+      requestState.cancelled = true;
+      if (requestState.requestId) {
+        activeStreamHandlers.delete(requestState.requestId);
+        chrome.runtime.sendMessage(
+          { type: 'cancelAiRequest', requestId: requestState.requestId },
+          () => { void chrome.runtime.lastError; }
+        );
+      }
+    }
+    settleCompareSlot(instance, slot, { error: 'Generation stopped.' });
+  });
+  if (stoppedAny) renderCompareView(instance);
 }
 
 // Re-asks only this model's last question after a failure.
@@ -3275,7 +3362,7 @@ function buildCompareCard(instance, card, slot) {
     status.innerHTML = iconSvg('checkCircle', 12) + '<span>done</span>';
   } else if (slot.status === 'error') {
     status.classList.add('is-error');
-    status.innerHTML = iconSvg('xCircle', 12) + '<span>failed</span>';
+    status.innerHTML = iconSvg('xCircle', 12) + '<span>' + (slot.stopped ? 'stopped' : 'failed') + '</span>';
   } else if (slot.status === 'streaming' || slot.status === 'waiting') {
     status.classList.add('is-busy');
     status.textContent = 'answering…';
@@ -3322,7 +3409,7 @@ function buildCompareCard(instance, card, slot) {
     retryRow.className = 'ai-compare-actions';
     const retryBtn = document.createElement('button');
     retryBtn.type = 'button';
-    retryBtn.innerHTML = iconSvg('refresh', 12) + '<span>Retry</span>';
+    retryBtn.innerHTML = iconSvg('refresh', 12) + '<span>' + (slot.stopped ? 'Regenerate' : 'Retry') + '</span>';
     retryBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       retryBtn.disabled = true;
@@ -4212,6 +4299,21 @@ function createFollowupInput(instance, word) {
   micBtn.className = 'ai-popup-followup-mic';
   micBtn.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>';
   micBtn.title = 'Type by speaking';
+
+  // Abort in-flight generations (Issue #24). Hidden while idle; visibility is
+  // driven by updateCompareFollowupState, which swaps it with the mic.
+  const stopBtn = document.createElement('button');
+  stopBtn.type = 'button';
+  stopBtn.className = 'ai-popup-followup-stop';
+  stopBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
+  stopBtn.title = 'Stop generating';
+  stopBtn.style.display = 'none';
+  stopBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    stopBtn.disabled = true;
+    stopCompareGeneration(instance);
+  });
+
   const inputWrapper = document.createElement('div');
   inputWrapper.style.position = 'relative';
   inputWrapper.style.flexGrow = '1';
@@ -4220,6 +4322,7 @@ function createFollowupInput(instance, word) {
   inputWrapper.appendChild(input);
   inputWrapper.appendChild(micBtn);
   inputWrapper.appendChild(sendBtn);
+  inputWrapper.appendChild(stopBtn);
 
   container.appendChild(inputWrapper);
   popup.appendChild(container);
