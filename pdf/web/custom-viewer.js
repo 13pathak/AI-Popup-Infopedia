@@ -3195,8 +3195,19 @@ document.getElementById('edit-btn-note').addEventListener('click', () => {
     const notePopup = document.getElementById('note-editor-popup');
     
     notePopup.dataset.hlId = String(hl.id);
-    notePopup.style.left = editPopup.style.left;
-    notePopup.style.top = editPopup.style.top;
+    // Anchor = where the box would sit next to the selection popup. Stash
+    // it even when a dragged position takes precedence, so the grip's
+    // double-click reset can always return the box to its highlight.
+    notePopup.dataset.anchorLeft = editPopup.style.left;
+    notePopup.dataset.anchorTop = editPopup.style.top;
+    const storedPos = getStoredNotePopupPos();
+    if (storedPos) {
+        notePopup.style.left = `${storedPos.left}px`;
+        notePopup.style.top = `${storedPos.top}px`;
+    } else {
+        notePopup.style.left = editPopup.style.left;
+        notePopup.style.top = editPopup.style.top;
+    }
     
     const noteEl = document.getElementById('note-textarea');
     setRichNoteContent(noteEl, hl);
@@ -3244,6 +3255,32 @@ function setStoredNotePopupExpanded(val) {
     } catch (e) {}
 }
 
+// Last dragged position of the floating note box (viewport-space px).
+// Absent = follow mode: the box opens anchored to the selection popup.
+function getStoredNotePopupPos() {
+    try {
+        const raw = localStorage.getItem('pdf_note_popup_pos');
+        if (!raw) return null;
+        const pos = JSON.parse(raw);
+        if (!Number.isFinite(pos.left) || !Number.isFinite(pos.top)) return null;
+        return { left: pos.left, top: pos.top };
+    } catch (e) {
+        return null;
+    }
+}
+
+function setStoredNotePopupPos(left, top) {
+    try {
+        localStorage.setItem('pdf_note_popup_pos', JSON.stringify({ left, top }));
+    } catch (e) {}
+}
+
+function clearStoredNotePopupPos() {
+    try {
+        localStorage.removeItem('pdf_note_popup_pos');
+    } catch (e) {}
+}
+
 const noteEditorEl = document.getElementById('note-textarea');
 if (noteEditorEl) {
     attachRichEditor(noteEditorEl, {
@@ -3285,6 +3322,97 @@ if (notePopupEl && typeof ResizeObserver !== 'undefined') {
     });
     notePopupResizeObserver.observe(notePopupEl);
 }
+
+// Drag the floating note box by its grip. The dropped position becomes
+// sticky (reused on later opens); a grip double-click clears it and
+// re-anchors the box to its current highlight.
+function attachNotePopupDragControls(grip) {
+    let drag = null; // {pointerId, startX, startY, origLeft, origTop, moved}
+
+    grip.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0) return;
+        const notePopup = document.getElementById('note-editor-popup');
+        if (!notePopup || notePopup.classList.contains('hidden')) return;
+        e.preventDefault(); // keep focus and the caret inside the textarea
+        e.stopPropagation();
+        drag = {
+            pointerId: e.pointerId,
+            startX: e.clientX,
+            startY: e.clientY,
+            origLeft: parseFloat(notePopup.style.left) || 0,
+            origTop: parseFloat(notePopup.style.top) || 0,
+            moved: false
+        };
+        try {
+            grip.setPointerCapture(e.pointerId);
+        } catch (err) {}
+        grip.classList.add('dragging');
+    });
+
+    grip.addEventListener('pointermove', (e) => {
+        if (!drag || e.pointerId !== drag.pointerId) return;
+        const notePopup = document.getElementById('note-editor-popup');
+        if (!notePopup || notePopup.classList.contains('hidden')) {
+            drag = null;
+            grip.classList.remove('dragging');
+            return;
+        }
+        const dx = e.clientX - drag.startX;
+        const dy = e.clientY - drag.startY;
+        if (!drag.moved && dx === 0 && dy === 0) return;
+        drag.moved = true;
+        notePopup.style.left = `${drag.origLeft + dx}px`;
+        notePopup.style.top = `${drag.origTop + dy}px`;
+        clampPopupToViewport(notePopup);
+    });
+
+    const endDrag = (e) => {
+        if (!drag || e.pointerId !== drag.pointerId) return;
+        const moved = drag.moved;
+        drag = null;
+        grip.classList.remove('dragging');
+        try {
+            grip.releasePointerCapture(e.pointerId);
+        } catch (err) {}
+        // Persist only real drags: a bare click, or the presses making up a
+        // double-click, must not silently pin the box away from its anchor.
+        if (moved) {
+            const notePopup = document.getElementById('note-editor-popup');
+            setStoredNotePopupPos(parseFloat(notePopup.style.left) || 0, parseFloat(notePopup.style.top) || 0);
+        }
+    };
+
+    grip.addEventListener('pointerup', endDrag);
+    grip.addEventListener('pointercancel', endDrag);
+
+    grip.addEventListener('dblclick', (e) => {
+        e.stopPropagation();
+        clearStoredNotePopupPos();
+        const notePopup = document.getElementById('note-editor-popup');
+        if (!notePopup || notePopup.classList.contains('hidden')) return;
+        const anchorLeft = parseFloat(notePopup.dataset.anchorLeft);
+        const anchorTop = parseFloat(notePopup.dataset.anchorTop);
+        if (Number.isFinite(anchorLeft) && Number.isFinite(anchorTop)) {
+            notePopup.style.left = `${anchorLeft}px`;
+            notePopup.style.top = `${anchorTop}px`;
+            clampPopupToViewport(notePopup);
+        }
+    });
+}
+
+const noteMoveGrip = document.getElementById('note-btn-move');
+if (noteMoveGrip) {
+    attachNotePopupDragControls(noteMoveGrip);
+}
+
+// A smaller window (or devtools opening) can leave a sticky position
+// off-screen; the popup's own ResizeObserver only fires on its size.
+window.addEventListener('resize', () => {
+    const notePopup = document.getElementById('note-editor-popup');
+    if (notePopup && !notePopup.classList.contains('hidden')) {
+        clampPopupToViewport(notePopup);
+    }
+});
 
 document.getElementById('note-btn-cancel').addEventListener('click', () => {
     hidePopups();
