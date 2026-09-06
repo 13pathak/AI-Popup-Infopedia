@@ -2405,7 +2405,7 @@ function stopLoadingQuoteRotation(instance) {
 // watchdog takes over the UI so a late real response is ignored. Deltas
 // intentionally do not reset the clock — the budget is sized for a full
 // fallback chain of slow-but-alive streams.
-const AI_REQUEST_WATCHDOG_MS = 180000;
+const AI_REQUEST_WATCHDOG_MS = 35000;
 
 function createResponseWatchdog(onTimeout) {
   let settled = false;
@@ -3036,12 +3036,12 @@ function startCompareLookup(instance, word, customPrompt) {
   } else if (allModels.length > COMPARE_MODEL_CAP) {
     showPopupToast(instance, `Comparing the first ${COMPARE_MODEL_CAP} of ${allModels.length} models — swipe for more`);
   } else {
-    showPopupToast(instance, `Asking 2 models — swipe to compare more`);
+    showPopupToast(instance, `Swipe or use arrows to compare ${models.length} models`);
   }
 
-  // Lazy fan-out: the default model and the one after it answer immediately.
+  // Lazy fan-out: only the primary model is asked up front.
+  // Other models answer on demand as soon as you slide to their card.
   ensureCompareSlotLoaded(instance, 0);
-  ensureCompareSlotLoaded(instance, 1);
 }
 
 // Asks one model on demand (first visit of its card, or a retry elsewhere).
@@ -3140,7 +3140,6 @@ function runCompareFollowup(instance, promptToSend, displayText) {
     startLoadingQuoteRotation(instance);
     renderCompareView(instance);
     ensureCompareSlotLoaded(instance, 0);
-    ensureCompareSlotLoaded(instance, 1);
     return;
   }
 
@@ -3280,11 +3279,12 @@ function settleCompareSlot(instance, slot, response) {
   // has finished — idle (never visited) models are excluded, or the box would
   // lock forever; a late-joined still-streaming model keeps it locked.
   const slots = instance.compareSlots;
-  if (slots && slots.length > 0 && slots.every(s => !s.started || s.settled)) {
+  const allSettled = slots && slots.length > 0 && slots.every(s => !s.started || s.settled);
+  if (allSettled) {
     instance.isLoading = false;
     stopLoadingQuoteRotation(instance);
-    updateCompareFollowupState(instance, !!(slot.lastRequest && slot.lastRequest.isFollowup));
   }
+  updateCompareFollowupState(instance, !!(allSettled && slot.lastRequest && slot.lastRequest.isFollowup));
 }
 
 // Locks or unlocks the shared follow-up box from live slot state. Locked
