@@ -626,6 +626,16 @@ const popupStyles = `
     border-radius: 0;
     flex-shrink: 0;
   }
+  .ai-popup-actions .custom-select-container {
+    flex: 1 1 auto;
+    min-width: 160px;
+    margin-left: auto;
+  }
+  .ai-popup-actions .custom-select {
+    height: 34px;
+    padding: 0 14px;
+    font-size: 13px;
+  }
 
   .ai-popup-button {
     font-family: inherit;
@@ -1187,6 +1197,44 @@ const popupStyles = `
   .ai-compare-body p:last-child { margin-bottom: 0; }
   /* Stacked conversation turns: follow-up answers land below earlier ones,
      separated by a hairline so the thread reads clearly. */
+  .ai-compare-turn {
+    display: flow-root;
+    position: relative;
+  }
+  .ai-turn-save-btn {
+    float: right;
+    margin-left: 8px;
+    margin-bottom: 4px;
+    background: rgba(var(--popup-accent-rgb), 0.1);
+    border: 1px solid rgba(var(--popup-accent-rgb), 0.25);
+    color: rgba(var(--popup-accent-rgb), 1);
+    border-radius: 6px;
+    width: 26px;
+    height: 26px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+    transition: all 140ms ease;
+    flex-shrink: 0;
+    line-height: 1;
+  }
+  .ai-turn-save-btn:hover {
+    background: rgba(var(--popup-accent-rgb), 0.22);
+    border-color: rgba(var(--popup-accent-rgb), 0.55);
+  }
+  .ai-turn-save-btn.is-saved {
+    background: rgba(16, 185, 129, 0.15);
+    border-color: #10b981;
+    color: #059669;
+    cursor: default;
+  }
+  :host([data-theme="dark"]) .ai-turn-save-btn.is-saved {
+    background: rgba(52, 211, 153, 0.18);
+    border-color: #34d399;
+    color: #34d399;
+  }
   .ai-compare-turn + .ai-compare-turn,
   .ai-compare-turn + .ai-chat-row,
   .ai-chat-row + .ai-compare-turn {
@@ -1342,6 +1390,8 @@ const POPUP_ICON_PATHS = {
   chevronLeft: '<polyline points="15 18 9 12 15 6"/>',
   sparkles: '<path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/>',
   bookmark: '<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>',
+  bookmarkPlus: '<path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/><line x1="12" y1="7" x2="12" y2="13"/><line x1="9" y1="10" x2="15" y2="10"/>',
+  bookmarkCheck: '<path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/><polyline points="9 10 11 12 15 8"/>',
   send: '<line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>',
   arrowRight: '<line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>'
 };
@@ -3507,6 +3557,84 @@ function buildCompareCard(instance, card, slot) {
   }
 }
 
+// Saves a specific conversation turn to history under the currently selected list.
+function saveTurnToHistory(instance, slot, msg, saveBtn) {
+  if (!activePopups.includes(instance)) return;
+  if (msg.isSaved) {
+    showPopupToast(instance, 'Already saved to list');
+    return;
+  }
+
+  const listSelector = instance.listSelector;
+  const listId = listSelector ? listSelector.value : null;
+  if (!listId) {
+    showPopupToast(instance, 'Please select or create a list first', 'error');
+    return;
+  }
+
+  // Determine the word / query title for this specific turn:
+  const msgIndex = slot.messages.indexOf(msg);
+  let precedingUserMsg = null;
+  for (let i = msgIndex - 1; i >= 0; i--) {
+    if (slot.messages[i] && slot.messages[i].role === 'user') {
+      precedingUserMsg = slot.messages[i];
+      break;
+    }
+  }
+
+  const isFirstAssistantTurn = !slot.messages.slice(0, msgIndex).some(m => m && m.role === 'assistant' && !m.isThinking && !m.isError);
+  let baseWord = instance.compareWord;
+  if (!baseWord || baseWord === 'Custom Question') {
+    const firstUser = slot.messages.find(m => m && m.role === 'user');
+    baseWord = (firstUser && (firstUser.displayContent || firstUser.content)) || baseWord || 'Conversation';
+  }
+
+  let wordToSave = baseWord;
+  const currentQuery = (precedingUserMsg && (precedingUserMsg.displayContent || precedingUserMsg.content)) || '';
+
+  if (isFirstAssistantTurn) {
+    wordToSave = baseWord;
+  } else {
+    wordToSave = baseWord ? `${baseWord}: ${currentQuery || 'Follow-up'}` : (currentQuery || 'Follow-up');
+  }
+
+  const { sourceUrl, sourceTitle } = collectSourceMetadata();
+  const modelName = slot.answerModelName || slot.modelName || 'AI';
+  const promptName = slot.promptName || 'System Default';
+  const citations = msg.citations || [];
+
+  if (saveBtn) saveBtn.disabled = true;
+
+  chrome.runtime.sendMessage({
+    type: 'saveToHistory',
+    word: wordToSave,
+    definition: msg.content,
+    listId: listId,
+    modelName: modelName,
+    promptName: promptName,
+    sourceUrl: sourceUrl,
+    sourceTitle: sourceTitle,
+    citations: citations
+  }, (saveResponse) => {
+    if (!activePopups.includes(instance)) return;
+    if (chrome.runtime.lastError || (saveResponse && saveResponse.status === 'error')) {
+      if (saveBtn) saveBtn.disabled = false;
+      showPopupToast(instance, 'Failed to save', 'error');
+    } else {
+      msg.isSaved = true;
+      if (saveBtn) {
+        saveBtn.disabled = false;
+        saveBtn.classList.add('is-saved');
+        saveBtn.title = 'Saved to list';
+        saveBtn.innerHTML = iconSvg('bookmarkCheck', 15);
+      }
+      const valEl = listSelector && listSelector.querySelector('.custom-select-value');
+      const listName = valEl ? valEl.textContent : 'list';
+      showPopupToast(instance, `Saved to ${listName}`);
+    }
+  });
+}
+
 // Renders one model's conversation inside its card body: completed answers as
 // separated turns, the live answer streaming at the end, the user's own
 // questions only when the "Show your own questions" setting is on (echoing
@@ -3555,6 +3683,18 @@ function appendCompareConversation(instance, body, slot) {
       }
       if (msg.verification) {
         appendVerificationBadge(turn, msg.verification);
+      }
+      if (!msg.isStreaming && msg.content) {
+        const saveBtn = document.createElement('button');
+        saveBtn.type = 'button';
+        saveBtn.className = 'ai-turn-save-btn' + (msg.isSaved ? ' is-saved' : '');
+        saveBtn.title = msg.isSaved ? 'Saved to list' : 'Save this output to list';
+        saveBtn.innerHTML = iconSvg(msg.isSaved ? 'bookmarkCheck' : 'bookmarkPlus', 15);
+        saveBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          saveTurnToHistory(instance, slot, msg, saveBtn);
+        });
+        turn.prepend(saveBtn);
       }
     }
     body.appendChild(turn);
@@ -3851,15 +3991,6 @@ function ensureCompareToolbar(instance) {
       const slot = visibleSlot();
       return slot ? latestCompareAnswer(slot) : null;
     };
-    const saveWordFor = (slot) => {
-      let wordToSave = instance.compareWord;
-      if (!wordToSave || wordToSave === 'Custom Question') {
-        const lastUser = slot.messages.filter(m => m.role === 'user').pop();
-        wordToSave = (lastUser && (lastUser.displayContent || lastUser.content)) || wordToSave || 'Conversation';
-      }
-      return wordToSave;
-    };
-
     // --- Listen (same button id so toggleSpeech can swap its icon) ---
     const speakButton = document.createElement('button');
     speakButton.type = 'button';
@@ -3912,9 +4043,11 @@ function ensureCompareToolbar(instance) {
         }
       }, { showCreateNew: true });
 
+      instance.listSelector = listSelector;
+
       // On re-creation (e.g. after "Create New List"), swap the new dropdown
       // in where the old one sat. The INITIAL append happens in the ordered
-      // sequence below, so the row reads icons-left, list+Save-right.
+      // sequence below, so the row reads icons-left, list-right.
       if (previousSelector && previousSelector.parentNode) {
         listSelector.style.marginLeft = 'auto';
         previousSelector.parentNode.replaceChild(listSelector, previousSelector);
@@ -3922,48 +4055,10 @@ function ensureCompareToolbar(instance) {
     }
     recreateDropdown(lists, validListId);
 
-    // --- Save: the visible card's answer into the chosen list ---
-    const finalSaveButton = document.createElement('button');
-    finalSaveButton.textContent = 'Save';
-    finalSaveButton.className = 'ai-popup-button ai-popup-button-save';
-    finalSaveButton.addEventListener('click', (ev) => {
-      ev.stopPropagation();
-      const slot = visibleSlot();
-      const answer = slot && latestCompareAnswer(slot);
-      if (!slot || !answer) { showPopupToast(instance, 'Nothing to save yet — wait for the answer'); return; }
-
-      const { sourceUrl, sourceTitle } = collectSourceMetadata();
-      chrome.runtime.sendMessage({
-        type: 'saveToHistory',
-        word: saveWordFor(slot),
-        definition: answer.content,
-        listId: listSelector.value,
-        modelName: slot.answerModelName || slot.modelName,
-        promptName: slot.promptName || 'System Default',
-        sourceUrl: sourceUrl,
-        sourceTitle: sourceTitle,
-        citations: answer.citations || []
-      }, (saveResponse) => {
-        if (!activePopups.includes(instance)) return;
-        if (chrome.runtime.lastError || (saveResponse && saveResponse.status === 'error')) {
-          showPopupToast(instance, 'Failed to save', 'error');
-        } else {
-          // Sliding to another model must leave the button usable, so the
-          // confirmation is a toast rather than a permanent "Saved" state —
-          // but a short lockout still swallows accidental double-clicks
-          // (the single-answer flow prevented duplicates by staying disabled).
-          finalSaveButton.disabled = true;
-          setTimeout(() => { if (activePopups.includes(instance)) finalSaveButton.disabled = false; }, 1200);
-          showPopupToast(instance, `Saved ${slot.answerModelName || slot.modelName}'s answer`);
-        }
-      });
-    });
-
     actionsContainer.appendChild(speakButton);
     actionsContainer.appendChild(pdfButton);
     listSelector.style.marginLeft = 'auto';
     actionsContainer.appendChild(listSelector);
-    actionsContainer.appendChild(finalSaveButton);
     mount();
   });
 }
