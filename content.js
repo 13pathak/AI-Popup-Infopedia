@@ -1077,7 +1077,7 @@ const popupStyles = `
     display: flex;
     flex-direction: column;
     min-height: 0;
-    flex: 1 1 auto;
+    flex: 0 1 auto;
     overflow: hidden;
     padding: 2px 0 0 0;
   }
@@ -1085,16 +1085,17 @@ const popupStyles = `
     overflow: hidden;
     position: relative;
     touch-action: pan-y; /* vertical answer scrolling stays native; horizontal is ours */
-    flex: 1 1 auto;
+    flex: 0 1 auto;
     min-height: 0;
-    height: 100%;
-    max-height: 100%;
+    will-change: height;
+  }
+  .ai-compare-viewport.animating {
+    transition: height 200ms ease-out;
   }
   .ai-compare-track {
     display: flex;
-    align-items: stretch;
+    align-items: flex-start;
     width: 100%;
-    height: 100%;
     will-change: transform;
   }
   .ai-compare-track.animating { transition: transform 200ms ease-out; }
@@ -1108,9 +1109,6 @@ const popupStyles = `
     background: var(--popup-card-bg);
     border-radius: 16px;
     padding: 14px 16px;
-    height: 100%;
-    max-height: 100%;
-    min-height: 0;
   }
   .ai-compare-header {
     display: flex;
@@ -1172,7 +1170,6 @@ const popupStyles = `
     text-align: left;
     overflow-y: auto;
     overscroll-behavior: contain;
-    flex: 1 1 auto;
     min-height: 60px;
     max-height: 38vh;
     padding-right: 4px;
@@ -3646,7 +3643,25 @@ function applyCompareScroll(instance, animate) {
   instance.compareIndex = Math.max(0, Math.min(instance.compareIndex || 0, n - 1));
   const cardWidth = viewport.clientWidth || 1;
   track.classList.toggle('animating', !!animate);
+  viewport.classList.toggle('animating', !!animate);
   track.style.transform = `translateX(${-(instance.compareIndex || 0) * cardWidth}px)`;
+
+  // Dynamically adapt viewport height to the active card so cards hug their content
+  const cards = track.querySelectorAll('.ai-compare-card');
+  const activeCard = cards[instance.compareIndex];
+  if (activeCard) {
+    const cardHeight = activeCard.offsetHeight;
+    if (cardHeight > 0) {
+      viewport.style.height = `${cardHeight}px`;
+    } else {
+      requestAnimationFrame(() => {
+        if (activeCard && activeCard.isConnected && activeCard.offsetHeight > 0) {
+          viewport.style.height = `${activeCard.offsetHeight}px`;
+        }
+      });
+    }
+  }
+
   updateCompareNav(instance);
   ensureCompareSlotLoaded(instance, instance.compareIndex);
 }
@@ -3700,6 +3715,7 @@ function makeCompareSlider(instance, wrapper) {
     if (!viewport || !track) return;
     const cardWidth = viewport.clientWidth || 1;
     track.classList.remove('animating');
+    viewport.classList.remove('animating');
     drag = {
       startX: e.clientX,
       base: -(instance.compareIndex || 0) * cardWidth,
