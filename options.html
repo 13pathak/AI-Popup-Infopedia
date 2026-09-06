@@ -1164,12 +1164,9 @@
         #model-selection-container button { padding: 10px 14px; }
 
         #model-form-container {
-            padding: 20px 24px;
-            background-color: var(--card-bg);
-            border: 1px solid var(--border-color);
-            border-radius: 12px;
             margin-top: 20px;
-            margin-bottom: 20px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border-color);
             animation: fadeIn 0.3s ease;
         }
 
@@ -1713,6 +1710,81 @@
         </div>
         <p id="no-models-message" style="display: none; margin-top: 10px;">No models configured. Click '+' to add one.
         </p>
+
+        <div id="model-form-container" style="display: none;">
+            <h3 id="form-title" class="section-title">Add New Model</h3>
+            <input type="hidden" id="model-id">
+            <div>
+                <label for="provider-preset-select">Provider</label>
+                <select id="provider-preset-select">
+                    <option value="custom">Custom / Manual</option>
+                    <option value="groq">Groq</option>
+                    <option value="gemini">Google Gemini</option>
+                    <option value="openrouter">OpenRouter</option>
+                    <option value="openai">OpenAI</option>
+                    <option value="ollama">Ollama (Local)</option>
+                </select>
+                <small>Select a provider to auto-configure settings and dynamically fetch active models.</small>
+            </div>
+
+            <!-- API Key & Auto-Fetch Section -->
+            <div>
+                <div style="display: flex; align-items: center; justify-content: space-between; max-width: 480px; margin-bottom: calc(var(--spacing-unit) / 2);">
+                    <label for="apiKey" style="margin-bottom: 0;">API Key</label>
+                    <span id="apiKey-status-badge" style="font-size: 0.78em; padding: 2px 8px; border-radius: 6px; font-weight: 500; background: rgba(148, 163, 184, 0.15); color: var(--text-muted);">Required for cloud · Optional for local</span>
+                </div>
+                <div style="display: flex; gap: 8px; align-items: center; max-width: 480px;">
+                    <input type="password" id="apiKey" placeholder="Paste your API key (leave blank for local models)" style="flex-grow: 1;">
+                    <button type="button" id="fetch-models-btn" title="Fetch live models from provider" style="background-color: var(--button-bg); padding: 8px 12px; font-size: 0.85em; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px;">
+                        <svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                        <span>Fetch Models</span>
+                    </button>
+                </div>
+                <small id="apiKey-hint" style="display: block; line-height: 1.45; margin-top: 5px;">Required for online AI services (Groq, Gemini, OpenAI, etc.). Leave blank <strong>only</strong> if running a local model on your computer (Ollama, LM Studio).</small>
+                <div id="apiKey-link-container" style="margin-top: 6px; font-size: 0.85em; display: none;">
+                    <a id="apiKey-provider-link" href="#" target="_blank" rel="noopener noreferrer" style="color: var(--primary-color); text-decoration: underline; font-weight: 500; display: inline-flex; align-items: center; gap: 4px;">Get an API key &rarr;</a>
+                </div>
+                <div id="model-fetch-status" class="model-fetch-note info" style="display: none;"></div>
+            </div>
+
+            <!-- Dynamic Model Selection & Input -->
+            <div>
+                <label for="modelName">Model</label>
+                <select id="model-select-dropdown" style="display: none; margin-bottom: 8px; max-width: 480px;"></select>
+                <input type="text" id="modelName" placeholder="e.g., llama-3.3-70b-versatile, gemini-2.5-flash, gpt-4o-mini">
+                <small id="model-field-hint">Select a model from the fetched list or enter any custom model name.</small>
+            </div>
+
+            <div>
+                <label for="configName">Configuration Name (e.g., "Groq Llama")</label>
+                <input type="text" id="configName" placeholder="e.g., Groq Llama, Gemini Flash, Local Ollama">
+            </div>
+            <div>
+                <label for="endpoint">Endpoint URL</label>
+                <input type="text" id="endpoint"
+                    placeholder="e.g., https://api.groq.com/openai/v1/chat/completions or https://generativelanguage.googleapis.com/v1beta/openai/chat/completions">
+            </div>
+
+            <div style="display: flex; align-items: center; gap: 10px; margin-top: 10px; margin-bottom: 10px;">
+                <input type="checkbox" id="enableSearchGrounding" style="width: auto;">
+                <label for="enableSearchGrounding" style="margin-bottom: 0;">Enable Web Search (Requires Search API Key)</label>
+            </div>
+            <div id="model-form-actions">
+                <button id="save-model-btn" style="background-color: var(--primary-color);">Save Model</button>
+                <button id="test-form-model-btn" type="button" style="background-color: var(--button-bg);"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg> Test Inputs</button>
+                <button id="cancel-model-btn">Cancel</button>
+            </div>
+        </div>
+        </div>
+
+        <div id="model-fallback-container" class="settings-section">
+            <h3 class="section-title">Model Fallback</h3>
+            <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer;">
+                <input type="checkbox" id="enable-model-fallback" style="margin-top: 4px;">
+                <span><strong>Model fallback</strong><br>
+                    <small>If the selected model fails (error or timeout), automatically retry the request with the
+                        next model in the list. Use the Reorder button to arrange the priority with drag &amp; drop.</small></span>
+            </label>
         </div>
 
         <div id="usage-dashboard-container" class="settings-section">
@@ -1777,81 +1849,6 @@
                     <small id="usage-meta-line">Never updated</small>
                     <button id="clear-usage-btn" style="background-color: var(--danger-color);">Clear Usage Data</button>
                 </div>
-            </div>
-        </div>
-
-        <div id="model-fallback-container" class="settings-section">
-            <h3 class="section-title">Model Fallback</h3>
-            <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer;">
-                <input type="checkbox" id="enable-model-fallback" style="margin-top: 4px;">
-                <span><strong>Model fallback</strong><br>
-                    <small>If the selected model fails (error or timeout), automatically retry the request with the
-                        next model in the list. Use the Reorder button to arrange the priority with drag &amp; drop.</small></span>
-            </label>
-        </div>
-
-        <div id="model-form-container" style="display: none;">
-            <h3 id="form-title" class="section-title">Add New Model</h3>
-            <input type="hidden" id="model-id">
-            <div>
-                <label for="provider-preset-select">Provider</label>
-                <select id="provider-preset-select">
-                    <option value="custom">Custom / Manual</option>
-                    <option value="groq">Groq</option>
-                    <option value="gemini">Google Gemini</option>
-                    <option value="openrouter">OpenRouter</option>
-                    <option value="openai">OpenAI</option>
-                    <option value="ollama">Ollama (Local)</option>
-                </select>
-                <small>Select a provider to auto-configure settings and dynamically fetch active models.</small>
-            </div>
-
-            <!-- API Key & Auto-Fetch Section -->
-            <div>
-                <div style="display: flex; align-items: center; justify-content: space-between; max-width: 480px; margin-bottom: calc(var(--spacing-unit) / 2);">
-                    <label for="apiKey" style="margin-bottom: 0;">API Key</label>
-                    <span id="apiKey-status-badge" style="font-size: 0.78em; padding: 2px 8px; border-radius: 6px; font-weight: 500; background: rgba(148, 163, 184, 0.15); color: var(--text-muted);">Required for cloud · Optional for local</span>
-                </div>
-                <div style="display: flex; gap: 8px; align-items: center; max-width: 480px;">
-                    <input type="password" id="apiKey" placeholder="Paste your API key (leave blank for local models)" style="flex-grow: 1;">
-                    <button type="button" id="fetch-models-btn" title="Fetch live models from provider" style="background-color: var(--button-bg); padding: 8px 12px; font-size: 0.85em; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px;">
-                        <svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-                        <span>Fetch Models</span>
-                    </button>
-                </div>
-                <small id="apiKey-hint" style="display: block; line-height: 1.45; margin-top: 5px;">Required for online AI services (Groq, Gemini, OpenAI, etc.). Leave blank <strong>only</strong> if running a local model on your computer (Ollama, LM Studio).</small>
-                <div id="apiKey-link-container" style="margin-top: 6px; font-size: 0.85em; display: none;">
-                    <a id="apiKey-provider-link" href="#" target="_blank" rel="noopener noreferrer" style="color: var(--primary-color); text-decoration: underline; font-weight: 500; display: inline-flex; align-items: center; gap: 4px;">Get an API key &rarr;</a>
-                </div>
-                <div id="model-fetch-status" class="model-fetch-note info" style="display: none;"></div>
-            </div>
-
-            <!-- Dynamic Model Selection & Input -->
-            <div>
-                <label for="modelName">Model</label>
-                <select id="model-select-dropdown" style="display: none; margin-bottom: 8px; max-width: 480px;"></select>
-                <input type="text" id="modelName" placeholder="e.g., llama-3.3-70b-versatile, gemini-2.5-flash, gpt-4o-mini">
-                <small id="model-field-hint">Select a model from the fetched list or enter any custom model name.</small>
-            </div>
-
-            <div>
-                <label for="configName">Configuration Name (e.g., "Groq Llama")</label>
-                <input type="text" id="configName" placeholder="e.g., Groq Llama, Gemini Flash, Local Ollama">
-            </div>
-            <div>
-                <label for="endpoint">Endpoint URL</label>
-                <input type="text" id="endpoint"
-                    placeholder="e.g., https://api.groq.com/openai/v1/chat/completions or https://generativelanguage.googleapis.com/v1beta/openai/chat/completions">
-            </div>
-
-            <div style="display: flex; align-items: center; gap: 10px; margin-top: 10px; margin-bottom: 10px;">
-                <input type="checkbox" id="enableSearchGrounding" style="width: auto;">
-                <label for="enableSearchGrounding" style="margin-bottom: 0;">Enable Web Search (Requires Search API Key)</label>
-            </div>
-            <div id="model-form-actions">
-                <button id="save-model-btn" style="background-color: var(--primary-color);">Save Model</button>
-                <button id="test-form-model-btn" type="button" style="background-color: var(--button-bg);"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg> Test Inputs</button>
-                <button id="cancel-model-btn">Cancel</button>
             </div>
         </div>
 

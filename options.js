@@ -925,13 +925,23 @@ function showModelForm(isEdit = false, model = {}) {
     fetchProviderModels(false, false);
   }
 
-  document.getElementById('model-form-container').style.display = 'block';
+  const noModelsMsg = document.getElementById('no-models-message');
+  if (noModelsMsg) noModelsMsg.style.display = 'none';
+
+  const formContainer = document.getElementById('model-form-container');
+  formContainer.style.display = 'block';
   document.getElementById('model-selection-container').style.display = 'none';
+  formContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 function hideModelForm() {
   document.getElementById('model-form-container').style.display = 'none';
   document.getElementById('model-selection-container').style.display = 'flex';
+  const noModelsMsg = document.getElementById('no-models-message');
+  const selectEl = document.getElementById('model-select');
+  if (noModelsMsg && (!selectEl || selectEl.options.length === 0)) {
+    noModelsMsg.style.display = 'block';
+  }
   document.getElementById('model-id').value = '';
   document.getElementById('configName').value = '';
   document.getElementById('endpoint').value = '';
