@@ -510,6 +510,165 @@ function noteHtmlToPlainText(html) {
     return walk(div).replace(/\n{3,}/g, '\n\n').trim();
 }
 
+// ==================== Auto-List Continuation for Comments ====================
+// Shared by the floating note editor (#note-textarea) and the sidebar comment
+// boxes (.sidebar-item-note-input) through attachRichEditor below: pressing
+// Enter after a "1. ", "1) ", "a. ", "A) " or "- " style line continues the
+// list with the next marker ("2. ", "b. ", "- "...). Pressing Enter on an
+// empty bullet exits the list, and Backspace on an empty bullet removes the
+// whole prefix at once. Markers stay plain text (no <ol>/<ul>), so the HTML
+// sanitizer, storage format, and Markdown export all work unchanged, and
+// every edit goes through execCommand so Ctrl+Z undo keeps working.
+// Alpha markers are single letters (wraps z->a, Z->A): this keeps ordinary
+// abbreviations ("etc. ", "Mr. ") from falsely triggering list continuation.
+
+function incrementAlphaMarker(s) {
+    const upper = s === s.toUpperCase();
+    const code = s.toLowerCase().charCodeAt(0) - 97; // a=0 .. z=25
+    const next = String.fromCharCode(97 + ((code + 1) % 26));
+    return upper ? next.toUpperCase() : next;
+}
+
+function incrementNumberMarker(s) {
+    const n = parseInt(s, 10);
+    if (!isFinite(n)) return s;
+    let next = String(n + 1);
+    // Preserve zero-padding ("007." -> "008.")
+    if (s.length > 1 && s[0] === '0' && next.length < s.length) {
+        next = next.padStart(s.length, '0');
+    }
+    return next;
+}
+
+// List prefix at the start of a line: indent + marker + spacing. Marker is a
+// number ("1." / "2)"), a single letter ("a." / "B)"), or a bullet.
+// Groups: 1=indent, 2=num, 3=numDelim, 4=alpha, 5=alphaDelim, 6=bullet,
+// 7=spacing, 8=rest of line before the caret.
+const COMMENT_LIST_RE = /^([ \t\xa0]*)(?:(\d+)([.)])|([A-Za-z])([.)])|([-–—*•]))([ \t\xa0]+)([\s\S]*)$/;
+
+// Whole line is just an (empty) prefix: indent + marker + spacing.
+const COMMENT_EMPTY_BULLET_RE = /^([ \t\xa0]*)((?:\d+[.)])|(?:[A-Za-z][.)])|(?:[-–—*•]))([ \t\xa0]+)$/;
+
+function nextListPrefix(m) {
+    const indent = m[1];
+    const spacing = m[7];
+    if (m[2] !== undefined) return indent + incrementNumberMarker(m[2]) + m[3] + spacing;
+    if (m[4] !== undefined) return indent + incrementAlphaMarker(m[4]) + m[5] + spacing;
+    return indent + m[6] + spacing;
+}
+
+// Text of the caret's current line, split into the part before the caret and
+// the part after it. Lines are delimited by <br> and block (DIV/P) bounds;
+// inline formatting (B/U/I/SPAN) is transparent to the walk.
+function getCommentLineInfo(el) {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount || !sel.isCollapsed) return null;
+    const caret = sel.getRangeAt(0);
+    if (!el.contains(caret.endContainer)) return null;
+
+    // Block holding the caret: direct child of the editor root (or the root).
+    let block = caret.endContainer.nodeType === Node.ELEMENT_NODE
+        ? caret.endContainer
+        : caret.endContainer.parentNode;
+    while (block && block !== el && block.parentNode && block.parentNode !== el) {
+        block = block.parentNode;
+    }
+    if (!block || !el.contains(block)) block = el;
+
+    const BLOCK_TAGS = new Set(['DIV', 'P', 'LI', 'BLOCKQUOTE', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6']);
+    let before = '';
+    let after = '';
+    const caretIsAfterNodeStart = (nodeRange) =>
+        caret.compareBoundaryPoints(Range.END_TO_START, nodeRange) > 0;
+
+    const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
+    let node;
+    while ((node = walker.nextNode())) {
+        if (node.nodeType === Node.TEXT_NODE) {
+            const nodeRange = document.createRange();
+            nodeRange.selectNodeContents(node);
+            const startsBefore = caret.compareBoundaryPoints(Range.END_TO_START, nodeRange) < 0;
+            const endsAfter = caret.compareBoundaryPoints(Range.END_TO_END, nodeRange) > 0;
+            if (startsBefore) {
+                after += node.nodeValue;
+            } else if (endsAfter) {
+                before += node.nodeValue;
+            } else if (caret.endContainer === node) {
+                // Caret sits inside this text node: split at the offset.
+                before += node.nodeValue.slice(0, caret.endOffset);
+                after += node.nodeValue.slice(caret.endOffset);
+            } else {
+                // Caret touches the node edge: attribute by exact position.
+                if (caretIsAfterNodeStart(nodeRange)) before += node.nodeValue;
+                else after += node.nodeValue;
+            }
+        } else if (node.nodeType === Node.ELEMENT_NODE) {
+            const tag = node.tagName;
+            if (tag === 'BR' || BLOCK_TAGS.has(tag)) {
+                const nodeRange = document.createRange();
+                nodeRange.selectNode(node);
+                // A boundary exactly at the caret belongs to "after" when the
+                // caret is before it (end of line) and to "before" when the
+                // caret is past it (start of a fresh line).
+                if (caretIsAfterNodeStart(nodeRange)) before += '\n';
+                else after += '\n';
+            }
+        }
+    }
+
+    return {
+        beforeLine: before.split('\n').pop(),
+        afterLine: after.split('\n').shift()
+    };
+}
+
+// Deletes `count` rendered characters backward from a collapsed caret via a
+// Selection extension so rich-text boundaries are handled by the browser.
+// Uses execCommand so the deletion stays on the undo stack.
+function deleteCharsBackward(count) {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount || !sel.isCollapsed || typeof sel.modify !== 'function') return false;
+    for (let i = 0; i < count; i++) sel.modify('extend', 'backward', 'character');
+    if (sel.isCollapsed) return false;
+    document.execCommand('delete', false, null);
+    return true;
+}
+
+// Plain-Enter list continuation. Returns true when the key was handled.
+function tryAutoListOnEnter(el) {
+    const info = getCommentLineInfo(el);
+    if (!info) return false;
+    const m = info.beforeLine.match(COMMENT_LIST_RE);
+    if (!m) return false;
+
+    const lineHasContent = m[8].trim() !== '' || info.afterLine.trim() !== '';
+    if (!lineHasContent) {
+        // Empty bullet + Enter: exit the list by removing the marker.
+        const del = info.beforeLine.length - m[1].length;
+        if (del <= 0) return false;
+        return deleteCharsBackward(del);
+    }
+
+    // Non-empty bullet: split the line (text after the caret rides to the
+    // new line via insertLineBreak) and prefix it with the next marker.
+    document.execCommand('insertLineBreak', false, null);
+    document.execCommand('insertText', false, nextListPrefix(m));
+    return true;
+}
+
+// Backspace right after an empty (just-created) prefix removes the whole
+// "1. " / "a. " / "- " prefix at once. Returns true when handled.
+function tryAutoListOnBackspace(el) {
+    const info = getCommentLineInfo(el);
+    if (!info) return false;
+    if (info.afterLine.trim() !== '') return false;
+    const m = info.beforeLine.match(COMMENT_EMPTY_BULLET_RE);
+    if (!m) return false;
+    const del = info.beforeLine.length - m[1].length;
+    if (del <= 0) return false;
+    return deleteCharsBackward(del);
+}
+
 function attachRichEditor(el, { getInitial, onSave, onInput } = {}) {
     if (!el) return;
 
@@ -547,11 +706,29 @@ function attachRichEditor(el, { getInitial, onSave, onInput } = {}) {
         }
 
         // Intercept Enter to insert uniform <br> line break via execCommand (recorded in undo stack)
-        if (e.key === 'Enter') {
+        if (e.key === 'Enter' && !e.isComposing) {
             e.preventDefault();
+            // Plain Enter continues "1. " / "a) " / "- " lists; modified
+            // Enters keep the plain line-break behavior from before.
+            if (!e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                if (tryAutoListOnEnter(el)) {
+                    notifyInput();
+                    return;
+                }
+            }
             document.execCommand('insertLineBreak', false, null);
             notifyInput();
             return;
+        }
+
+        // Backspace on an empty auto-inserted bullet removes the whole
+        // "1. " / "a. " / "- " prefix at once instead of one char at a time.
+        if (e.key === 'Backspace' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.isComposing) {
+            if (tryAutoListOnBackspace(el)) {
+                e.preventDefault();
+                notifyInput();
+                return;
+            }
         }
 
         // Intercept Ctrl+B / Cmd+B for bold
