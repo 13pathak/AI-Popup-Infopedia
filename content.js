@@ -299,6 +299,7 @@ const popupStyles = `
     margin-bottom: 12px;
     cursor: grab;
     user-select: none; /* the header drags the popup; text stays copyable via its tooltip */
+    flex-shrink: 0;
   }
   #ai-popup-context:active { cursor: grabbing; }
   .ai-popup-context-copy { min-width: 0; flex: 1 1 auto; }
@@ -400,6 +401,7 @@ const popupStyles = `
     display: flex;
     gap: 10px;
     margin-bottom: 12px;
+    flex-shrink: 0;
   }
   #ai-popup-selectors-container .selector-field {
     flex: 1 1 50%;
@@ -448,6 +450,8 @@ const popupStyles = `
     font-size: 14px;
     line-height: 1.68;
     text-align: left;
+    min-height: 0;
+    flex: 1 1 auto;
   }
 
   /* Thin rounded scrollbars, accent-muted (shared pattern with options page and PDF viewer) */
@@ -619,6 +623,7 @@ const popupStyles = `
     background: transparent;
     border: none;
     border-radius: 0;
+    flex-shrink: 0;
   }
 
   .ai-popup-button {
@@ -754,6 +759,7 @@ const popupStyles = `
     padding-top: 10px;
     border-top: 1px solid var(--popup-border);
     align-items: center;
+    flex-shrink: 0;
   }
   
   #ai-popup-followup-input {
@@ -1068,6 +1074,10 @@ const popupStyles = `
      sideways, snapping to the nearest model. Compare is the popup's normal
      answering mode — no toggle, the slider is simply how answers appear. */
   #ai-popup-content.ai-compare-mode {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    flex: 1 1 auto;
     overflow: hidden;
     padding: 2px 0 0 0;
   }
@@ -1075,11 +1085,16 @@ const popupStyles = `
     overflow: hidden;
     position: relative;
     touch-action: pan-y; /* vertical answer scrolling stays native; horizontal is ours */
+    flex: 1 1 auto;
+    min-height: 0;
+    height: 100%;
+    max-height: 100%;
   }
   .ai-compare-track {
     display: flex;
     align-items: stretch;
     width: 100%;
+    height: 100%;
     will-change: transform;
   }
   .ai-compare-track.animating { transition: transform 200ms ease-out; }
@@ -1093,6 +1108,9 @@ const popupStyles = `
     background: var(--popup-card-bg);
     border-radius: 16px;
     padding: 14px 16px;
+    height: 100%;
+    max-height: 100%;
+    min-height: 0;
   }
   .ai-compare-header {
     display: flex;
@@ -1104,6 +1122,7 @@ const popupStyles = `
     border: 1px solid var(--popup-border);
     border-radius: 999px;
     min-width: 0;
+    flex-shrink: 0;
   }
   .ai-compare-dot {
     width: 7px;
@@ -1153,8 +1172,9 @@ const popupStyles = `
     text-align: left;
     overflow-y: auto;
     overscroll-behavior: contain;
+    flex: 1 1 auto;
+    min-height: 60px;
     max-height: 38vh;
-    min-height: 96px;
     padding-right: 4px;
     overflow-wrap: break-word;
   }
@@ -1222,6 +1242,7 @@ const popupStyles = `
     gap: 6px;
     padding: 4px 0 2px 0;
     user-select: none;
+    flex-shrink: 0;
   }
   .ai-compare-nav-btn {
     display: inline-flex;
@@ -2095,7 +2116,7 @@ function initiatePopupSequence(rect, selectedText, customPrompt, implicitContext
       if (curModels.length > 0) {
         popupInstance.models = curModels;
         createSelectors(popupInstance, curModels, curPrompts, curDefaultModelId, null, selectedText, defaultPromptId);
-        startCompareLookup(popupInstance, selectedText, null);
+        startCompareLookup(popupInstance, selectedText, customPrompt || null);
         adjustPopupPosition(popupInstance, rect);
       } else {
         showModelsNotConfiguredError();
@@ -3325,8 +3346,31 @@ function renderCompareView(instance) {
 
     viewport.appendChild(track);
     contentWrapper.appendChild(viewport);
-    const nav = buildCompareNav(instance);
-    if (nav) contentWrapper.appendChild(nav);
+    // Mount or update the compare navigation bar (< • • • 1/N >) outside the
+    // scrollable content wrapper so height constraints never push it off-screen or clip it.
+    let nav = popup.querySelector('.ai-compare-nav');
+    const needed = instance.compareSlots && instance.compareSlots.length >= 2;
+    if (!needed) {
+      if (nav) nav.remove();
+    } else {
+      const currentDotCount = nav ? nav.querySelectorAll('.ai-compare-dotnav').length : 0;
+      if (!nav || currentDotCount !== instance.compareSlots.length) {
+        if (nav) nav.remove();
+        nav = buildCompareNav(instance);
+        if (nav) {
+          const actions = popup.querySelector('.ai-popup-actions.ai-compare-actions-row');
+          const followup = popup.querySelector('#ai-popup-followup-container');
+          const anchor = actions || followup || null;
+          if (anchor) {
+            popup.insertBefore(nav, anchor);
+          } else {
+            contentWrapper.insertAdjacentElement('afterend', nav);
+          }
+        }
+      } else {
+        updateCompareNav(instance);
+      }
+    }
 
     makeCompareSlider(instance, contentWrapper);
     applyCompareScroll(instance, false);
