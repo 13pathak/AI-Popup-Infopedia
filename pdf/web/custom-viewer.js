@@ -581,29 +581,83 @@ function incrementRomanMarker(s) {
     return s === s.toUpperCase() ? next.toUpperCase() : next;
 }
 
+// Predecessor mapping to disambiguate single-letter roman numerals ('v', 'x', etc.)
+// from ordinary alphabet lists ('a', 'b', 'c', 'd'...).
+const PREV_ROMAN_MAP = {
+    v: 'iv',
+    x: 'ix',
+    l: 'xl',
+    c: 'xc',
+    d: 'cd',
+    m: 'cm'
+};
+
+function getMarkerFromLine(line) {
+    if (!line) return null;
+    const m = line.match(/^([ \t\xa0]*)(?:(\d+)|([A-Za-z]+)|([-–—*•]))[.)]?([ \t\xa0]+)/);
+    return m ? (m[2] || m[3] || m[4]) : null;
+}
+
+// Disambiguates letter markers: multi-letter strict roman numerals continue as roman
+// ("ii" -> "iii", "iv" -> "v"); single letters continue as alphabetic lists ("c." -> "d.",
+// "d." -> "e.") unless preceded by their roman predecessor (e.g. "iv." -> "v." -> "vi.")
+// or starting an outline with "i." (which continues as "ii." unless preceded by "h.").
+function resolveLetterMarker(marker, prevLine) {
+    const prevMarker = getMarkerFromLine(prevLine);
+    const prevLower = prevMarker ? prevMarker.toLowerCase() : null;
+    const mLower = marker.toLowerCase();
+
+    // Multi-letter: if strict roman, it continues as roman ("ii" -> "iii", "ix" -> "x")
+    if (marker.length > 1) {
+        return incrementRomanMarker(marker);
+    }
+
+    // Single letter 'i' / 'I':
+    // If preceded by 'h' (in an alpha sequence: "g." -> "h." -> "i."), continues as alpha ("j")
+    if (mLower === 'i') {
+        if (prevLower === 'h') {
+            return incrementAlphaMarker(marker);
+        }
+        return incrementRomanMarker(marker); // default outline start: "i" -> "ii"
+    }
+
+    // Single roman letter ('v', 'x', 'l', 'c', 'd', 'm'):
+    // Only continues as roman if immediately preceded by its roman predecessor
+    // (e.g. "iv." -> "v." -> "vi.", "ix." -> "x." -> "xi.")
+    if (PREV_ROMAN_MAP[mLower]) {
+        if (prevLower === PREV_ROMAN_MAP[mLower]) {
+            return incrementRomanMarker(marker);
+        }
+        return incrementAlphaMarker(marker);
+    }
+
+    // Any other single letter ('a'..'z'): standard alpha continuation
+    return incrementAlphaMarker(marker);
+}
+
 // List prefix at the start of a line: indent + marker + spacing. Marker is a
-// number ("1." / "2)"), a roman numeral ("I." / "iv)"), a single letter
-// ("a." / "B)"), or a bullet. The roman class is tried before the alpha
-// class so i/v/x/l/c/d/m continue as roman numerals.
-// Groups: 1=indent, 2=num, 3=numDelim, 4=roman, 5=romanDelim, 6=alpha,
-// 7=alphaDelim, 8=bullet, 9=spacing, 10=rest of line before the caret.
-const COMMENT_LIST_RE = /^([ \t\xa0]*)(?:(\d+)([.)])|([ivxlcdm]+|[IVXLCDM]+)([.)])|([A-Za-z])([.)])|([-–—*•]))([ \t\xa0]+)([\s\S]*)$/;
+// number ("1." / "2)"), an alphabetical or roman letter marker ("a." / "B)" / "iv)"),
+// or a bullet.
+// Groups: 1=indent, 2=num, 3=numDelim, 4=letter, 5=letterDelim, 6=bullet,
+// 7=spacing, 8=rest of line before the caret.
+const COMMENT_LIST_RE = /^([ \t\xa0]*)(?:(\d+)([.)])|([A-Za-z]+)([.)])|([-–—*•]))([ \t\xa0]+)([\s\S]*)$/;
 
 // Whole line is just an (empty) prefix: indent + marker + spacing.
-const COMMENT_EMPTY_BULLET_RE = /^([ \t\xa0]*)(?:(?:\d+[.)])|(?:[ivxlcdm]+[.)])|(?:[IVXLCDM]+[.)])|(?:[A-Za-z][.)])|(?:[-–—*•]))([ \t\xa0]+)$/;
+// Only matches numbers, single letters, 2+ character strict roman numerals, or bullets,
+// so hitting Backspace on an ordinary word like "Hello. " does not delete the word.
+const COMMENT_EMPTY_BULLET_RE = /^([ \t\xa0]*)(?:(?:\d+[.)])|(?:(?:[A-Za-z]|(?:[ivxlcdm]{2,}|[IVXLCDM]{2,}))[.)])|(?:[-–—*•]))([ \t\xa0]+)$/;
 
-// Returns the next prefix for a matched line, or null when the marker is a
-// non-strict roman spelling that has no valid successor.
-function nextListPrefix(m) {
+// Returns the next prefix for a matched line, or null when the marker is an
+// ordinary word or abbreviation ("etc. ", "Mr. ") that has no successor.
+function nextListPrefix(m, prevLine = null) {
     const indent = m[1];
-    const spacing = m[9];
+    const spacing = m[7];
     if (m[2] !== undefined) return indent + incrementNumberMarker(m[2]) + m[3] + spacing;
     if (m[4] !== undefined) {
-        const next = incrementRomanMarker(m[4]);
+        const next = resolveLetterMarker(m[4], prevLine);
         return next === null ? null : indent + next + m[5] + spacing;
     }
-    if (m[6] !== undefined) return indent + incrementAlphaMarker(m[6]) + m[7] + spacing;
-    return indent + m[8] + spacing;
+    return indent + m[6] + spacing;
 }
 
 // Block-level tags that delimit lines inside the editor (the sanitizer
@@ -672,8 +726,10 @@ function getCommentLineInfo(el) {
         }
     }
 
+    const lines = before.split('\n');
     return {
-        beforeLine: before.split('\n').pop(),
+        beforeLine: lines[lines.length - 1],
+        prevLine: lines.length >= 2 ? lines[lines.length - 2] : null,
         afterLine: after.split('\n').shift()
     };
 }
@@ -697,7 +753,7 @@ function tryAutoListOnEnter(el) {
     const m = info.beforeLine.match(COMMENT_LIST_RE);
     if (!m) return false;
 
-    const lineHasContent = m[10].trim() !== '' || info.afterLine.trim() !== '';
+    const lineHasContent = m[8].trim() !== '' || info.afterLine.trim() !== '';
     if (!lineHasContent) {
         // Empty bullet + Enter: exit the list by removing the marker.
         const del = info.beforeLine.length - m[1].length;
@@ -709,7 +765,7 @@ function tryAutoListOnEnter(el) {
     // new line via insertLineBreak) and prefix it with the next marker.
     // Compute the prefix first: a non-strict roman marker ("iiii. ") has no
     // successor and must fall through to a plain line break untouched.
-    const nextPrefix = nextListPrefix(m);
+    const nextPrefix = nextListPrefix(m, info.prevLine);
     if (nextPrefix === null) return false;
     document.execCommand('insertLineBreak', false, null);
     document.execCommand('insertText', false, nextPrefix);
