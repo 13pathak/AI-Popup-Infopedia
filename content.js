@@ -636,6 +636,10 @@ const popupStyles = `
     padding: 0 14px;
     font-size: 13px;
   }
+  .ai-popup-actions .custom-select-value {
+    text-align: center;
+    padding-left: 14px;
+  }
 
   .ai-popup-button {
     font-family: inherit;
