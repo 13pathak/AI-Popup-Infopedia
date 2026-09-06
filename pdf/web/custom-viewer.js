@@ -521,6 +521,9 @@ function noteHtmlToPlainText(html) {
 // every edit goes through execCommand so Ctrl+Z undo keeps working.
 // Alpha markers are single letters (wraps z->a, Z->A): this keeps ordinary
 // abbreviations ("etc. ", "Mr. ") from falsely triggering list continuation.
+// Roman numerals ("I. " -> "II. ", "iv) " -> "v) ") also continue; letters
+// that are valid roman numerals (i, v, x, l, c, d, m) count as roman, so
+// outline-style notes number correctly.
 
 function incrementAlphaMarker(s) {
     const upper = s === s.toUpperCase();
@@ -540,22 +543,72 @@ function incrementNumberMarker(s) {
     return next;
 }
 
+// Strict roman numeral form (1..3999): rejects loose spellings like "iiii".
+const ROMAN_STRICT_RE = /^(?:m{0,3}(?:cm|cd|d?c{0,3})(?:xc|xl|l?x{0,3})(?:ix|iv|v?i{0,3}))$/i;
+const ROMAN_VALUES = { i: 1, v: 5, x: 10, l: 50, c: 100, d: 500, m: 1000 };
+
+function romanToInt(s) {
+    let n = 0;
+    const lower = s.toLowerCase();
+    for (let i = 0; i < lower.length; i++) {
+        const cur = ROMAN_VALUES[lower[i]];
+        const next = ROMAN_VALUES[lower[i + 1]] || 0;
+        n += cur < next ? -cur : cur;
+    }
+    return n;
+}
+
+function intToRoman(n) {
+    if (n < 1 || n > 3999) return null;
+    const parts = [
+        [1000, 'm'], [900, 'cm'], [500, 'd'], [400, 'cd'],
+        [100, 'c'], [90, 'xc'], [50, 'l'], [40, 'xl'],
+        [10, 'x'], [9, 'ix'], [5, 'v'], [4, 'iv'], [1, 'i']
+    ];
+    let out = '';
+    for (const [value, glyph] of parts) {
+        while (n >= value) { out += glyph; n -= value; }
+    }
+    return out;
+}
+
+// Next strict roman numeral ("iii" -> "iv"), preserving case; null when the
+// marker is not a strict roman numeral ("ic", "iiii") or would exceed 3999.
+function incrementRomanMarker(s) {
+    if (!ROMAN_STRICT_RE.test(s)) return null;
+    const next = intToRoman(romanToInt(s) + 1);
+    if (next === null) return null;
+    return s === s.toUpperCase() ? next.toUpperCase() : next;
+}
+
 // List prefix at the start of a line: indent + marker + spacing. Marker is a
-// number ("1." / "2)"), a single letter ("a." / "B)"), or a bullet.
-// Groups: 1=indent, 2=num, 3=numDelim, 4=alpha, 5=alphaDelim, 6=bullet,
-// 7=spacing, 8=rest of line before the caret.
-const COMMENT_LIST_RE = /^([ \t\xa0]*)(?:(\d+)([.)])|([A-Za-z])([.)])|([-–—*•]))([ \t\xa0]+)([\s\S]*)$/;
+// number ("1." / "2)"), a roman numeral ("I." / "iv)"), a single letter
+// ("a." / "B)"), or a bullet. The roman class is tried before the alpha
+// class so i/v/x/l/c/d/m continue as roman numerals.
+// Groups: 1=indent, 2=num, 3=numDelim, 4=roman, 5=romanDelim, 6=alpha,
+// 7=alphaDelim, 8=bullet, 9=spacing, 10=rest of line before the caret.
+const COMMENT_LIST_RE = /^([ \t\xa0]*)(?:(\d+)([.)])|([ivxlcdm]+|[IVXLCDM]+)([.)])|([A-Za-z])([.)])|([-–—*•]))([ \t\xa0]+)([\s\S]*)$/;
 
 // Whole line is just an (empty) prefix: indent + marker + spacing.
-const COMMENT_EMPTY_BULLET_RE = /^([ \t\xa0]*)((?:\d+[.)])|(?:[A-Za-z][.)])|(?:[-–—*•]))([ \t\xa0]+)$/;
+const COMMENT_EMPTY_BULLET_RE = /^([ \t\xa0]*)(?:(?:\d+[.)])|(?:[ivxlcdm]+[.)])|(?:[IVXLCDM]+[.)])|(?:[A-Za-z][.)])|(?:[-–—*•]))([ \t\xa0]+)$/;
 
+// Returns the next prefix for a matched line, or null when the marker is a
+// non-strict roman spelling that has no valid successor.
 function nextListPrefix(m) {
     const indent = m[1];
-    const spacing = m[7];
+    const spacing = m[9];
     if (m[2] !== undefined) return indent + incrementNumberMarker(m[2]) + m[3] + spacing;
-    if (m[4] !== undefined) return indent + incrementAlphaMarker(m[4]) + m[5] + spacing;
-    return indent + m[6] + spacing;
+    if (m[4] !== undefined) {
+        const next = incrementRomanMarker(m[4]);
+        return next === null ? null : indent + next + m[5] + spacing;
+    }
+    if (m[6] !== undefined) return indent + incrementAlphaMarker(m[6]) + m[7] + spacing;
+    return indent + m[8] + spacing;
 }
+
+// Block-level tags that delimit lines inside the editor (the sanitizer
+// whitelist only emits DIV/P/BR, the rest are defensive).
+const COMMENT_BLOCK_TAGS = new Set(['DIV', 'P', 'LI', 'BLOCKQUOTE', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6']);
 
 // Text of the caret's current line, split into the part before the caret and
 // the part after it. Lines are delimited by <br> and block (DIV/P) bounds;
@@ -566,51 +619,54 @@ function getCommentLineInfo(el) {
     const caret = sel.getRangeAt(0);
     if (!el.contains(caret.endContainer)) return null;
 
-    // Block holding the caret: direct child of the editor root (or the root).
+    // Block holding the caret: the nearest block-level ancestor that is a
+    // direct child of the editor root, or the root itself. Only block-level
+    // children stop the climb — stopping at an inline run (<b>, <u>, <span>)
+    // would crop the walked line down to that run and hide the rest of it.
     let block = caret.endContainer.nodeType === Node.ELEMENT_NODE
         ? caret.endContainer
         : caret.endContainer.parentNode;
-    while (block && block !== el && block.parentNode && block.parentNode !== el) {
+    while (block && block !== el && !(block.parentNode === el && COMMENT_BLOCK_TAGS.has(block.tagName))) {
         block = block.parentNode;
     }
     if (!block || !el.contains(block)) block = el;
 
-    const BLOCK_TAGS = new Set(['DIV', 'P', 'LI', 'BLOCKQUOTE', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6']);
     let before = '';
     let after = '';
-    const caretIsAfterNodeStart = (nodeRange) =>
-        caret.compareBoundaryPoints(Range.END_TO_START, nodeRange) > 0;
-
+    // compareBoundaryPoints operand order is easy to invert: for END_TO_START
+    // the FIRST range contributes its START and the second its END. All checks
+    // below therefore spell out START_TO_START/END_TO_END pairings explicitly:
+    // "nodeRange starts at or after the caret" and "the caret ends at or after
+    // nodeRange's end" read exactly as they compare. The caret is collapsed
+    // (guarded above), so its start and end are the same point.
     const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
     let node;
     while ((node = walker.nextNode())) {
         if (node.nodeType === Node.TEXT_NODE) {
             const nodeRange = document.createRange();
             nodeRange.selectNodeContents(node);
-            const startsBefore = caret.compareBoundaryPoints(Range.END_TO_START, nodeRange) < 0;
-            const endsAfter = caret.compareBoundaryPoints(Range.END_TO_END, nodeRange) > 0;
-            if (startsBefore) {
+            const nodeStartsAtOrAfterCaret = nodeRange.compareBoundaryPoints(Range.START_TO_START, caret) >= 0;
+            const nodeEndsAtOrBeforeCaret = caret.compareBoundaryPoints(Range.END_TO_END, nodeRange) >= 0;
+            if (nodeStartsAtOrAfterCaret) {
                 after += node.nodeValue;
-            } else if (endsAfter) {
+            } else if (nodeEndsAtOrBeforeCaret) {
                 before += node.nodeValue;
-            } else if (caret.endContainer === node) {
-                // Caret sits inside this text node: split at the offset.
+            } else {
+                // Caret strictly inside this text node: split at the offset.
+                // An interior collapsed caret is always (node, offset).
                 before += node.nodeValue.slice(0, caret.endOffset);
                 after += node.nodeValue.slice(caret.endOffset);
-            } else {
-                // Caret touches the node edge: attribute by exact position.
-                if (caretIsAfterNodeStart(nodeRange)) before += node.nodeValue;
-                else after += node.nodeValue;
             }
         } else if (node.nodeType === Node.ELEMENT_NODE) {
             const tag = node.tagName;
-            if (tag === 'BR' || BLOCK_TAGS.has(tag)) {
+            if (tag === 'BR' || COMMENT_BLOCK_TAGS.has(tag)) {
                 const nodeRange = document.createRange();
                 nodeRange.selectNode(node);
                 // A boundary exactly at the caret belongs to "after" when the
                 // caret is before it (end of line) and to "before" when the
-                // caret is past it (start of a fresh line).
-                if (caretIsAfterNodeStart(nodeRange)) before += '\n';
+                // caret is past it (start of a fresh line), so compare the
+                // caret against the boundary's START, not its END.
+                if (caret.compareBoundaryPoints(Range.START_TO_START, nodeRange) > 0) before += '\n';
                 else after += '\n';
             }
         }
@@ -641,7 +697,7 @@ function tryAutoListOnEnter(el) {
     const m = info.beforeLine.match(COMMENT_LIST_RE);
     if (!m) return false;
 
-    const lineHasContent = m[8].trim() !== '' || info.afterLine.trim() !== '';
+    const lineHasContent = m[10].trim() !== '' || info.afterLine.trim() !== '';
     if (!lineHasContent) {
         // Empty bullet + Enter: exit the list by removing the marker.
         const del = info.beforeLine.length - m[1].length;
@@ -651,8 +707,12 @@ function tryAutoListOnEnter(el) {
 
     // Non-empty bullet: split the line (text after the caret rides to the
     // new line via insertLineBreak) and prefix it with the next marker.
+    // Compute the prefix first: a non-strict roman marker ("iiii. ") has no
+    // successor and must fall through to a plain line break untouched.
+    const nextPrefix = nextListPrefix(m);
+    if (nextPrefix === null) return false;
     document.execCommand('insertLineBreak', false, null);
-    document.execCommand('insertText', false, nextListPrefix(m));
+    document.execCommand('insertText', false, nextPrefix);
     return true;
 }
 
