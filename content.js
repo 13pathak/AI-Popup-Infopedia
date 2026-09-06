@@ -1817,81 +1817,106 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 });
 
+// Unified accessor for configured models and prompts across sync and local storage.
+// Ensures that whether models are kept in sync or local storage (or if a storage
+// desync occurred), the popup always retrieves the full list of user-configured models.
+function readConfiguredModels(callback) {
+  chrome.storage.sync.get({ secretsLocalOnly: false, models: [], defaultModelId: null, customPrompts: [], defaultPromptId: null }, (syncData) => {
+    chrome.storage.local.get(['secretsLocalOnly', 'models', 'defaultModelId'], (localData) => {
+      const isLocal = Boolean(syncData?.secretsLocalOnly || localData?.secretsLocalOnly);
+      const syncModels = Array.isArray(syncData?.models) ? syncData.models : [];
+      const localModels = Array.isArray(localData?.models) ? localData.models : [];
+
+      // Combine models by unique ID, prioritizing the active storage area
+      const primary = isLocal ? localModels : syncModels;
+      const secondary = isLocal ? syncModels : localModels;
+
+      const modelMap = new Map();
+      secondary.forEach(m => { if (m && m.id) modelMap.set(m.id, m); });
+      primary.forEach(m => { if (m && m.id) modelMap.set(m.id, m); });
+
+      let models = Array.from(modelMap.values());
+      const defaultModelId = (isLocal ? localData?.defaultModelId : syncData?.defaultModelId)
+        || (isLocal ? syncData?.defaultModelId : localData?.defaultModelId)
+        || (models.length > 0 ? models[0].id : null);
+
+      // Reorder default model to the front so the first card matches default selection
+      if (defaultModelId && models.length > 1) {
+        const def = models.find(m => m.id === defaultModelId);
+        if (def) {
+          models = [def, ...models.filter(m => m.id !== defaultModelId)];
+        }
+      }
+
+      const customPrompts = Array.isArray(syncData?.customPrompts) ? syncData.customPrompts : [];
+      const defaultPromptId = syncData?.defaultPromptId || null;
+
+      callback({ models, defaultModelId, customPrompts, defaultPromptId });
+    });
+  });
+}
+
 function initiateEmptyPopupSequence() {
   const popupInstance = showPopup(0, 0, "Initializing...");
   popupInstance.sourceText = ""; 
   popupInstance.sourceWord = "Custom Question";
 
-  chrome.storage.sync.get({ 'secretsLocalOnly': false, 'models': [], 'defaultModelId': null, 'customPrompts': [], 'defaultPromptId': null }, (syncData) => {
+  readConfiguredModels(({ models, defaultModelId, customPrompts, defaultPromptId }) => {
     if (!activePopups.includes(popupInstance)) return;
 
-    const finalize = (models, defaultModelId) => {
-      const customPrompts = syncData.customPrompts || [];
-      const defaultPromptId = syncData.defaultPromptId || null;
+    // The greeting stays in .messages (popupHasConversation treats a
+    // talking popup as occupied) but renders as a single bare bubble.
+    popupInstance.messages = [
+      { role: 'assistant', content: "Hi! What would you like to ask?" }
+    ];
+    const greetingEl = popupInstance.popup && popupInstance.popup.querySelector('#ai-popup-content');
+    if (greetingEl) {
+      greetingEl.innerHTML = '';
+      greetingEl.insertAdjacentHTML('beforeend', `<div>${renderMarkdownHtml("Hi! What would you like to ask?")}</div>`);
+    }
 
-      // The greeting stays in .messages (popupHasConversation treats a
-      // talking popup as occupied) but renders as a single bare bubble.
-      popupInstance.messages = [
-        { role: 'assistant', content: "Hi! What would you like to ask?" }
-      ];
-      const greetingEl = popupInstance.popup && popupInstance.popup.querySelector('#ai-popup-content');
-      if (greetingEl) {
-        greetingEl.innerHTML = '';
-        greetingEl.insertAdjacentHTML('beforeend', `<div>${renderMarkdownHtml("Hi! What would you like to ask?")}</div>`);
-      }
+    if (models && models.length > 0) {
+      popupInstance.models = models;
+      createSelectors(popupInstance, models, customPrompts, defaultModelId, null, "Custom Question", defaultPromptId);
+      // The typed question fans out through the compare slider; only the
+      // follow-up box (with its mic) is needed up front.
+      createFollowupInput(popupInstance, "Custom Question");
 
-      if (models && models.length > 0) {
-        popupInstance.models = models;
-        createSelectors(popupInstance, models, customPrompts, defaultModelId, null, "Custom Question", defaultPromptId);
-        // The typed question fans out through the compare slider; only the
-        // follow-up box (with its mic) is needed up front.
-        createFollowupInput(popupInstance, "Custom Question");
-
-        // One-tap resume for the last dismissed conversation (Issue #26):
-        // shown only when there is actually something to restore. The
-        // greeting popup itself stashes nothing (no model ever answered), so
-        // making way for the restore can never overwrite the saved thread.
-        chrome.runtime.sendMessage({ type: 'getLastConversation' }, (resp) => {
-          if (chrome.runtime.lastError || !resp || !resp.payload) return;
-          if (!activePopups.includes(popupInstance)) return;
-          const contentEl = popupInstance.popup.querySelector('#ai-popup-content');
-          if (!contentEl) return;
-          const restoreBtn = document.createElement('button');
-          restoreBtn.type = 'button';
-          restoreBtn.className = 'ai-popup-button ai-popup-restore-btn';
-          restoreBtn.innerHTML = iconSvg('refresh', 13) + '<span>Open last conversation</span>';
-          restoreBtn.title = 'Reopen the conversation that was closed';
-          restoreBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            restoreBtn.disabled = true;
-            removePopupInstance(popupInstance);
-            reopenLastConversationPopup();
-          });
-          contentEl.appendChild(restoreBtn);
-        });
-      } else {
-        // No models: keep the greeting and the action row; a typed question
-        // lands on the setup error instead of being silently swallowed.
-        const defaultModelName = 'Unknown Model';
-        createActionButtons(popupInstance, "Custom Question", "Conversation started from hotkey.", defaultModelName, "Default");
-      }
-
-      adjustPopupPosition(popupInstance, null);
-
-      setTimeout(() => {
-        const input = popupInstance.popup.querySelector('#ai-popup-followup-input');
-        if (input) input.focus();
-      }, 100);
-    };
-
-    if (syncData.secretsLocalOnly) {
-      chrome.storage.local.get(['models', 'defaultModelId'], (localData) => {
+      // One-tap resume for the last dismissed conversation (Issue #26):
+      // shown only when there is actually something to restore. The
+      // greeting popup itself stashes nothing (no model ever answered), so
+      // making way for the restore can never overwrite the saved thread.
+      chrome.runtime.sendMessage({ type: 'getLastConversation' }, (resp) => {
+        if (chrome.runtime.lastError || !resp || !resp.payload) return;
         if (!activePopups.includes(popupInstance)) return;
-        finalize(localData.models || [], localData.defaultModelId || null);
+        const contentEl = popupInstance.popup.querySelector('#ai-popup-content');
+        if (!contentEl) return;
+        const restoreBtn = document.createElement('button');
+        restoreBtn.type = 'button';
+        restoreBtn.className = 'ai-popup-button ai-popup-restore-btn';
+        restoreBtn.innerHTML = iconSvg('refresh', 13) + '<span>Open last conversation</span>';
+        restoreBtn.title = 'Reopen the conversation that was closed';
+        restoreBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          restoreBtn.disabled = true;
+          removePopupInstance(popupInstance);
+          reopenLastConversationPopup();
+        });
+        contentEl.appendChild(restoreBtn);
       });
     } else {
-      finalize(syncData.models || [], syncData.defaultModelId || null);
+      // No models: keep the greeting and the action row; a typed question
+      // lands on the setup error instead of being silently swallowed.
+      const defaultModelName = 'Unknown Model';
+      createActionButtons(popupInstance, "Custom Question", "Conversation started from hotkey.", defaultModelName, "Default");
     }
+
+    adjustPopupPosition(popupInstance, null);
+
+    setTimeout(() => {
+      const input = popupInstance.popup.querySelector('#ai-popup-followup-input');
+      if (input) input.focus();
+    }, 100);
   });
 }
 
@@ -2062,32 +2087,18 @@ function initiatePopupSequence(rect, selectedText, customPrompt, implicitContext
   // while the local-only API-key mode is on — the same split the empty
   // hotkey popup uses. With no models configured the popup renders the
   // setup error below instead of asking anyone.
-  chrome.storage.sync.get({ secretsLocalOnly: false, models: [], defaultModelId: null, customPrompts: [], defaultPromptId: null }, (syncData) => {
+  readConfiguredModels(({ models, defaultModelId, customPrompts, defaultPromptId }) => {
     if (!activePopups.includes(popupInstance)) return;
 
-    const begin = (models, prompts, defaultModelId) => {
+    const begin = (curModels, curPrompts, curDefaultModelId) => {
       if (!activePopups.includes(popupInstance)) return;
-      if (models.length > 0) {
-        popupInstance.models = models;
-        createSelectors(popupInstance, models, prompts, defaultModelId, null, selectedText, syncData.defaultPromptId || null);
+      if (curModels.length > 0) {
+        popupInstance.models = curModels;
+        createSelectors(popupInstance, curModels, curPrompts, curDefaultModelId, null, selectedText, defaultPromptId);
         startCompareLookup(popupInstance, selectedText, null);
         adjustPopupPosition(popupInstance, rect);
       } else {
         showModelsNotConfiguredError();
-      }
-    };
-
-    // Only models/defaultModelId are secret-bearing; custom prompts and
-    // the default prompt id are ordinary sync data (same split the empty
-    // hotkey popup uses), so they come from syncData above.
-    const readCurrentModels = (cb) => {
-      if (syncData.secretsLocalOnly) {
-        chrome.storage.local.get(['models', 'defaultModelId'], (localData) => {
-          if (!activePopups.includes(popupInstance)) return;
-          cb(localData.models || [], localData.defaultModelId || null);
-        });
-      } else {
-        cb(syncData.models || [], syncData.defaultModelId || null);
       }
     };
 
@@ -2120,12 +2131,12 @@ function initiatePopupSequence(rect, selectedText, customPrompt, implicitContext
           e.target.textContent = "Working...";
           e.target.style.opacity = "0.7";
           e.target.style.cursor = "wait";
-          readCurrentModels((models, defaultModelId) => begin(models, syncData.customPrompts || [], defaultModelId));
+          readConfiguredModels((res) => begin(res.models, res.customPrompts, res.defaultModelId));
         });
       }, 0);
     }
 
-    readCurrentModels((models, defaultModelId) => begin(models, syncData.customPrompts || [], defaultModelId));
+    begin(models, customPrompts, defaultModelId);
   });
 }
 
@@ -3009,26 +3020,18 @@ function showSetupErrorForQuestion(instance, promptToSend, displayText) {
       retryBtn.textContent = "Working...";
       retryBtn.style.opacity = "0.7";
       retryBtn.style.cursor = "wait";
-      chrome.storage.sync.get({ secretsLocalOnly: false, models: [], defaultModelId: null, customPrompts: [], defaultPromptId: null }, (syncData) => {
+      readConfiguredModels(({ models, defaultModelId, customPrompts, defaultPromptId }) => {
         if (!activePopups.includes(instance)) return;
-        const got = (models) => {
-          if (!activePopups.includes(instance)) return;
-          if (models.length === 0) {
-            // Still unconfigured: restore the button; the error row stays.
-            retryBtn.textContent = "Reload";
-            retryBtn.style.opacity = "";
-            retryBtn.style.cursor = "";
-            return;
-          }
-          instance.models = models;
-          createSelectors(instance, models, syncData.customPrompts || [], syncData.defaultModelId || null, null, instance.sourceWord || 'Custom Question', syncData.defaultPromptId || null);
-          runCompareFollowup(instance, promptToSend, displayText);
-        };
-        if (syncData.secretsLocalOnly) {
-          chrome.storage.local.get(['models', 'defaultModelId'], (localData) => got(localData.models || []));
-        } else {
-          got(syncData.models || []);
+        if (models.length === 0) {
+          // Still unconfigured: restore the button; the error row stays.
+          retryBtn.textContent = "Reload";
+          retryBtn.style.opacity = "";
+          retryBtn.style.cursor = "";
+          return;
         }
+        instance.models = models;
+        createSelectors(instance, models, customPrompts, defaultModelId, null, instance.sourceWord || 'Custom Question', defaultPromptId);
+        runCompareFollowup(instance, promptToSend, displayText);
       });
     });
   }, 0);
@@ -4685,12 +4688,14 @@ function restoreConversationFromStash(instance, stash, models) {
   if (!stash || !Array.isArray(stash.slots) || !models || models.length === 0) return false;
   const byId = new Map(models.map(m => [m.id, m]));
   const slots = [];
+  const restoredModelIds = new Set();
   stash.slots.forEach(s => {
     const model = byId.get(s.modelId);
     if (!model) return; // model deleted since the stash — skip its card
     const msgs = (Array.isArray(s.messages) ? s.messages : [])
       .filter(m => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content);
     if (!msgs.some(m => m.role === 'assistant')) return;
+    restoredModelIds.add(model.id);
     slots.push({
       modelId: model.id,
       modelName: model.name,
@@ -4706,6 +4711,26 @@ function restoreConversationFromStash(instance, stash, models) {
     });
   });
   if (slots.length === 0) return false;
+
+  // Add back remaining configured models (up to COMPARE_MODEL_CAP) as idle slots
+  // so the compare navigation slider (< • • • 1/N >) and multi-model cards are preserved.
+  models.slice(0, COMPARE_MODEL_CAP).forEach(m => {
+    if (!restoredModelIds.has(m.id)) {
+      slots.push({
+        modelId: m.id,
+        modelName: m.name,
+        messages: [],
+        started: false,
+        status: 'idle',
+        settled: false,
+        errorText: null,
+        answerModelName: null,
+        promptName: null,
+        lastRequest: null,
+        bodyPinned: false
+      });
+    }
+  });
 
   instance.compareWord = stash.word || null;
   instance.comparePrompt = null;
@@ -4734,11 +4759,11 @@ function reopenLastConversationPopup() {
     if (chrome.runtime.lastError) resp = null;
     const stash = resp && resp.payload;
 
-    chrome.storage.sync.get({ secretsLocalOnly: false, models: [], defaultModelId: null, customPrompts: [], defaultPromptId: null }, (syncData) => {
-      const begin = (models) => {
+    readConfiguredModels(({ models, defaultModelId, customPrompts, defaultPromptId }) => {
+      const begin = (curModels) => {
         if (!activePopups.includes(popupInstance)) return; // closed while loading
-        createSelectors(popupInstance, models, syncData.customPrompts || [], syncData.defaultModelId || null, null, (stash && stash.word) || 'Conversation', syncData.defaultPromptId || null);
-        const restored = restoreConversationFromStash(popupInstance, stash, models);
+        createSelectors(popupInstance, curModels, customPrompts, defaultModelId, null, (stash && stash.word) || 'Conversation', defaultPromptId);
+        const restored = restoreConversationFromStash(popupInstance, stash, curModels);
         if (restored) {
           adjustPopupPosition(popupInstance, null);
           showPopupToast(popupInstance, 'Conversation restored — keep asking below');
@@ -4749,16 +4774,7 @@ function reopenLastConversationPopup() {
           initiateEmptyPopupSequence();
         }
       };
-      // Only models/default-model are secret-bearing; prompts are plain sync
-      // data (same split as every other popup entry point).
-      if (syncData.secretsLocalOnly) {
-        chrome.storage.local.get(['models', 'defaultModelId'], (localData) => {
-          if (!activePopups.includes(popupInstance)) return;
-          begin(localData.models || []);
-        });
-      } else {
-        begin(syncData.models || []);
-      }
+      begin(models);
     });
   });
 }

@@ -483,10 +483,38 @@ function getSecretStorageConfig(requestedKeys, defaults = {}) {
 
       chrome.storage.sync.get(syncKeys, (syncRes) => {
         if (localKeys.length === 0) {
+          if (keysList.includes('models')) {
+            chrome.storage.local.get(['models', 'defaultModelId'], (extraLocal) => {
+              let mergedModels = Array.isArray(syncRes.models) ? syncRes.models : [];
+              if (extraLocal.models && extraLocal.models.length > 0) {
+                const modelMap = new Map();
+                extraLocal.models.forEach(m => { if (m && m.id) modelMap.set(m.id, m); });
+                mergedModels.forEach(m => { if (m && m.id) modelMap.set(m.id, m); });
+                mergedModels = Array.from(modelMap.values());
+              }
+              const defaultModelId = syncRes.defaultModelId || extraLocal.defaultModelId || (mergedModels[0] && mergedModels[0].id) || null;
+              resolve({ ...defaults, ...syncRes, models: mergedModels, defaultModelId, secretsLocalOnly: isLocalOnly });
+            });
+            return;
+          }
           resolve({ ...defaults, ...syncRes, secretsLocalOnly: isLocalOnly });
           return;
         }
         chrome.storage.local.get(localKeys, (localRes) => {
+          if (keysList.includes('models')) {
+            chrome.storage.sync.get(['models', 'defaultModelId'], (extraSync) => {
+              let mergedModels = Array.isArray(localRes.models) ? localRes.models : [];
+              if (extraSync.models && extraSync.models.length > 0) {
+                const modelMap = new Map();
+                extraSync.models.forEach(m => { if (m && m.id) modelMap.set(m.id, m); });
+                mergedModels.forEach(m => { if (m && m.id) modelMap.set(m.id, m); });
+                mergedModels = Array.from(modelMap.values());
+              }
+              const defaultModelId = localRes.defaultModelId || extraSync.defaultModelId || (mergedModels[0] && mergedModels[0].id) || null;
+              resolve({ ...defaults, ...syncRes, ...localRes, models: mergedModels, defaultModelId, secretsLocalOnly: isLocalOnly });
+            });
+            return;
+          }
           resolve({ ...defaults, ...syncRes, ...localRes, secretsLocalOnly: isLocalOnly });
         });
       });
