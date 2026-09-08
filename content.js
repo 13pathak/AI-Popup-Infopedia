@@ -3171,6 +3171,22 @@ function runCompareFollowup(instance, promptToSend, displayText) {
     slot.latestFollowupId = followupId;
     slot.pendingFollowupScroll = true;
     slot.bodyPinned = false;
+    // A slot whose opening turn never landed anything (interrupted straggler,
+    // Stop, or a failed first ask) has an EMPTY thread: the opening question
+    // lived only inside that request's payload. Sending the follow-up alone
+    // would reach the model with zero context ("examples of what?"), so seed
+    // the original question first — the same join seed late-visited cards and
+    // custom-question popups get in ensureCompareSlotLoaded.
+    if (slot.messages.length === 0) {
+      if (Array.isArray(instance.compareFirstMessages) && instance.compareFirstMessages.length > 0) {
+        instance.compareFirstMessages.forEach(m => slot.messages.push({ ...m }));
+      } else {
+        const seedWord = instance.compareWord || instance.sourceWord || '';
+        if (seedWord && seedWord !== 'Custom Question') {
+          slot.messages.push({ role: 'user', content: seedWord, displayContent: seedWord });
+        }
+      }
+    }
     slot.messages.push({ role: 'user', content: promptToSend, displayContent: displayText, followupId: followupId });
   });
 
