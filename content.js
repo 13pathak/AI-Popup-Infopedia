@@ -3127,7 +3127,9 @@ function showSetupErrorForQuestion(instance, promptToSend, displayText) {
 
 // Sends the same question to every model ALREADY in the conversation. Models
 // the user has not slid to yet stay idle (un-billed); they join at the
-// original question whenever their card is first visited.
+// original question whenever their card is first visited. A model still
+// finishing an older turn keeps that answer — the question queues behind it
+// (slot.pendingFollowups) and fires when the older answer lands.
 function runCompareFollowup(instance, promptToSend, displayText) {
   if (!instance.compareSlots || instance.compareSlots.length === 0) {
     // Compare was enabled on the empty hotkey popup: build the sections now.
@@ -3165,46 +3167,54 @@ function runCompareFollowup(instance, promptToSend, displayText) {
     return;
   }
 
-  // Stragglers still answering an OLDER turn cannot simply receive this
-  // question — their pending reply would land below it and scramble the
-  // thread, so interrupt them first (the same per-slot abort the Stop button
-  // performs), then fan the question out to everyone. This must precede the
-  // loading-rotation restart below: settling the last straggler hits the
-  // all-settled path, which stops the rotation isLoading would otherwise lose.
+  const followupId = 'fu_' + Date.now();
+  const followup = { promptToSend: promptToSend, displayText: displayText, followupId: followupId };
+  const readySlots = [];
+
+  // A straggler still answering an OLDER turn keeps that answer: interrupting
+  // it would discard work that may be nearly finished. Instead the question
+  // queues behind the turn — settleCompareSlot drains it the moment the older
+  // answer lands — so every card still answers every question, in order.
   activeSlots.forEach(slot => {
-    if (!slot.settled) interruptCompareSlot(instance, slot);
+    if (!slot.settled) {
+      (slot.pendingFollowups || (slot.pendingFollowups = [])).push({ ...followup });
+      return;
+    }
+    readySlots.push(slot);
   });
 
-  instance.isLoading = true;
-  startLoadingQuoteRotation(instance);
+  if (readySlots.length > 0) {
+    instance.isLoading = true;
+    startLoadingQuoteRotation(instance);
+    readySlots.forEach(slot => deliverFollowupToSlot(instance, slot, followup));
+  }
+}
 
-  const followupId = 'fu_' + Date.now();
-
-  activeSlots.forEach(slot => {
-    slot.latestFollowupId = followupId;
-    slot.pendingFollowupScroll = true;
-    slot.bodyPinned = false;
-    // A slot whose opening turn never landed anything (interrupted straggler,
-    // Stop, or a failed first ask) has an EMPTY thread: the opening question
-    // lived only inside that request's payload. Sending the follow-up alone
-    // would reach the model with zero context ("examples of what?"), so seed
-    // the original question first — the same join seed late-visited cards and
-    // custom-question popups get in ensureCompareSlotLoaded.
-    if (slot.messages.length === 0) {
-      if (Array.isArray(instance.compareFirstMessages) && instance.compareFirstMessages.length > 0) {
-        instance.compareFirstMessages.forEach(m => slot.messages.push({ ...m }));
-      } else {
-        const seedWord = instance.compareWord || instance.sourceWord || '';
-        if (seedWord && seedWord !== 'Custom Question') {
-          slot.messages.push({ role: 'user', content: seedWord, displayContent: seedWord });
-        }
+// Pushes one follow-up question into a SETTLED slot's thread and asks it —
+// the shared body of the fan-out (slots that were free) and the queue drain
+// (stragglers that finished an older turn after the question was asked).
+function deliverFollowupToSlot(instance, slot, followup) {
+  const { promptToSend, displayText, followupId } = followup;
+  slot.latestFollowupId = followupId;
+  slot.pendingFollowupScroll = true;
+  slot.bodyPinned = false;
+  // A slot whose opening turn never landed anything (a failed or stopped
+  // first ask) has an EMPTY thread: the opening question lived only inside
+  // that request's payload, and the follow-up alone would reach the model
+  // with zero context ("examples of what?"). Seed the original question —
+  // the same join seed late-visited cards use in ensureCompareSlotLoaded.
+  if (slot.messages.length === 0) {
+    if (Array.isArray(instance.compareFirstMessages) && instance.compareFirstMessages.length > 0) {
+      instance.compareFirstMessages.forEach(m => slot.messages.push({ ...m }));
+    } else {
+      const seedWord = instance.compareWord || instance.sourceWord || '';
+      if (seedWord && seedWord !== 'Custom Question') {
+        slot.messages.push({ role: 'user', content: seedWord, displayContent: seedWord });
       }
     }
-    slot.messages.push({ role: 'user', content: promptToSend, displayContent: displayText, followupId: followupId });
-  });
-
-  const word = instance.compareWord || instance.sourceWord || 'Custom Question';
-  activeSlots.forEach(slot => issueCompareRequest(instance, instance.compareGen, slot, word, null, true));
+  }
+  slot.messages.push({ role: 'user', content: promptToSend, displayContent: displayText, followupId: followupId });
+  issueCompareRequest(instance, instance.compareGen, slot, instance.compareWord || instance.sourceWord || 'Custom Question', null, true);
 }
 
 // One model's share of a fan-out: thinking placeholder, stream registration,
@@ -3327,6 +3337,18 @@ function settleCompareSlot(instance, slot, response) {
     stopLoadingQuoteRotation(instance);
   }
   updateCompareFollowupState(instance, !!(allSettled && slot.lastRequest && slot.lastRequest.isFollowup));
+
+  // Queue drain: a follow-up asked while this slot was still finishing an
+  // older turn waited in slot.pendingFollowups. That answer has now landed
+  // (or failed), so the question appends cleanly after it — nothing was
+  // interrupted, nothing was lost. One drain per settle keeps a deep queue
+  // advancing one turn at a time.
+  if (Array.isArray(slot.pendingFollowups) && slot.pendingFollowups.length > 0) {
+    const next = slot.pendingFollowups.shift();
+    instance.isLoading = true;
+    startLoadingQuoteRotation(instance);
+    deliverFollowupToSlot(instance, slot, next);
+  }
 }
 
 // Locks or unlocks the shared follow-up box from live slot state. The gate is
@@ -3367,10 +3389,14 @@ function updateCompareFollowupState(instance, wasFollowup) {
 }
 
 // Cancels ONE slot's in-flight request and settles it as stopped, keeping the
-// card honest ("stopped" + Regenerate). Shared by the Stop button (every slot
-// at once) and by runCompareFollowup (stragglers still on an older turn).
+// card honest ("stopped" + Regenerate). Used by the Stop button only. A
+// queued follow-up would auto-fire the moment this generation settles, so
+// stopping also abandons the queue — Stop means "spend no more tokens on this
+// card", and the queued questions were already asked and answered on the
+// cards that were free.
 function interruptCompareSlot(instance, slot) {
   slot.stopped = true;
+  slot.pendingFollowups = [];
   const requestState = slot.activeRequest;
   if (requestState) {
     requestState.cancelled = true;
@@ -3558,7 +3584,11 @@ function buildCompareCard(instance, card, slot) {
     status.innerHTML = iconSvg('xCircle', 12) + '<span>' + (slot.stopped ? 'stopped' : 'failed') + '</span>';
   } else if (slot.status === 'streaming' || slot.status === 'waiting') {
     status.classList.add('is-busy');
-    status.textContent = 'answering…';
+    // Questions queued behind this generation (asked while this model was
+    // still finishing an older turn) are counted, so waiting is visible
+    // instead of the question feeling swallowed.
+    const queued = Array.isArray(slot.pendingFollowups) ? slot.pendingFollowups.length : 0;
+    status.textContent = queued > 0 ? `answering… (+${queued} queued)` : 'answering…';
   } else {
     status.textContent = 'not asked yet';
   }
