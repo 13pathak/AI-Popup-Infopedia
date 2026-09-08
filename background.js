@@ -796,6 +796,22 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       } else {
          safeMessagesText = [{ role: "user", content: prompt }];
       }
+      // A turn that never got its assistant reply (user Stop, a failed ask,
+      // or a straggler interrupted by a newer question) leaves the next
+      // follow-up directly after that turn's user message. Strict providers
+      // reject consecutive same-role turns ("roles must alternate"), so merge
+      // them into one; lenient OpenAI-compatible servers read the merged
+      // form identically. System messages never merge (index-0 hoisting is
+      // the provider's job and happens further below).
+      safeMessagesText = safeMessagesText.reduce((acc, m) => {
+        const prev = acc[acc.length - 1];
+        if (prev && prev.role === m.role && (m.role === 'user' || m.role === 'assistant')) {
+          prev.content = `${prev.content}\n\n${m.content}`;
+        } else {
+          acc.push({ role: m.role, content: m.content });
+        }
+        return acc;
+      }, []);
 
       // --- Implicit lookup context ---
       // The popup sends the sentence around the selection plus the page
