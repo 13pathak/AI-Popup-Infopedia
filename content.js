@@ -3336,7 +3336,14 @@ function settleCompareSlot(instance, slot, response) {
     instance.isLoading = false;
     stopLoadingQuoteRotation(instance);
   }
-  updateCompareFollowupState(instance, !!(allSettled && slot.lastRequest && slot.lastRequest.isFollowup));
+  // Refocus the follow-up input the moment the FRONT card's follow-up answer
+  // lands — that is the answer the user is waiting to continue from. A
+  // background straggler settling seconds later must never steal focus back
+  // (the reader may be mid-selection on a card), so only the settling slot
+  // BEING the front slot earns the focus; allSettled no longer gates it.
+  const frontIndex = slots ? Math.max(0, Math.min(instance.compareIndex || 0, slots.length - 1)) : -1;
+  const settlesFrontCard = !!(slots && slots[frontIndex] === slot);
+  updateCompareFollowupState(instance, !!(settlesFrontCard && slot.lastRequest && slot.lastRequest.isFollowup));
 
   // Queue drain: a follow-up asked while this slot was still finishing an
   // older turn waited in slot.pendingFollowups. That answer has now landed
