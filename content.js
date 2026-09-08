@@ -3020,9 +3020,10 @@ function startCompareLookup(instance, word, customPrompt) {
   startLoadingQuoteRotation(instance);
   renderCompareView(instance);
 
-  // The follow-up box is shared by every section and stays locked until all
-  // models finish. Create it if this popup does not have one yet (compare can
-  // start before any single-model answer ever arrived).
+  // The follow-up box is shared by every section and stays locked while the
+  // card on screen is answering (updateCompareFollowupState). Create it if
+  // this popup does not have one yet (compare can start before any
+  // single-model answer ever arrived).
   if (!instance.popup.querySelector('#ai-popup-followup-container')) {
     createFollowupInput(instance, word);
   }
@@ -3151,6 +3152,16 @@ function runCompareFollowup(instance, promptToSend, displayText) {
     return;
   }
 
+  // Stragglers still answering an OLDER turn cannot simply receive this
+  // question — their pending reply would land below it and scramble the
+  // thread, so interrupt them first (the same per-slot abort the Stop button
+  // performs), then fan the question out to everyone. This must precede the
+  // loading-rotation restart below: settling the last straggler hits the
+  // all-settled path, which stops the rotation isLoading would otherwise lose.
+  activeSlots.forEach(slot => {
+    if (!slot.settled) interruptCompareSlot(instance, slot);
+  });
+
   instance.isLoading = true;
   startLoadingQuoteRotation(instance);
 
@@ -3275,9 +3286,11 @@ function settleCompareSlot(instance, slot, response) {
 
   renderCompareView(instance);
 
-  // The follow-up box unlocks only when every model that was actually ASKED
-  // has finished — idle (never visited) models are excluded, or the box would
-  // lock forever; a late-joined still-streaming model keeps it locked.
+  // The shared loading rotation ends only when every asked model has
+  // finished; idle (never visited) models are excluded or it would spin
+  // forever. The follow-up box itself is gated by updateCompareFollowupState
+  // on the card in front, so a settled front card unlocks it even while a
+  // background straggler is still streaming here.
   const slots = instance.compareSlots;
   const allSettled = slots && slots.length > 0 && slots.every(s => !s.started || s.settled);
   if (allSettled) {
@@ -3287,20 +3300,23 @@ function settleCompareSlot(instance, slot, response) {
   updateCompareFollowupState(instance, !!(allSettled && slot.lastRequest && slot.lastRequest.isFollowup));
 }
 
-// Locks or unlocks the shared follow-up box from live slot state. Locked
-// while any asked model is still answering, so questions can never interleave
-// with a pending answer inside a model's conversation.
+// Locks or unlocks the shared follow-up box from live slot state. The gate is
+// the card ON SCREEN: while the model you are reading is still answering, a
+// question could interleave with its pending reply, so the box stays locked —
+// but a straggler finishing an OLDER turn in the background must not block
+// the model in front (runCompareFollowup interrupts stragglers instead).
 function updateCompareFollowupState(instance, wasFollowup) {
   if (!instance.popup) return;
   const input = instance.popup.querySelector('#ai-popup-followup-input');
   const send = instance.popup.querySelector('.ai-popup-followup-send');
   if (!input || !send) return;
   const slots = instance.compareSlots || [];
-  const busy = slots.some(s => s.started && !s.settled);
+  const front = slots[Math.max(0, Math.min(instance.compareIndex || 0, slots.length - 1))];
+  const busy = !!(front && front.started && !front.settled) || !!instance.followupSubmitPending;
   input.disabled = busy;
   send.disabled = busy;
-  // While any model is answering, the mic is useless (the box is locked) and
-  // Stop takes its place; idle restores the mic (Issue #24).
+  // While the front model is answering, the mic is useless (the box is locked)
+  // and Stop takes its place; idle restores the mic (Issue #24).
   const mic = instance.popup.querySelector('.ai-popup-followup-mic');
   const stop = instance.popup.querySelector('.ai-popup-followup-stop');
   if (mic) mic.style.display = busy ? 'none' : '';
@@ -3309,6 +3325,25 @@ function updateCompareFollowupState(instance, wasFollowup) {
     if (busy) stop.disabled = false;
   }
   if (!busy && wasFollowup) input.focus();
+}
+
+// Cancels ONE slot's in-flight request and settles it as stopped, keeping the
+// card honest ("stopped" + Regenerate). Shared by the Stop button (every slot
+// at once) and by runCompareFollowup (stragglers still on an older turn).
+function interruptCompareSlot(instance, slot) {
+  slot.stopped = true;
+  const requestState = slot.activeRequest;
+  if (requestState) {
+    requestState.cancelled = true;
+    if (requestState.requestId) {
+      activeStreamHandlers.delete(requestState.requestId);
+      chrome.runtime.sendMessage(
+        { type: 'cancelAiRequest', requestId: requestState.requestId },
+        () => { void chrome.runtime.lastError; }
+      );
+    }
+  }
+  settleCompareSlot(instance, slot, { error: 'Generation stopped.' });
 }
 
 // User-initiated abort (Issue #24): kill every in-flight generation of this
@@ -3322,19 +3357,7 @@ function stopCompareGeneration(instance) {
   slots.forEach(slot => {
     if (!slot.started || slot.settled) return;
     stoppedAny = true;
-    slot.stopped = true;
-    const requestState = slot.activeRequest;
-    if (requestState) {
-      requestState.cancelled = true;
-      if (requestState.requestId) {
-        activeStreamHandlers.delete(requestState.requestId);
-        chrome.runtime.sendMessage(
-          { type: 'cancelAiRequest', requestId: requestState.requestId },
-          () => { void chrome.runtime.lastError; }
-        );
-      }
-    }
-    settleCompareSlot(instance, slot, { error: 'Generation stopped.' });
+    interruptCompareSlot(instance, slot);
   });
   if (stoppedAny) renderCompareView(instance);
 }
@@ -3810,6 +3833,10 @@ function applyCompareScroll(instance, animate) {
 
   updateCompareNav(instance);
   ensureCompareSlotLoaded(instance, instance.compareIndex);
+  // The lock follows the card in front, so every landing (slide, arrow, dot,
+  // wheel — this also runs on each render) must re-evaluate it: arriving on a
+  // still-answering card locks the box, returning to a finished one reopens it.
+  updateCompareFollowupState(instance, false);
 }
 
 function updateCompareNav(instance) {
@@ -4750,6 +4777,10 @@ function createFollowupInput(instance, word) {
     input.value = ''; // clear
     input.disabled = true;
     sendBtn.disabled = true;
+    // Hold the lock across the async settings read: a background slot
+    // settling in that window must not re-open the box before the fan-out
+    // (or its setup-error path) re-evaluates it.
+    instance.followupSubmitPending = true;
 
     // Fetch custom follow-up message setting and append if exists
     chrome.storage.sync.get({ followupCustomMessage: '' }, (settings) => {
@@ -4761,6 +4792,8 @@ function createFollowupInput(instance, word) {
       // The question goes to every model's own conversation, rendered as
       // fresh answer cards (or a setup error when no model is configured).
       runCompareFollowup(instance, promptToSend, text);
+      instance.followupSubmitPending = false;
+      updateCompareFollowupState(instance, false);
     });
   }
 
