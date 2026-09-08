@@ -831,8 +831,10 @@ const popupStyles = `
   }
 
   /* --- Stop Button (Issue #24) --- */
-  /* Sits exactly where the mic sits while a generation is in flight (the two
-     are never shown together), so the row's layout never shifts on stop. */
+  /* While the FRONT model is generating it sits exactly where the mic sits
+     (the box is locked, so the two are never shown together). When the front
+     card is done but background models still stream, both show at once —
+     .ai-popup-followup-straggler then slides Stop left of the mic. */
   .ai-popup-followup-stop {
     position: absolute;
     right: 39px;
@@ -862,6 +864,17 @@ const popupStyles = `
     opacity: 0.75;
     cursor: default;
     transform: translateY(-50%);
+  }
+
+  /* Straggler mode: the follow-up box is unlocked (front card finished) while
+     background models still generate, so mic and Stop are shown together.
+     Slide Stop left of the mic and reserve its width in the input's right
+     padding, or typed text would run underneath the buttons. */
+  #ai-popup-followup-container.ai-popup-followup-straggler .ai-popup-followup-stop {
+    right: 73px;
+  }
+  #ai-popup-followup-container.ai-popup-followup-straggler #ai-popup-followup-input {
+    padding-right: 108px;
   }
 
   /* --- Follow-up Mic Button --- */
@@ -3320,7 +3333,9 @@ function settleCompareSlot(instance, slot, response) {
 // the card ON SCREEN: while the model you are reading is still answering, a
 // question could interleave with its pending reply, so the box stays locked —
 // but a straggler finishing an OLDER turn in the background must not block
-// the model in front (runCompareFollowup interrupts stragglers instead).
+// the model in front (runCompareFollowup interrupts stragglers instead). The
+// Stop button is separate: it tracks ANY live generation, so background
+// stragglers can always be aborted from wherever the user is reading.
 function updateCompareFollowupState(instance, wasFollowup) {
   if (!instance.popup) return;
   const input = instance.popup.querySelector('#ai-popup-followup-input');
@@ -3329,17 +3344,25 @@ function updateCompareFollowupState(instance, wasFollowup) {
   const slots = instance.compareSlots || [];
   const front = slots[Math.max(0, Math.min(instance.compareIndex || 0, slots.length - 1))];
   const busy = !!(front && front.started && !front.settled) || !!instance.followupSubmitPending;
+  const anyBusy = slots.some(s => s.started && !s.settled);
   input.disabled = busy;
   send.disabled = busy;
-  // While the front model is answering, the mic is useless (the box is locked)
-  // and Stop takes its place; idle restores the mic (Issue #24).
+  // The mic follows the lock (front card): hidden only while the box is
+  // locked. Stop follows generation itself (Issue #24): visible while ANY
+  // asked model still runs, so background stragglers stay abortable without
+  // swiping to their card.
   const mic = instance.popup.querySelector('.ai-popup-followup-mic');
   const stop = instance.popup.querySelector('.ai-popup-followup-stop');
   if (mic) mic.style.display = busy ? 'none' : '';
   if (stop) {
-    stop.style.display = busy ? '' : 'none';
-    if (busy) stop.disabled = false;
+    stop.style.display = anyBusy ? '' : 'none';
+    if (anyBusy) stop.disabled = false;
   }
+  // Straggler mode (box unlocked + background generation): mic and Stop are
+  // both visible; the class slides Stop left of the mic and widens the
+  // input's right padding to match.
+  const container = instance.popup.querySelector('#ai-popup-followup-container');
+  if (container) container.classList.toggle('ai-popup-followup-straggler', anyBusy && !busy);
   if (!busy && wasFollowup) input.focus();
 }
 
