@@ -3567,29 +3567,45 @@ function revokeObjectUrlLater(url) {
     setTimeout(() => URL.revokeObjectURL(url), REVOKE_OBJECT_URL_DELAY_MS);
 }
 
-document.getElementById('export_md').addEventListener('click', () => {
-    if (highlights.length === 0) {
-        viewerAlert('Nothing to export', 'No annotations to export yet.');
-        return;
-    }
-    
-    // Sort highlights by page, then by Y position (top to bottom visually)
-    const sortedHighlights = [...highlights].sort((a, b) => {
+// ==================== Annotation export (Markdown / JSON / CSV) ====================
+// All three formats share one ordering, one empty-state guard and one
+// download path; only the serialization differs. Filenames follow the
+// existing MD convention: "<document>-annotations.<ext>".
+
+// Reading order: page ascending, then top to bottom within the page
+// (PDF Y grows upward, so larger pdfY first).
+function sortedAnnotationsForExport() {
+    return [...highlights].sort((a, b) => {
         if (a.pageNumber !== b.pageNumber) return a.pageNumber - b.pageNumber;
         const aTop = a.rects && a.rects[0] ? a.rects[0].pdfY : 0;
         const bTop = b.rects && b.rects[0] ? b.rects[0].pdfY : 0;
         return bTop - aTop;
     });
+}
 
+function downloadAnnotationFile(content, mimeType, extension) {
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = documentBaseName() + '-annotations.' + extension;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    revokeObjectUrlLater(url);
+}
+
+function buildMarkdownExport(sortedHighlights) {
     let mdContent = "# PDF Annotations & Notes\n\n";
     let currentPage = -1;
-    
+
     sortedHighlights.forEach(hl => {
         if (hl.pageNumber !== currentPage) {
             currentPage = hl.pageNumber;
             mdContent += `## Page ${currentPage}\n\n`;
         }
-        
+
         const cleanText = (hl.text || '').replace(/\n/g, ' ');
         if (hl.markupType === 'Underline') {
             mdContent += `> <u>${cleanText}</u>\n`;
@@ -3598,24 +3614,164 @@ document.getElementById('export_md').addEventListener('click', () => {
         } else {
             mdContent += `> ==${cleanText}==\n`;
         }
-        
+
         if (hl.note) {
             const formattedNote = hl.noteFmt === 'html' ? noteHtmlToMarkdown(hl.note) : hl.note;
             mdContent += `\n**Note:** ${formattedNote}\n`;
         }
         mdContent += "\n---\n\n";
     });
-    
-    const blob = new Blob([mdContent], { type: 'text/markdown' });
-    const url = URL.createObjectURL(blob);
-    
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = documentBaseName() + '-annotations.md';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        revokeObjectUrlLater(url);
+
+    return mdContent;
+}
+
+// JSON mirrors the stored record shape key-for-key (id, pageNumber,
+// rects with pdfX/pdfY/pdfWidth/pdfHeight plus corner quads when
+// present, markupType, color, text, note/noteFmt, createdAt) so the
+// annotations array can be written back verbatim for round-tripping —
+// the same contract sanitizeStoredHighlights() validates on load. The
+// envelope follows the options-page settings backup (exportFormatVersion
+// + exportedAt). Notes stay in their stored form (noteFmt:"html" flags
+// rich ones); consumers wanting plain text have the CSV export.
+function buildAnnotationsJson(sortedHighlights) {
+    const annotations = sortedHighlights.map(hl => {
+        const rec = {
+            id: hl.id,
+            pageNumber: hl.pageNumber,
+            markupType: hl.markupType || 'Highlight',
+            color: hl.color || '',
+            text: hl.text || '',
+            rects: hl.rects.map(r => {
+                const out = {
+                    pdfX: r.pdfX,
+                    pdfY: r.pdfY,
+                    pdfWidth: r.pdfWidth,
+                    pdfHeight: r.pdfHeight
+                };
+                if (hasValidCornerQuad(r)) {
+                    out.cTL = r.cTL;
+                    out.cTR = r.cTR;
+                    out.cBR = r.cBR;
+                    out.cBL = r.cBL;
+                }
+                return out;
+            })
+        };
+        if (Number.isFinite(hl.createdAt) && hl.createdAt > 0) {
+            rec.createdAt = hl.createdAt;
+        }
+        if (hl.note) {
+            rec.note = hl.note;
+            if (hl.noteFmt === 'html') rec.noteFmt = 'html';
+        }
+        return rec;
+    });
+
+    return JSON.stringify({
+        format: 'ai-popup-infopedia/pdf-annotations',
+        exportFormatVersion: '1.0',
+        exportedAt: new Date().toISOString(),
+        document: {
+            name: documentBaseName(),
+            pageCount: pdfDoc ? pdfDoc.numPages : null
+        },
+        annotations
+    }, null, 2);
+}
+
+// RFC 4180 field escaping, matching the options page's escapeCSV(): wrap
+// in quotes when the field contains a quote, comma or line break, and
+// double embedded quotes so the cell survives spreadsheet round-trips.
+function csvEscapeField(value) {
+    let result = String(value ?? '');
+    result = result.replace(/"/g, '""');
+    if (/[",\n\r]/.test(result)) {
+        result = `"${result}"`;
+    }
+    return result;
+}
+
+// Flat one-row-per-annotation table for spreadsheets, Notion and Anki
+// imports. Notes are flattened to plain text (rich HTML notes carry
+// formatting meaningful only in this viewer), timestamps become ISO 8601
+// so tools parse them natively; CRLF row endings per RFC 4180.
+function buildAnnotationsCsv(sortedHighlights) {
+    const rows = sortedHighlights.map(hl => [
+        hl.id,
+        hl.pageNumber,
+        hl.markupType || 'Highlight',
+        hl.color || '',
+        hl.text || '',
+        hl.noteFmt === 'html' ? noteHtmlToPlainText(hl.note) : (hl.note || ''),
+        Number.isFinite(hl.createdAt) && hl.createdAt > 0 ? new Date(hl.createdAt).toISOString() : ''
+    ].map(csvEscapeField).join(','));
+    return ['id,page,type,color,text,note,created_at', ...rows].join('\r\n');
+}
+
+function runAnnotationExport(format) {
+    if (highlights.length === 0) {
+        viewerAlert('Nothing to export', 'No annotations to export yet.');
+        return;
+    }
+    const sortedHighlights = sortedAnnotationsForExport();
+    if (format === 'json') {
+        downloadAnnotationFile(buildAnnotationsJson(sortedHighlights), 'application/json', 'json');
+    } else if (format === 'csv') {
+        // BOM prefix so Excel detects UTF-8 — same convention as the
+        // options page history CSV export.
+        downloadAnnotationFile('\uFEFF' + buildAnnotationsCsv(sortedHighlights), 'text/csv;charset=utf-8;', 'csv');
+    } else {
+        downloadAnnotationFile(buildMarkdownExport(sortedHighlights), 'text/markdown', 'md');
+    }
+}
+
+// --- Export format dropdown ---
+// The toolbar Export button opens a small menu instead of firing one
+// fixed format. Outside clicks and Escape close it; picking an item
+// closes it and runs that export.
+const exportMenuWrap = document.getElementById('export-menu-wrap');
+const exportToggle = document.getElementById('export_toggle');
+const exportFormatMenu = document.getElementById('export-format-menu');
+
+function setExportMenuOpen(open) {
+    exportFormatMenu.classList.toggle('hidden', !open);
+    exportToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+
+function isExportMenuOpen() {
+    return !exportFormatMenu.classList.contains('hidden');
+}
+
+exportToggle.addEventListener('click', (e) => {
+    e.stopPropagation();
+    setExportMenuOpen(!isExportMenuOpen());
+});
+
+exportFormatMenu.addEventListener('click', (e) => {
+    const item = e.target.closest('.export-format-item');
+    if (!item) return;
+    e.stopPropagation();
+    setExportMenuOpen(false);
+    runAnnotationExport(item.id.replace(/^export_/, ''));
+});
+
+document.addEventListener('click', (e) => {
+    if (isExportMenuOpen() && !exportMenuWrap.contains(e.target)) {
+        setExportMenuOpen(false);
+    }
+});
+
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && isExportMenuOpen()) {
+        // Progressive dismissal, same contract as the annotation popups
+        // below: an open menu consumes this press instead of letting it
+        // fall through and also clear the find bar's search results.
+        // stopImmediatePropagation (not plain stopPropagation) because the
+        // search-dismissal handler is another listener on this same
+        // document node, registered after this one.
+        setExportMenuOpen(false);
+        e.stopImmediatePropagation();
+    }
 });
 
 // One export at a time: every click used to launch a full

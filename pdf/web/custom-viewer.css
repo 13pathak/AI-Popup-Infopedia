@@ -139,6 +139,55 @@ button, input, textarea, select {
     color: #042020 !important;
 }
 
+/* Export format dropdown: anchored under the toolbar's Export button.
+ * The wrap is position:relative so the absolutely-positioned menu tracks
+ * the button; the menu lives inside #toolbar's stacking context (z-index
+ * 1000) and therefore paints above the page viewer below it. */
+#export-menu-wrap {
+    position: relative;
+}
+
+#export-format-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    min-width: 190px;
+    background: var(--surface-raised);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: var(--popup-shadow);
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    z-index: 1100;
+}
+
+/* Scoped with the menu id on purpose: these buttons sit inside #toolbar,
+ * whose `#toolbar button` rules (1-0-1) would otherwise out-specify a
+ * plain class and repaint the items as toolbar pills — border, 999px
+ * radius and all. */
+#export-format-menu .export-format-item {
+    background: none;
+    border: none;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 550;
+    text-align: left;
+    padding: 7px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+#export-format-menu .export-format-item:hover {
+    background: var(--control-bg-4);
+    color: var(--text-hover);
+}
+
 #page_num {
     width: 44px;
     text-align: center;
