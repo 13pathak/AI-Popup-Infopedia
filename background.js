@@ -2019,7 +2019,10 @@ function triggerBackup(type = "Auto", customBackupInclude = null) {
       if (backupInclude.pdf) {
         const pdfAnnotations = {};
         for (const key of Object.keys(localData)) {
-          if (key === 'pdf_author_name' || key.startsWith('pdf_highlights_') || key.startsWith('pdf_bookmarks_') || key.startsWith('pdf_lastpage_')) {
+          // pdf_doc_identities / pdf_variant_decisions ride along so a
+          // restored backup keeps URL-variant merge detection working
+          // (issue #21); the restore path merges any pdf_* key back.
+          if (key === 'pdf_author_name' || key.startsWith('pdf_highlights_') || key.startsWith('pdf_bookmarks_') || key.startsWith('pdf_lastpage_') || key === 'pdf_doc_identities' || key === 'pdf_variant_decisions') {
             pdfAnnotations[key] = localData[key];
           }
         }

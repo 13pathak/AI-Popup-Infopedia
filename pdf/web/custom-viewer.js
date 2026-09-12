@@ -891,6 +891,9 @@ function saveHighlights(reRenderSidebar = true) {
     const storageKey = SYNC_KEYS.highlights;
     const entry = rememberOwnWrite(storageKey, highlights);
     chrome.storage.local.set({ [storageKey]: highlights }, () => settlePendingWrite(entry));
+    // A session's first save also (re)records this document's identity
+    // for URL-variant detection — see offerVariantAnnotationMerge.
+    recordDocumentIdentity();
     if (reRenderSidebar && typeof renderSidebar === 'function') renderSidebar();
 }
 
@@ -991,10 +994,10 @@ function livePendingWrites(key) {
 // drawHighlight during renderPageContent, whose catch marks the whole
 // page data-loaded="error" — a single bad record blanked a page. Every
 // consumer (canvas overlays, click hit-testing, sidebar, exports) assumes
-// the canonical shape, so validate once at the two ingestion points
-// (initial load + cross-tab adoption) rather than defending each
-// consumer. Storage is not rewritten on load; the cleaned array is
-// persisted organically by the next saveHighlights()/saveBookmarks().
+// the canonical shape, so validate once at the three ingestion points
+// (initial load, cross-tab adoption, URL-variant merge) rather than
+// defending each consumer. Storage is not rewritten on load; the cleaned
+// array is persisted organically by the next saveHighlights()/saveBookmarks().
 //
 // Kept records pass through untouched (forward-compatible with unknown
 // extra fields); only structurally impossible geometry is dropped, and a
@@ -1251,6 +1254,344 @@ function redrawRenderedHighlights() {
         if (pageDiv._viewport) {
             drawHighlightsForPage(parseInt(pageDiv.dataset.pageNumber, 10), pageDiv, pageDiv._viewport);
         }
+    });
+}
+
+// ==================== Annotation migration across URL variants ====================
+// Annotations are namespaced by document URL, so the same file reached as
+// http:// vs https://, with an added query param, or from a new domain
+// starts a fresh, invisible annotation set. pdf.js computes a content
+// fingerprint for every document (the trailer /ID when present, else a
+// hash of the bytes) that is stable across all of those URL changes and,
+// unlike filename or byte-length heuristics, never conflates two
+// different documents that happen to share a name or size. Each first
+// save of a session records this document's fingerprint in a shared
+// registry; on open, registry entries with the same fingerprint are
+// offered for a one-shot merge into this URL's namespace.
+//
+// The offer is user-confirmed — records move between namespaces, so no
+// silent data surgery. "Keep separate" is remembered per variant until
+// that variant's data actually changes (new annotations there re-arm the
+// prompt). Merging is a move, re-read from storage at confirm time: the
+// variant's storage keys are deleted so one document keeps exactly one
+// set and the offer cannot repeat. A tab left open at the variant URL
+// adopts that key removal as its own emptied set (its SYNC_KEYS match),
+// so it does not silently resurrect the data — only an edit racing
+// inside the pending-write FIFO window can re-save a stale copy, and
+// re-detection afterwards additionally needs a fresh identity write from
+// a later session at that address.
+//
+// Detection is fingerprint-based, so pre-feature annotation sets (which
+// have no registry entry yet) link up as soon as each of their URLs has
+// been opened and edited once going forward.
+const DOC_IDENTITIES_KEY = 'pdf_doc_identities';
+const VARIANT_DECISIONS_KEY = 'pdf_variant_decisions';
+
+// One identity write per tab session unless the fingerprint changes —
+// saveHighlights runs on every annotation edit.
+let docIdentityWritten = false;
+
+function currentDocFingerprint() {
+    if (!pdfDoc) return null;
+    const fps = pdfDoc.fingerprints;
+    const fp = Array.isArray(fps) ? fps[0] : fps;
+    if (typeof fp === 'string' && fp) return fp;
+    // Deprecated single-fingerprint property of older pdf.js builds.
+    return typeof pdfDoc.fingerprint === 'string' && pdfDoc.fingerprint ? pdfDoc.fingerprint : null;
+}
+
+// Shared registry reads must survive a corrupt (non-object) stored
+// value: `x || {}` alone would pass a string through and throw on the
+// first property write inside the callback.
+function asStorageObject(value) {
+    return (value && typeof value === 'object' && !Array.isArray(value)) ? value : {};
+}
+
+function recordDocumentIdentity() {
+    if (!hasChromeStorage() || docIdentityWritten) return;
+    const fingerprint = currentDocFingerprint();
+    if (!fingerprint) return;
+    chrome.storage.local.get(DOC_IDENTITIES_KEY, (result) => {
+        if (chrome.runtime.lastError) return; // flag stays unset: retried by this session's next save
+        const registry = asStorageObject(result && result[DOC_IDENTITIES_KEY]);
+        const existing = registry[storageFileUrl];
+        if (existing && typeof existing === 'object' &&
+            existing.fingerprint === fingerprint &&
+            existing.pageCount === (pdfDoc ? pdfDoc.numPages : null)) {
+            docIdentityWritten = true;
+            return;
+        }
+        registry[storageFileUrl] = {
+            fingerprint,
+            pageCount: pdfDoc ? pdfDoc.numPages : null,
+            savedAt: Date.now()
+        };
+        chrome.storage.local.set({ [DOC_IDENTITIES_KEY]: registry }, () => { void chrome.runtime.lastError; });
+        docIdentityWritten = true;
+    });
+}
+
+// Dismissal key: this URL's user has ruled on *that* URL's copy of *this*
+// fingerprint. JSON encoding keeps the three parts unambiguous even when
+// a URL itself contains the separator characters, and including the
+// fingerprint keeps the decision from leaking across a replaced file at
+// the same variant URL.
+function variantDecisionKey(currentUrl, variantUrl, fingerprint) {
+    return JSON.stringify([currentUrl, variantUrl, fingerprint]);
+}
+
+// What the variant's data looked like when dismissed. A different
+// signature later (annotations added/removed there) re-arms the prompt.
+function variantDataSignature(hlCount, bmCount, lastPage) {
+    return JSON.stringify([hlCount, bmCount, lastPage]);
+}
+
+// Fingerprint-matched variants that actually hold annotations, minus the
+// dismissed-and-unchanged ones. Records are sanitized here — the same
+// third ingestion point as initial load and cross-tab adoption — so the
+// counts shown in the prompt and the data merged are both trustworthy.
+// Page count is an extra guard when known: an incremental save keeps the
+// trailer /ID, so fingerprint alone can call two revisions of a document
+// identical; a differing page count is cheap proof they are not.
+// Legacy string lastPage values parse the same way loadStorageData does.
+function pickVariantMergeCandidates(registry, decisions, currentUrl, fingerprint, variantData, currentPageCount) {
+    const candidates = [];
+    for (const [url, meta] of Object.entries(asStorageObject(registry))) {
+        if (url === currentUrl) continue;
+        if (!meta || typeof meta !== 'object' || meta.fingerprint !== fingerprint) continue;
+        if (Number.isFinite(currentPageCount) && Number.isFinite(meta.pageCount) &&
+            meta.pageCount !== currentPageCount) continue;
+        const data = variantData[url] || {};
+        const hls = sanitizeStoredHighlights(data.highlights);
+        const bms = sanitizeStoredBookmarks(data.bookmarks);
+        if (hls.length === 0 && bms.length === 0) continue;
+        const parsedPage = parseInt(data.lastPage, 10);
+        const lastPage = Number.isFinite(parsedPage) && parsedPage >= 1 ? parsedPage : 1;
+        const key = variantDecisionKey(currentUrl, url, fingerprint);
+        if (decisions && decisions[key] === variantDataSignature(hls.length, bms.length, lastPage)) continue;
+        candidates.push({ url, highlights: hls, bookmarks: bms, lastPage });
+    }
+    return candidates;
+}
+
+// Union of the target arrays and every candidate set, with all incoming
+// ids renumbered above the target's current maximum so nothing collides
+// in the merged namespace. Candidate record objects are owned by this
+// flow (fresh from storage) and mutated freely. Resume position: the
+// target's own lastPage wins when it is meaningful (≥2) so the merge
+// never yanks the sidebar's current-page filter off the page the user is
+// reading; otherwise the deepest variant position carries over.
+function mergeAnnotationSets(targetHls, targetBms, targetLastPage, candidates) {
+    let nextHlId = targetHls.reduce((max, h) => Math.max(max, (h && h.id) || 0), 0);
+    let nextBmId = targetBms.reduce((max, b) => Math.max(max, (b && b.id) || 0), 0);
+    const targetHadPosition = Number.isFinite(targetLastPage) && targetLastPage >= 2;
+    let lastPage = targetHadPosition ? targetLastPage : 1;
+    const outHls = [...targetHls];
+    const outBms = [...targetBms];
+    for (const cand of candidates) {
+        for (const hl of cand.highlights) {
+            if (!hl || typeof hl !== 'object') continue;
+            hl.id = ++nextHlId;
+            outHls.push(hl);
+        }
+        for (const bm of cand.bookmarks) {
+            if (!bm || typeof bm !== 'object') continue;
+            bm.id = ++nextBmId;
+            outBms.push(bm);
+        }
+        if (!targetHadPosition && Number.isFinite(cand.lastPage) && cand.lastPage > lastPage) lastPage = cand.lastPage;
+    }
+    return { highlights: outHls, bookmarks: outBms, lastPage, nextHlId, nextBmId };
+}
+
+// Compact a storage URL for the prompt line; keeps protocol + host +
+// start of the path, which is what distinguishes the variants in practice.
+function shortenVariantUrl(url) {
+    if (typeof url !== 'string' || url.length <= 64) return url;
+    return url.slice(0, 46) + '…' + url.slice(-16);
+}
+
+// After a "Keep separate" click: record each candidate's current data
+// signature so an unchanged variant stays silent until it changes.
+function rememberVariantDismissal(fingerprint, candidates) {
+    if (!hasChromeStorage()) return;
+    chrome.storage.local.get(VARIANT_DECISIONS_KEY, (result) => {
+        if (chrome.runtime.lastError) return;
+        const decisions = asStorageObject(result && result[VARIANT_DECISIONS_KEY]);
+        for (const c of candidates) {
+            decisions[variantDecisionKey(storageFileUrl, c.url, fingerprint)] =
+                variantDataSignature(c.highlights.length, c.bookmarks.length, c.lastPage);
+        }
+        chrome.storage.local.set({ [VARIANT_DECISIONS_KEY]: decisions }, () => { void chrome.runtime.lastError; });
+    });
+}
+
+function mergeVariantAnnotations(fingerprint, candidates) {
+    // Suppress the identity write that saveHighlights would trigger
+    // below: it is a separate async read-modify-write whose read can
+    // predate this prune's write (or vice versa), so the two chains can
+    // interleave into a registry that either loses this document's fresh
+    // entry or resurrects a just-deleted variant. Folding our entry into
+    // the prune's single registry write makes the outcome deterministic.
+    docIdentityWritten = true;
+    // The modal may have sat open while the variant URL's tab kept
+    // annotating, and the candidates above are a snapshot taken before
+    // it appeared — merging that snapshot and then deleting the variant
+    // keys (move semantics) would permanently drop those newer records.
+    // Re-read every candidate's data now and merge only what is still
+    // there; a candidate whose keys vanished (another tab of this URL
+    // already merged it) drops out, which also makes a double-confirm
+    // from two tabs a no-op rather than a duplicate merge.
+    const readKeys = candidates.flatMap(c => [
+        'pdf_highlights_' + c.url,
+        'pdf_bookmarks_' + c.url,
+        'pdf_lastpage_' + c.url
+    ]);
+    chrome.storage.local.get(readKeys, (data) => {
+        if (chrome.runtime.lastError) {
+            viewerAlert('Merge failed', 'The stored annotations could not be read, so nothing was moved or deleted. Please try again.');
+            return;
+        }
+        const fresh = [];
+        for (const c of candidates) {
+            const hls = sanitizeStoredHighlights(data['pdf_highlights_' + c.url]);
+            const bms = sanitizeStoredBookmarks(data['pdf_bookmarks_' + c.url]);
+            if (hls.length === 0 && bms.length === 0) continue;
+            const parsedPage = parseInt(data['pdf_lastpage_' + c.url], 10);
+            fresh.push({
+                url: c.url,
+                highlights: hls,
+                bookmarks: bms,
+                lastPage: Number.isFinite(parsedPage) && parsedPage >= 1 ? parsedPage : 1
+            });
+        }
+        if (fresh.length === 0) {
+            viewerAlert('Nothing to merge', 'Those annotations were already merged or removed elsewhere, so there was nothing left to bring over.');
+            return;
+        }
+        applyMergedVariantAnnotations(fingerprint, fresh);
+    });
+}
+
+function applyMergedVariantAnnotations(fingerprint, candidates) {
+    const merged = mergeAnnotationSets(highlights, bookmarks, autoSavedLastPage, candidates);
+    // Reading-order canonical order for storage/exports; the sidebar
+    // sorts independently anyway.
+    merged.highlights.sort((a, b) => {
+        if (a.pageNumber !== b.pageNumber) return a.pageNumber - b.pageNumber;
+        const aTop = a.rects && a.rects[0] ? a.rects[0].pdfY : 0;
+        const bTop = b.rects && b.rects[0] ? b.rects[0].pdfY : 0;
+        return bTop - aTop;
+    });
+    highlights = merged.highlights;
+    bookmarks = merged.bookmarks;
+    highlightCounter = Math.max(highlightCounter, merged.nextHlId);
+    bookmarkCounter = Math.max(bookmarkCounter, merged.nextBmId);
+    autoSavedLastPage = merged.lastPage;
+    // Same repaint path cross-tab adoption uses: overlays, sidebar, and
+    // the note popups re-derive from the merged arrays.
+    redrawRenderedHighlights();
+    renderSidebar();
+    renderBookmarks();
+    // saveHighlights(false): renderSidebar above already covered the
+    // re-render this pass; persisting registers the write with the
+    // echo-suppression FIFO like every other save.
+    saveHighlights(false);
+    saveBookmarks();
+    saveLastPage(merged.lastPage);
+    // Belt for the prune below failing (storage error): recording the
+    // dismissal signatures first keeps a survived variant namespace from
+    // re-offering an identical merge — which would duplicate every
+    // record — until its data actually changes. A successful prune
+    // deletes these decisions again, so normally nothing lingers.
+    rememberVariantDismissal(fingerprint, candidates);
+
+    // Move semantics: delete the variant namespaces and prune both
+    // registries so this exact offer can never fire again from either
+    // side. Registry pruning is read-modify-write on shared keys; a
+    // concurrent tab of a different document loses at most its own
+    // pending identity write, which only a later session of that
+    // document re-records (its in-session flag is already set).
+    const removeKeys = candidates.flatMap(c => [
+        'pdf_highlights_' + c.url,
+        'pdf_bookmarks_' + c.url,
+        'pdf_lastpage_' + c.url
+    ]);
+    chrome.storage.local.get([DOC_IDENTITIES_KEY, VARIANT_DECISIONS_KEY], (result) => {
+        if (chrome.runtime.lastError) return;
+        const registry = asStorageObject(result && result[DOC_IDENTITIES_KEY]);
+        const decisions = asStorageObject(result && result[VARIANT_DECISIONS_KEY]);
+        for (const c of candidates) {
+            delete registry[c.url];
+            delete decisions[variantDecisionKey(storageFileUrl, c.url, fingerprint)];
+        }
+        // Re-assert this address's identity in the same write — see the
+        // docIdentityWritten note above — so the merged-to namespace
+        // stays discoverable as a variant source for any third URL that
+        // later opens the same file.
+        registry[storageFileUrl] = {
+            fingerprint,
+            pageCount: pdfDoc ? pdfDoc.numPages : null,
+            savedAt: Date.now()
+        };
+        chrome.storage.local.set({ [DOC_IDENTITIES_KEY]: registry, [VARIANT_DECISIONS_KEY]: decisions }, () => {
+            void chrome.runtime.lastError;
+            chrome.storage.local.remove(removeKeys, () => { void chrome.runtime.lastError; });
+        });
+    });
+}
+
+// One offer per document open. Called from loadPDF's success path only,
+// after the pages are visible, and never awaited there.
+function offerVariantAnnotationMerge() {
+    if (!hasChromeStorage() || !pdfDoc) return;
+    const fingerprint = currentDocFingerprint();
+    if (!fingerprint) return;
+    chrome.storage.local.get([DOC_IDENTITIES_KEY, VARIANT_DECISIONS_KEY], (result) => {
+        if (chrome.runtime.lastError) return;
+        const registry = asStorageObject(result && result[DOC_IDENTITIES_KEY]);
+        const decisions = asStorageObject(result && result[VARIANT_DECISIONS_KEY]);
+        const matchUrls = Object.entries(registry)
+            .filter(([url, meta]) => url !== storageFileUrl &&
+                meta && typeof meta === 'object' && meta.fingerprint === fingerprint)
+            .map(([url]) => url);
+        if (matchUrls.length === 0) return;
+        const keys = matchUrls.flatMap(url => [
+            'pdf_highlights_' + url,
+            'pdf_bookmarks_' + url,
+            'pdf_lastpage_' + url
+        ]);
+        chrome.storage.local.get(keys, (data) => {
+            if (chrome.runtime.lastError) return;
+            const variantData = {};
+            for (const url of matchUrls) {
+                variantData[url] = {
+                    highlights: data['pdf_highlights_' + url],
+                    bookmarks: data['pdf_bookmarks_' + url],
+                    lastPage: data['pdf_lastpage_' + url]
+                };
+            }
+            const candidates = pickVariantMergeCandidates(registry, decisions, storageFileUrl, fingerprint, variantData,
+                pdfDoc ? pdfDoc.numPages : null);
+            if (candidates.length === 0) return;
+            const totalHl = candidates.reduce((n, c) => n + c.highlights.length, 0);
+            const totalBm = candidates.reduce((n, c) => n + c.bookmarks.length, 0);
+            const urlList = candidates.map(c => shortenVariantUrl(c.url)).join(', ');
+            buildViewerModal({
+                title: 'Merge annotations from another copy of this document?',
+                message: `This PDF looks identical to ${candidates.length === 1 ? 'a copy saved under another address' : candidates.length + ' copies saved under other addresses'} (${urlList}) holding ${totalHl} highlight(s) with their notes and ${totalBm} bookmark(s). Merging moves everything here so one address owns the full set.`,
+                confirmText: 'Merge here',
+                cancelText: 'Keep separate'
+            }).then((choice) => {
+                // buildViewerModal resolves null on cancel/Escape and
+                // undefined on the confirm button.
+                if (choice === null) {
+                    rememberVariantDismissal(fingerprint, candidates);
+                } else {
+                    mergeVariantAnnotations(fingerprint, candidates);
+                }
+            });
+        });
     });
 }
 
@@ -1553,6 +1894,12 @@ async function loadPDF() {
                 scrollToPage(autoSavedLastPage);
             }, 300); // small delay to ensure rendering has caught up
         }
+
+        // URL-variant annotation merge offer (issue #21): after the
+        // document is visible and auto-resume has settled, check whether
+        // the same file's fingerprint carries annotations under another
+        // address. Fire-and-forget — never blocks or fails the load.
+        setTimeout(offerVariantAnnotationMerge, 450);
     } catch (e) {
         console.error("Error loading PDF:", e);
         showLoadError(passwordCancelled ? { name: 'PasswordCancelled' } : e);
