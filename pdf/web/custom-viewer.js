@@ -364,6 +364,14 @@ async function loadStorageData() {
                     bookmarkCounter = bookmarks.reduce((max, b) => Math.max(max, (b && b.id) || 0), 0);
                 }
             }
+            // Stored annotations mean this URL owns a set worth linking
+            // across URL variants — register its identity as soon as the
+            // document (fingerprint) is available. Covers sets created
+            // before the feature existed, which would otherwise wait for
+            // the user's next edit here.
+            if (highlights.length > 0 || bookmarks.length > 0) {
+                pendingIdentityFromLoad = true;
+            }
             if (result[lastPageKey]) {
                 autoSavedLastPage = parseInt(result[lastPageKey], 10) || 1;
             }
@@ -902,6 +910,9 @@ function saveBookmarks() {
     const storageKey = SYNC_KEYS.bookmarks;
     const entry = rememberOwnWrite(storageKey, bookmarks);
     chrome.storage.local.set({ [storageKey]: bookmarks }, () => settlePendingWrite(entry));
+    // Bookmark-only documents must register their identity too — the
+    // variant-merge offer covers bookmarks as well as highlights.
+    recordDocumentIdentity();
     if (typeof renderBookmarks === 'function') renderBookmarks();
 }
 
@@ -1281,15 +1292,22 @@ function redrawRenderedHighlights() {
 // re-detection afterwards additionally needs a fresh identity write from
 // a later session at that address.
 //
-// Detection is fingerprint-based, so pre-feature annotation sets (which
-// have no registry entry yet) link up as soon as each of their URLs has
-// been opened and edited once going forward.
+// Detection is fingerprint-based. Annotation sets saved before this
+// feature existed register their URL's identity on open (loadStorageData
+// flags them, loadPDF records once the fingerprint is available), so no
+// edit is needed to become discoverable — only a URL that was never
+// opened with this version stays unknown.
 const DOC_IDENTITIES_KEY = 'pdf_doc_identities';
 const VARIANT_DECISIONS_KEY = 'pdf_variant_decisions';
 
 // One identity write per tab session unless the fingerprint changes —
-// saveHighlights runs on every annotation edit.
+// saveHighlights/saveBookmarks run on every annotation edit. Documents
+// whose annotations predate this feature register on open instead of
+// waiting for the next edit: loadStorageData raises the flag below when
+// stored data arrives, and loadPDF consumes it once pdfDoc (and thus
+// the fingerprint) exists.
 let docIdentityWritten = false;
+let pendingIdentityFromLoad = false;
 
 function currentDocFingerprint() {
     if (!pdfDoc) return null;
@@ -1374,13 +1392,44 @@ function pickVariantMergeCandidates(registry, decisions, currentUrl, fingerprint
     return candidates;
 }
 
+// Two highlight records describe the same physical highlight when page,
+// markup type, normalized text and geometry all agree. The same
+// selection on the same file yields byte-identical geometry, so a tight
+// epsilon catches both-URL copies without conflating genuinely different
+// passages that merely share text (different page or position).
+function highlightRecordsEquivalent(a, b) {
+    if (a === b) return true;
+    if (!a || !b) return false;
+    if (a.pageNumber !== b.pageNumber) return false;
+    if ((a.markupType || 'Highlight') !== (b.markupType || 'Highlight')) return false;
+    if ((a.text || '').replace(/\s+/g, ' ').trim() !== (b.text || '').replace(/\s+/g, ' ').trim()) return false;
+    const ra = a.rects || [], rb = b.rects || [];
+    if (ra.length !== rb.length) return false;
+    for (let i = 0; i < ra.length; i++) {
+        if (Math.abs(ra[i].pdfX - rb[i].pdfX) > 0.5 ||
+            Math.abs(ra[i].pdfY - rb[i].pdfY) > 0.5 ||
+            Math.abs(ra[i].pdfWidth - rb[i].pdfWidth) > 0.5 ||
+            Math.abs(ra[i].pdfHeight - rb[i].pdfHeight) > 0.5) return false;
+    }
+    return true;
+}
+
 // Union of the target arrays and every candidate set, with all incoming
 // ids renumbered above the target's current maximum so nothing collides
-// in the merged namespace. Candidate record objects are owned by this
-// flow (fresh from storage) and mutated freely. Resume position: the
-// target's own lastPage wins when it is meaningful (≥2) so the merge
-// never yanks the sidebar's current-page filter off the page the user is
-// reading; otherwise the deepest variant position carries over.
+// in the merged namespace. Highlighting the same passage under both
+// addresses must not stack two overlays: an incoming record equivalent
+// to one already kept is folded into it — the kept copy's note is
+// upgraded if only the twin had one, and the older createdAt wins for
+// the sidebar's age display — unless both carry different notes, which
+// are distinct user content and keep both records. Equivalent here also
+// covers two candidates holding the same original record (multi-variant
+// merge). Page bookmarks deduplicate by page + title for the same
+// reason; same page with a different custom title stays (a distinct
+// user label). Candidate record objects are owned by this flow (fresh
+// from storage) and mutated freely. Resume position: the target's own
+// lastPage wins when it is meaningful (≥2) so the merge never yanks the
+// sidebar's current-page filter off the page the user is reading;
+// otherwise the deepest variant position carries over.
 function mergeAnnotationSets(targetHls, targetBms, targetLastPage, candidates) {
     let nextHlId = targetHls.reduce((max, h) => Math.max(max, (h && h.id) || 0), 0);
     let nextBmId = targetBms.reduce((max, b) => Math.max(max, (b && b.id) || 0), 0);
@@ -1391,11 +1440,24 @@ function mergeAnnotationSets(targetHls, targetBms, targetLastPage, candidates) {
     for (const cand of candidates) {
         for (const hl of cand.highlights) {
             if (!hl || typeof hl !== 'object') continue;
+            const twin = outHls.find(h => highlightRecordsEquivalent(h, hl));
+            if (twin && !(twin.note && hl.note && twin.note !== hl.note)) {
+                if (!twin.note && hl.note) {
+                    twin.note = hl.note;
+                    if (hl.noteFmt === 'html') twin.noteFmt = 'html';
+                }
+                if (Number.isFinite(hl.createdAt) &&
+                    hl.createdAt < (Number.isFinite(twin.createdAt) ? twin.createdAt : Infinity)) {
+                    twin.createdAt = hl.createdAt;
+                }
+                continue;
+            }
             hl.id = ++nextHlId;
             outHls.push(hl);
         }
         for (const bm of cand.bookmarks) {
             if (!bm || typeof bm !== 'object') continue;
+            if (outBms.some(b => b.pageNumber === bm.pageNumber && (b.title || '') === (bm.title || ''))) continue;
             bm.id = ++nextBmId;
             outBms.push(bm);
         }
@@ -1882,6 +1944,12 @@ async function loadPDF() {
         pdfDoc = await loadingTask.promise;
         document.querySelector('.pdf-password-prompt')?.remove();
         pageCountSpan.textContent = pdfDoc.numPages;
+        // Identity registration deferred from loadStorageData: the
+        // fingerprint needs pdfDoc, which did not exist yet at load time.
+        if (pendingIdentityFromLoad) {
+            pendingIdentityFromLoad = false;
+            recordDocumentIdentity();
+        }
         await renderAllPages();
         
         pdfDoc.getOutline().then(outline => {
