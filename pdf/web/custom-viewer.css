@@ -125,6 +125,15 @@ button, input, textarea, select {
     flex-shrink: 0;
 }
 
+/* Undo/redo (and any other toolbar control awaiting a preconditions
+ * change): dim and un-interactive while its stack is empty.
+ * pointer-events:none also keeps the hover restyle off a dead control. */
+#toolbar button:disabled {
+    opacity: 0.45;
+    cursor: default;
+    pointer-events: none;
+}
+
 #save_pdf {
     background: var(--accent) !important;
     color: #072b2b !important;

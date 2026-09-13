@@ -895,6 +895,11 @@ function attachRichEditor(el, { getInitial, onSave, onInput } = {}) {
 }
 
 function saveHighlights(reRenderSidebar = true) {
+    // Render before (and regardless of) the storage write: the arrays are
+    // already mutated at every call site, and the chrome.storage-less test
+    // context used to skip this refresh entirely, leaving the sidebar DOM
+    // stale after creates/deletes/undo.
+    if (reRenderSidebar && typeof renderSidebar === 'function') renderSidebar();
     if (!hasChromeStorage()) return;
     const storageKey = SYNC_KEYS.highlights;
     const entry = rememberOwnWrite(storageKey, highlights);
@@ -902,10 +907,10 @@ function saveHighlights(reRenderSidebar = true) {
     // A session's first save also (re)records this document's identity
     // for URL-variant detection — see offerVariantAnnotationMerge.
     recordDocumentIdentity();
-    if (reRenderSidebar && typeof renderSidebar === 'function') renderSidebar();
 }
 
 function saveBookmarks() {
+    if (typeof renderBookmarks === 'function') renderBookmarks();
     if (!hasChromeStorage()) return;
     const storageKey = SYNC_KEYS.bookmarks;
     const entry = rememberOwnWrite(storageKey, bookmarks);
@@ -913,7 +918,6 @@ function saveBookmarks() {
     // Bookmark-only documents must register their identity too — the
     // variant-merge offer covers bookmarks as well as highlights.
     recordDocumentIdentity();
-    if (typeof renderBookmarks === 'function') renderBookmarks();
 }
 
 function saveLastPage(pageNum) {
@@ -921,6 +925,294 @@ function saveLastPage(pageNum) {
     const storageKey = SYNC_KEYS.lastPage;
     const entry = rememberOwnWrite(storageKey, pageNum);
     chrome.storage.local.set({ [storageKey]: pageNum }, () => settlePendingWrite(entry));
+}
+
+// ==================== Undo / redo for annotation mutations ====================
+// Deletions and color/markup edits used to be permanent the moment they
+// happened. Every user-driven mutation of the highlight/bookmark arrays
+// now also registers an inverse operation on an in-memory stack (issue
+// #18): Ctrl+Z walks it back, Ctrl+Y or Ctrl+Shift+Z forward again.
+//
+// Entries hold deep snapshots, never live record references — a record
+// can be removed and re-added by earlier entries while later ones still
+// sit on the stack, so undo/redo resolve their target by id at apply
+// time and quietly no-op when it is gone (a cross-tab adoption or a
+// URL-variant merge replaced the arrays wholesale, and both clear the
+// stacks for exactly that reason). Id allocation is never rewound: the
+// counters stay above every id this session ever knew, so a redo can
+// restore a record under its original id without colliding with
+// anything created in between.
+//
+// Scope is deliberately this tab's session and the saves it already
+// performs — nothing is written to storage that a normal edit would not
+// write, and history is not persisted across opens or shared with other
+// tabs.
+const ANNOTATION_UNDO_LIMIT = 100;
+const annotationUndoStack = [];
+const annotationRedoStack = [];
+
+function cloneAnnotationRecord(rec) {
+    try {
+        return structuredClone(rec);
+    } catch (e) {
+        return JSON.parse(JSON.stringify(rec));
+    }
+}
+
+function registerUndoEntry(entry) {
+    annotationUndoStack.push(entry);
+    while (annotationUndoStack.length > ANNOTATION_UNDO_LIMIT) annotationUndoStack.shift();
+    annotationRedoStack.length = 0; // a fresh mutation invalidates the redo branch
+    updateUndoRedoButtons();
+}
+
+// Wholesale replacement of the arrays (cross-tab adoption, variant
+// merge) orphans every pending entry's target, so history restarts.
+function resetAnnotationHistory() {
+    annotationUndoStack.length = 0;
+    annotationRedoStack.length = 0;
+    endNoteUndoSession();
+    updateUndoRedoButtons();
+}
+
+function runAnnotationUndo() {
+    const entry = annotationUndoStack.pop();
+    if (!entry) return;
+    try {
+        entry.undo();
+    } finally {
+        annotationRedoStack.push(entry);
+        endNoteUndoSession();
+        updateUndoRedoButtons();
+    }
+}
+
+function runAnnotationRedo() {
+    const entry = annotationRedoStack.pop();
+    if (!entry) return;
+    try {
+        entry.redo();
+    } finally {
+        annotationUndoStack.push(entry);
+        endNoteUndoSession();
+        updateUndoRedoButtons();
+    }
+}
+
+function updateUndoRedoButtons() {
+    const undoBtn = document.getElementById('undo_annotation');
+    const redoBtn = document.getElementById('redo_annotation');
+    if (undoBtn) undoBtn.disabled = annotationUndoStack.length === 0;
+    if (redoBtn) redoBtn.disabled = annotationRedoStack.length === 0;
+}
+
+const undoAnnotationBtn = document.getElementById('undo_annotation');
+const redoAnnotationBtn = document.getElementById('redo_annotation');
+if (undoAnnotationBtn) undoAnnotationBtn.addEventListener('click', runAnnotationUndo);
+if (redoAnnotationBtn) redoAnnotationBtn.addEventListener('click', runAnnotationRedo);
+
+// --- Highlight restore primitives (shared by every entry kind) ---
+
+function removeHighlightOverlaysById(hlId) {
+    document.querySelectorAll(`.custom-highlight[data-hl-id="${hlId}"], .note-indicator[data-hl-id="${hlId}"]`)
+        .forEach(el => el.remove());
+}
+
+// Popups anchored to a highlight that is disappearing (delete, or undo
+// of its creation) must not outlive it — same contract the trash
+// buttons already honor inline.
+function detachHighlightPopupsById(hlId) {
+    endNoteUndoSessionIfFor(hlId);
+    const notePopup = document.getElementById('note-editor-popup');
+    if (activeHighlightId === hlId || (notePopup && parseInt(notePopup.dataset.hlId, 10) === hlId)) {
+        isNoteDirty = false;
+        if (notePopup) delete notePopup.dataset.hlId;
+        hidePopups();
+    }
+}
+
+function deleteHighlightForUndo(hlId) {
+    detachHighlightPopupsById(hlId);
+    removeHighlightOverlaysById(hlId);
+    highlights = highlights.filter(h => h.id !== hlId);
+    saveHighlights();
+}
+
+function restoreHighlightForUndo(snapshot) {
+    // Ids are guarded against reuse (counters never rewind), but a
+    // cross-tab write could still have brought an equal id back — never
+    // duplicate a record that is already present.
+    if (highlights.some(h => h.id === snapshot.id)) return;
+    const restored = cloneAnnotationRecord(snapshot);
+    highlights.push(restored);
+    saveHighlights();
+    // Virtualized pages draw their overlays on render; only a page that
+    // is currently materialized gets an immediate repaint.
+    const pageDiv = document.querySelector(`.page[data-page-number="${snapshot.pageNumber}"]`);
+    if (pageDiv && pageDiv._viewport) drawHighlight(restored, pageDiv, pageDiv._viewport);
+}
+
+function applyHighlightEditForUndo(hlId, fields) {
+    const hl = highlights.find(h => h.id === hlId);
+    if (!hl) return;
+    let changed = false;
+    for (const key of Object.keys(fields)) {
+        if (hl[key] !== fields[key]) {
+            hl[key] = fields[key];
+            changed = true;
+        }
+    }
+    if (!changed) return;
+    redrawExistingHighlight(hl);
+    saveHighlights();
+}
+
+// --- Undo entry factories ---
+
+// A selection spanning a page break is split into one highlight per
+// page at creation time; they are registered as a single operation so
+// one Ctrl+Z reverts the whole selection, not just one page's fragment.
+function pushHighlightsCreatedUndo(createdSnapshots) {
+    if (!createdSnapshots.length) return;
+    const ids = createdSnapshots.map(s => s.id);
+    registerUndoEntry({
+        undo() { ids.forEach(deleteHighlightForUndo); },
+        redo() { createdSnapshots.forEach(restoreHighlightForUndo); }
+    });
+}
+
+function pushHighlightDeletedUndo(snapshot) {
+    registerUndoEntry({
+        undo() { restoreHighlightForUndo(snapshot); },
+        redo() { deleteHighlightForUndo(snapshot.id); }
+    });
+}
+
+function pushHighlightEditUndo(hlId, before, after) {
+    registerUndoEntry({
+        undo() { applyHighlightEditForUndo(hlId, before); },
+        redo() { applyHighlightEditForUndo(hlId, after); }
+    });
+}
+
+// --- Note-edit sessions ---
+// Notes commit continuously (the floating editor autosaves every
+// ~300 ms of pause; sidebar cards save on blur), so recording each
+// commit would shatter one writing burst into a dozen undo steps.
+// Opening an editor for a highlight opens a session carrying the
+// pre-session note; every commit inside the session updates the top
+// entry's after-state instead of pushing a new one. The session ends
+// when its editor closes (popup hidden, sidebar blur), when its
+// highlight is deleted, or when undo/redo runs — the next edit burst
+// then starts a fresh entry, so undo steps back burst by burst.
+let noteUndoSession = null; // { hlId, token, note, noteFmt }
+
+function beginNoteUndoSession(hl) {
+    noteUndoSession = {
+        hlId: hl.id,
+        token: {},
+        note: hl.note || null,
+        noteFmt: hl.noteFmt || null
+    };
+}
+
+function endNoteUndoSession() {
+    noteUndoSession = null;
+}
+
+function endNoteUndoSessionIfFor(hlId) {
+    if (noteUndoSession && noteUndoSession.hlId === hlId) noteUndoSession = null;
+}
+
+function commitNoteUndoEntry(hl) {
+    const session = noteUndoSession;
+    if (!session || session.hlId !== hl.id) return;
+    const after = { note: hl.note || null, noteFmt: hl.noteFmt || null };
+    if (after.note === session.note) return; // net no-op (typed, then removed it all)
+    const top = annotationUndoStack[annotationUndoStack.length - 1];
+    if (top && top.kind === 'note' && top.token === session.token) {
+        top.after = after; // same burst: keep the original before-state
+        return;
+    }
+    const entry = {
+        kind: 'note',
+        token: session.token,
+        before: { note: session.note, noteFmt: session.noteFmt },
+        after
+    };
+    entry.undo = () => applyNoteForUndo(hl.id, entry.before);
+    entry.redo = () => applyNoteForUndo(hl.id, entry.after);
+    registerUndoEntry(entry);
+}
+
+function applyNoteForUndo(hlId, state) {
+    const hl = highlights.find(h => h.id === hlId);
+    if (!hl) return;
+    if (state.note === null) {
+        delete hl.note;
+        delete hl.noteFmt;
+    } else {
+        hl.note = state.note;
+        hl.noteFmt = state.noteFmt || 'html';
+    }
+    saveHighlights();
+    updateHighlightIndicatorsOnPage(hl);
+    syncFloatingNoteEditorForUndo(hl);
+}
+
+// Undo can run while the floating note editor is open for the affected
+// highlight (a toolbar click moved focus away without closing the box);
+// repopulate it from the restored record or the next keystroke would
+// clobber the undo with the editor's stale DOM content.
+function syncFloatingNoteEditorForUndo(hl) {
+    const notePopup = document.getElementById('note-editor-popup');
+    if (!notePopup || notePopup.classList.contains('hidden')) return;
+    if (parseInt(notePopup.dataset.hlId, 10) !== hl.id) return;
+    const noteEl = document.getElementById('note-textarea');
+    if (!noteEl) return;
+    setRichNoteContent(noteEl, hl);
+    isNoteDirty = false;
+}
+
+// --- Bookmark entries ---
+
+function deleteBookmarkForUndo(bmId) {
+    bookmarks = bookmarks.filter(b => b.id !== bmId);
+    saveBookmarks();
+}
+
+function restoreBookmarkForUndo(snapshot) {
+    if (bookmarks.some(b => b.id === snapshot.id)) return;
+    bookmarks.push(cloneAnnotationRecord(snapshot));
+    saveBookmarks();
+}
+
+function pushBookmarkCreatedUndo(snapshot) {
+    registerUndoEntry({
+        undo() { deleteBookmarkForUndo(snapshot.id); },
+        redo() { restoreBookmarkForUndo(snapshot); }
+    });
+}
+
+function pushBookmarkDeletedUndo(snapshot) {
+    registerUndoEntry({
+        undo() { restoreBookmarkForUndo(snapshot); },
+        redo() { deleteBookmarkForUndo(snapshot.id); }
+    });
+}
+
+function pushBookmarkRenamedUndo(bmId, before, after) {
+    registerUndoEntry({
+        undo() { applyBookmarkTitleForUndo(bmId, before); },
+        redo() { applyBookmarkTitleForUndo(bmId, after); }
+    });
+}
+
+function applyBookmarkTitleForUndo(bmId, title) {
+    const bk = bookmarks.find(b => b.id === bmId);
+    if (!bk || bk.title === title) return;
+    bk.title = title;
+    saveBookmarks();
 }
 
 // --- Cross-tab consistency ---
@@ -1237,6 +1529,9 @@ function adoptRemoteViewerTheme(key, value) {
 }
 
 function adoptRemoteHighlights(remote) {
+    // External wholesale replacement invalidates undo history: entries
+    // hold id-based references into arrays this tab no longer owns.
+    resetAnnotationHistory();
     highlights = sanitizeStoredHighlights(remote);
     // Keep id allocation above everything now known, or this tab's next
     // created highlight could collide with one from the other tab.
@@ -1250,6 +1545,7 @@ function adoptRemoteHighlights(remote) {
 }
 
 function adoptRemoteBookmarks(remote) {
+    resetAnnotationHistory();
     bookmarks = sanitizeStoredBookmarks(remote);
     bookmarkCounter = bookmarks.reduce((max, b) => Math.max(max, (b && b.id) || 0), bookmarkCounter);
     renderBookmarks();
@@ -1547,6 +1843,10 @@ function applyMergedVariantAnnotations(fingerprint, candidates) {
     });
     highlights = merged.highlights;
     bookmarks = merged.bookmarks;
+    // A merge is a wholesale replacement of both arrays — pending undo
+    // entries would reference records that moved namespaces, so history
+    // restarts rather than risk resurrecting merged-away data.
+    resetAnnotationHistory();
     highlightCounter = Math.max(highlightCounter, merged.nextHlId);
     bookmarkCounter = Math.max(bookmarkCounter, merged.nextBmId);
     autoSavedLastPage = merged.lastPage;
@@ -3195,6 +3495,7 @@ function flushFloatingNoteSave() {
 
     // Persist to storage without destroying sidebar DOM
     saveHighlights(false);
+    commitNoteUndoEntry(hl);
 
     // Show "Saved" status and fade after 1.5s
     const statusEl = document.getElementById('note-save-status');
@@ -3223,6 +3524,10 @@ function hidePopups() {
         }
         delete notePopup.dataset.hlId;
         notePopup.classList.add('hidden');
+        // Session ends after the flush above committed it, so a reopened
+        // editor starts a fresh undo step instead of coalescing with the
+        // burst that just finished.
+        endNoteUndoSession();
     }
     
     document.getElementById('color-picker-popup').classList.add('hidden');
@@ -3262,7 +3567,9 @@ document.querySelectorAll('.markup-tool-btn').forEach(btn => {
         if (activeHighlightId !== null) {
             const hl = highlights.find(h => h.id === activeHighlightId);
             if (!hl) return;
+            const editBefore = { color: hl.color, markupType: hl.markupType };
             hl.markupType = btn.dataset.type;
+            pushHighlightEditUndo(hl.id, editBefore, { color: hl.color, markupType: hl.markupType });
             activateTool();
             redrawExistingHighlight(hl);
             saveHighlights();
@@ -3281,7 +3588,9 @@ document.querySelectorAll('.color-btn').forEach(btn => {
             // Edit existing highlight
             const hl = highlights.find(h => h.id === activeHighlightId);
             if (hl) {
+                const editBefore = { color: hl.color, markupType: hl.markupType };
                 hl.color = color;
+                pushHighlightEditUndo(hl.id, editBefore, { color: hl.color, markupType: hl.markupType });
                 // Redraw through the shared path: any type conversion made
                 // via the tool buttons above must be reflected in the same
                 // pass, and hand-patched inline styles would go stale.
@@ -3300,6 +3609,7 @@ document.querySelectorAll('.color-btn').forEach(btn => {
         // all assume one page per highlight.
         let lastCreatedHlId = null;
         let lastCreatedPage = null;
+        const createdSnapshots = [];
         currentSelection.groups.forEach(group => {
             const hl = {
                 id: ++highlightCounter,
@@ -3314,6 +3624,9 @@ document.querySelectorAll('.color-btn').forEach(btn => {
             };
 
             highlights.push(hl);
+            // Snapshot for the undo entry: later in-place edits (recolor,
+            // note) must not leak into what Ctrl+Z restores.
+            createdSnapshots.push(cloneAnnotationRecord(hl));
             // Resolve the viewport at draw time, not mouseup time: the user
             // may zoom while the picker is open, and the stored PDF-space
             // rects only land correctly through the page's live _viewport.
@@ -3331,6 +3644,7 @@ document.querySelectorAll('.color-btn').forEach(btn => {
             if (pageNumInput) pageNumInput.value = lastCreatedPage;
         }
 
+        pushHighlightsCreatedUndo(createdSnapshots);
         saveHighlights();
 
         if (lastCreatedHlId !== null) {
@@ -3617,6 +3931,7 @@ document.getElementById('bookmark_page').addEventListener('click', async () => {
             title: customName.trim() || `Page ${pageNum}`
         };
         bookmarks.push(newBookmark);
+        pushBookmarkCreatedUndo(cloneAnnotationRecord(newBookmark));
         saveBookmarks();
 
         // Open the bookmarks sidebar tab to show feedback
@@ -3682,6 +3997,9 @@ document.getElementById('edit-btn-note').addEventListener('click', () => {
     
     const noteEl = document.getElementById('note-textarea');
     setRichNoteContent(noteEl, hl);
+    // Undo granularity boundary: everything typed until this box closes
+    // reverts as one Ctrl+Z step (see the note-edit session notes above).
+    beginNoteUndoSession(hl);
     noteEl.style.height = ''; // reset any manual drag height on open
     isNoteDirty = false;
     if (noteAutoSaveTimeout) {
@@ -3920,7 +4238,7 @@ document.getElementById('edit-btn-color').addEventListener('click', () => {
 
 document.getElementById('edit-btn-trash').addEventListener('click', () => {
     if (activeHighlightId === null) return;
-    
+
     const deletingId = activeHighlightId;
     const notePopup = document.getElementById('note-editor-popup');
     if (notePopup && parseInt(notePopup.dataset.hlId, 10) === deletingId) {
@@ -3928,7 +4246,9 @@ document.getElementById('edit-btn-trash').addEventListener('click', () => {
         delete notePopup.dataset.hlId;
     }
 
+    const removedHl = highlights.find(h => h.id === deletingId);
     highlights = highlights.filter(h => h.id !== deletingId);
+    if (removedHl) pushHighlightDeletedUndo(cloneAnnotationRecord(removedHl));
     saveHighlights();
     
     // Remove divs from DOM
@@ -4840,6 +5160,22 @@ document.addEventListener('keydown', (e) => {
         return;
     }
 
+    // Annotation undo/redo (issue #18). Skipped while typing so the
+    // browser's native text undo keeps working inside inputs and the
+    // note editors; those edits commit on blur and then revert as one
+    // step per writing burst.
+    if (!isInput && (e.ctrlKey || e.metaKey) && !e.altKey) {
+        const undoRedoKey = e.key.toLowerCase();
+        const isUndoKey = undoRedoKey === 'z' && !e.shiftKey;
+        const isRedoKey = undoRedoKey === 'y' || (undoRedoKey === 'z' && e.shiftKey);
+        if (isUndoKey || isRedoKey) {
+            e.preventDefault();
+            if (isUndoKey) runAnnotationUndo();
+            else runAnnotationRedo();
+            return;
+        }
+    }
+
     // Delete selected highlight when pressing Delete or Backspace
     if (!isInput && (e.key === 'Delete' || e.key === 'Backspace')) {
         // Case A: A highlight is selected/active (clicked by user)
@@ -5338,6 +5674,7 @@ function renderSidebar() {
 
             // Remove from global array
             highlights = highlights.filter(h => h.id !== hl.id);
+            pushHighlightDeletedUndo(cloneAnnotationRecord(hl));
             saveHighlights();
 
             // Remove from DOM
@@ -5409,8 +5746,16 @@ function renderSidebar() {
                 hl.noteFmt = cleanedHtml ? 'html' : undefined;
                 saveHighlights(false); // Do NOT re-render sidebar on blur
                 updateHighlightIndicatorsOnPage(hl);
+                commitNoteUndoEntry(hl);
             }
         });
+
+        // Undo history bounds for this card's note editing: focus opens a
+        // coalescing session; blur (after attachRichEditor's own save
+        // listener, registered just above) closes it, so each writing
+        // burst in the sidebar is one undo step.
+        noteInput.addEventListener('focus', () => beginNoteUndoSession(hl));
+        noteInput.addEventListener('blur', () => endNoteUndoSessionIfFor(hl.id));
 
         item.appendChild(noteInput);
 
@@ -5544,6 +5889,7 @@ function renderBookmarks() {
         deleteBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             bookmarks = bookmarks.filter(b => b.id !== bk.id);
+            pushBookmarkDeletedUndo(cloneAnnotationRecord(bk));
             saveBookmarks();
         });
         
@@ -5558,7 +5904,14 @@ function renderBookmarks() {
         titleInput.value = bk.title || '';
         
         titleInput.addEventListener('change', () => {
-            bk.title = titleInput.value.trim() || `Page ${bk.pageNumber}`;
+            const titleBefore = bk.title;
+            const titleAfter = titleInput.value.trim() || `Page ${bk.pageNumber}`;
+            bk.title = titleAfter;
+            // A rename that landed on the same stored title (e.g. clearing
+            // an auto-named bookmark) is a plain save, not an undo step.
+            if (titleBefore !== titleAfter) {
+                pushBookmarkRenamedUndo(bk.id, titleBefore, titleAfter);
+            }
             saveBookmarks();
         });
         
