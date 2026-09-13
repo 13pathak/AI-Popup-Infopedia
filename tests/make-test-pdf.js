@@ -1,5 +1,5 @@
 // Builds a small valid 3-page PDF with correct xref offsets for viewer
-// testing. Run: node .export-test/make-test-pdf.js > test_highlight.pdf
+// testing. Run: node tests/make-test-pdf.js > tests/test_highlight.pdf
 const pagesText = [
   ['Page one sample text alpha beta', 'gamma delta epsilon zeta'],
   ['Page two sample text eta theta', 'iota kappa lambda mu'],

@@ -1,5 +1,6 @@
 const fs = require('fs');
-const buf = fs.readFileSync(process.argv[2] || 'test_highlight.pdf');
+const path = require('path');
+const buf = fs.readFileSync(process.argv[2] || path.join(__dirname, 'test_highlight.pdf'));
 const s = buf.toString('latin1');
 const m = s.match(/xref\n0 (\d+)\n([\s\S]*?)startxref\n(\d+)/);
 if (!m) { console.log('NO XREF'); process.exit(1); }

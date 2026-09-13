@@ -2,9 +2,9 @@
 // Drives the real viewer page in headless Edge: real DOM selection drags,
 // real button clicks, real key events. Run with the viewer served on
 // http://127.0.0.1:8793 and headless Edge on port 9333:
-//   node .export-test/e2e-undo.js
+//   node tests/e2e-undo.js
 const CDP_PORT = 9333;
-const VIEWER_URL = 'http://127.0.0.1:8793/pdf/web/custom-viewer.html?file=/test_highlight.pdf';
+const VIEWER_URL = 'http://127.0.0.1:8793/pdf/web/custom-viewer.html?file=/tests/test_highlight.pdf';
 
 let msgId = 0;
 const pending = new Map();
