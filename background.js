@@ -2338,6 +2338,20 @@ async function handleOpenNativeViewer(request, sender, sendResponse) {
 // path never pays this cost: webNavigation.onBeforeNavigate fires before
 // commit, so those navigations are replaced pre-response. The Promise.all
 // below just keeps the takeover window as short as the platform allows.
+// The takeover target for an intercepted PDF. ?file= carries the document
+// address WITHOUT its #fragment: fragments are view state, and encoding
+// one into the query (as %23page%3D2) put the same deep link in two places
+// at once — once buried in fileUrl (error screens, native-viewer
+// handovers) and once on the viewer's own URL — and only on the
+// webNavigation path, whose URLs still carry the hash. The fragment rides
+// the viewer's hash alone, which is where the viewer reads it back.
+function buildViewerUrl(originalUrl, fragment) {
+  const hashIdx = originalUrl.indexOf('#');
+  const documentUrl = hashIdx === -1 ? originalUrl : originalUrl.slice(0, hashIdx);
+  const viewerUrl = chrome.runtime.getURL('pdf/web/custom-viewer.html?file=' + encodeURIComponent(documentUrl));
+  return fragment ? viewerUrl + fragment : viewerUrl;
+}
+
 async function redirectToPdfViewer(tabId, originalUrl) {
   await Promise.all([redirectedTabsLoaded, pdfViewerEnabledLoaded]);
   if (!pdfViewerEnabled) return;
@@ -2352,8 +2366,7 @@ async function redirectToPdfViewer(tabId, originalUrl) {
   const fragment = hashIdx !== -1
     ? originalUrl.slice(hashIdx)
     : recallNavFragment(tabId, originalUrl);
-  let viewerUrl = chrome.runtime.getURL('pdf/web/custom-viewer.html?file=' + encodeURIComponent(originalUrl));
-  if (fragment) viewerUrl += fragment;
+  const viewerUrl = buildViewerUrl(originalUrl, fragment);
   chrome.tabs.update(tabId, { url: viewerUrl }, () => {
     const err = chrome.runtime.lastError;
     if (err) {
