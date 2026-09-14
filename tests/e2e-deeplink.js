@@ -5,7 +5,8 @@
 // viewer served on http://127.0.0.1:8793 and headless browser on port 9333:
 //   node tests/e2e-deeplink.js
 const CDP_PORT = 9333;
-const BASE = 'http://127.0.0.1:8793/pdf/web/custom-viewer.html?file=/tests/test_highlight.pdf';
+const VIEWER_PATH = 'http://127.0.0.1:8793/pdf/web/custom-viewer.html';
+const DEFAULT_FILE = '/tests/test_highlight.pdf';
 
 let msgId = 0;
 const pending = new Map();
@@ -65,10 +66,11 @@ async function navigateTo(url) {
 // difference — a straight Page.navigate between them would be treated as a
 // same-document hash change and never reload the viewer. Bounce through
 // about:blank so every case is a fresh document load.
-async function openWithHash(fragment) {
-    console.log('  case:', fragment || '(none)');
+async function openWithHash(fragment, fileValue) {
+    const url = VIEWER_PATH + '?file=' + encodeURIComponent(fileValue || DEFAULT_FILE) + (fragment || '');
+    console.log('  case:', url.slice(VIEWER_PATH.length));
     await navigateTo('about:blank');
-    await navigateTo(BASE + fragment);
+    await navigateTo(url);
     // The load event fired in the new document; wait for the deep-link
     // scroll (300ms timer after render) to settle on a stable page number.
     await evalPage(`new Promise(res => {
@@ -82,6 +84,25 @@ async function openWithHash(fragment) {
         check();
     })`, true);
     await sleep(900);
+    return readViewerState();
+}
+
+// Same-document fragment change (address-bar edit, in-page anchor,
+// history): no new document load happens, so drive Page.navigate
+// directly — waiting for loadEventFired would time out — and prove the
+// document survived via a sentinel that a reload would wipe.
+async function setHash(fragment) {
+    await evalPage('window.__deeplinkSentinel = (window.__deeplinkSentinel || 0) + 1');
+    const before = await evalPage('window.__deeplinkSentinel');
+    const r = await send('Page.navigate', { url: VIEWER_PATH + '?file=' + encodeURIComponent(DEFAULT_FILE) + fragment });
+    if (r && r.errorText) throw new Error('navigation failed: ' + r.errorText);
+    await sleep(700);
+    const after = await evalPage('window.__deeplinkSentinel');
+    if (after !== before) throw new Error('same-document navigation reloaded the document');
+    return readViewerState();
+}
+
+async function readViewerState() {
     const result = await evalPage(`(() => {
         const num = document.getElementById('page_num').value;
         const div = document.querySelector('.page[data-page-number="' + num + '"]');
@@ -191,6 +212,47 @@ async function main() {
     // ---- No fragment: unchanged load behavior ----
     s = await openWithHash('');
     assert(s.hash === '' && s.page === 1 && s.targetVisible, 'no fragment loads at page 1', s);
+
+    // ---- Fragment inside ?file= is not a navigation source ----
+    // The background keeps ?file= fragment-free and puts the deep link on
+    // the viewer's own hash (tests/test-viewer-url.js pins the URL shape).
+    // This guards the viewer half of that contract: a %23-embedded
+    // fragment — a manually hand-built URL — loads the document but never
+    // navigates, so the two representations cannot drift back into doing
+    // double duty.
+    s = await openWithHash('', DEFAULT_FILE + '#page=3');
+    assert(s.page === 1 && s.targetVisible, 'fragment embedded in ?file= loads but does not navigate', s);
+
+    // ---- Same-document hash changes while the viewer is open ----
+    // Fresh document first; every edit below must land via hashchange,
+    // not by reloading (setHash enforces that with a sentinel).
+    s = await openWithHash('#page=2');
+    assert(s.page === 2, 'fresh load at page 2 for same-document cases', s);
+
+    s = await setHash('#page=3');
+    assert(s.hash === '#page=3' && s.page === 3 && s.targetVisible, 'address-bar style hash edit to #page=3 navigates without reload', s);
+
+    s = await setHash('#page=99');
+    assert(s.hash === '#page=99' && s.page === 3, 'same-document #page=99 clamps to the last page', s);
+
+    // History Back re-traverses the fragment-only entries: back to #page=3.
+    const beforeBack = await evalPage('window.__deeplinkSentinel');
+    await evalPage('history.back()');
+    await sleep(700);
+    const afterBack = await evalPage('window.__deeplinkSentinel');
+    assert(afterBack === beforeBack, 'history Back did not reload the document', { beforeBack, afterBack });
+    s = await readViewerState();
+    assert(s.hash === '#page=3' && s.page === 3, 'history Back re-applies the previous hash target', s);
+
+    s = await setHash('#page=abc');
+    assert(s.hash === '#page=abc' && s.page === 3, 'unusable hash change leaves the current page alone', s);
+
+    // A fully CLEARED fragment is deliberately not asserted here: this
+    // Edge build performs a full navigation (reload) on fragment removal —
+    // both via CDP and page-initiated location.href — instead of the
+    // spec's same-document change, so no harness path represents the user
+    // action. The viewer's half of that scenario (empty hash parses to no
+    // target) is the same code path as the #page=abc case above.
 
     console.log(process.exitCode ? 'DEEPLINK E2E FAILED' : 'DEEPLINK E2E PASSED');
     finished = true;

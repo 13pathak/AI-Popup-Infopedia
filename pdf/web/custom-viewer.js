@@ -2263,8 +2263,13 @@ async function loadPDF() {
         // caught up yet, exactly like the auto-resume path below.
         const deepLinkPage = await resolveDeepLinkPage();
         if (deepLinkPage !== null) {
+            // The generation token cancels this delayed jump if a
+            // hashchange lands before it fires: the change names a newer
+            // target and must not be clobbered by the stale one (the
+            // hashchange listener performs the fresh navigation instead).
+            const gen = deepLinkGeneration;
             setTimeout(() => {
-                scrollToPage(deepLinkPage);
+                if (gen === deepLinkGeneration) scrollToPage(deepLinkPage);
             }, 300); // small delay to ensure rendering has caught up
         } else if (autoSavedLastPage > 1 && autoSavedLastPage <= pdfDoc.numPages) {
             setTimeout(() => {
@@ -2299,7 +2304,11 @@ function buildNativeViewerButton() {
     nativeBtn.textContent = "Open in Chrome's built-in viewer";
     nativeBtn.addEventListener('click', () => {
         nativeBtn.disabled = true;
-        const send = (tabId) => chrome.runtime.sendMessage({ type: 'openNativeViewer', url: fileUrl, tabId }, (resp) => {
+        // The deep-link fragment lives on this page's own URL (?file= is
+        // kept fragment-free by the background), so graft it onto the
+        // handover URL to keep #page=N working in Chrome's native viewer.
+        const deepLinkHash = window.location.hash.length > 1 ? window.location.hash : '';
+        const send = (tabId) => chrome.runtime.sendMessage({ type: 'openNativeViewer', url: fileUrl + deepLinkHash, tabId }, (resp) => {
             if (chrome.runtime.lastError || !resp || !resp.ok) {
                 // Navigation never started (no tab id, blocked URL, dead
                 // worker); leave the button usable instead of a dead end.
@@ -3056,6 +3065,26 @@ const bootstrappedToggle = document.getElementById('dark_mode_toggle');
 if (bootstrappedToggle) {
     bootstrappedToggle.innerHTML = darkModeButtonHtml(document.body.classList.contains('dark-mode'));
 }
+
+// Same-document hash changes — editing #page=2 into #page=10 in the
+// address bar, in-page anchors, history Back — never reload the document,
+// so the one-shot deep link in loadPDF never re-runs. Honor them live
+// with the same parse/resolve rules and jump when the new fragment names
+// a usable page; an unusable one (cleared, #page=abc, unknown
+// destination) leaves the current position alone. deepLinkGeneration
+// supersedes stale work: a newer change discards a still-pending resolve
+// and also the initial load's delayed deep-link scroll (see loadPDF). It
+// is declared here, before loadPDF() runs, so no read can hit the
+// temporal dead zone.
+let deepLinkGeneration = 0;
+window.addEventListener('hashchange', () => {
+    deepLinkGeneration++;
+    const gen = deepLinkGeneration;
+    resolveDeepLinkPage().then((page) => {
+        if (page === null || gen !== deepLinkGeneration) return;
+        scrollToPage(page);
+    }).catch(() => {});
+});
 
 loadPDF();
 
