@@ -38,7 +38,7 @@ When the primary model grounds its response with live web search results, the Ha
 - **Conversational Hotkey:** Press `Ctrl+Shift+Y` (customizable) to instantly open an empty conversational AI popup and ask any question, or trigger the AI on your current text selection.
 - **Multiple AI Models:** Configure and switch between multiple AI backends (Ollama, Gemini API, OpenAI, etc.).
 - **Speech-to-Text Dictation:** Use API-based Speech-to-Text to quickly dictate follow-up questions instead of typing.
-- **Local & Online PDF Viewer:** Comes with a custom PDF.js viewer. Seamlessly reads and intercepts online PDFs (like Arxiv papers) so you can highlight text and get AI explanations right on the PDF.
+- **Local & Online PDF Viewer:** Comes with a custom PDF.js viewer. Seamlessly reads and intercepts online PDFs (like Arxiv papers) so you can highlight text and get AI explanations right on the PDF. `#page=N` deep links (and named destinations) in PDF URLs are honored, jumping straight to the linked page after load.
 - **Annotation Portability Across URLs:** PDF highlights, notes and bookmarks are matched by document fingerprint, so the same file opened at a different address (http→https, added query params, moved domain) is detected and offered a one-click merge into a single set.
 - **Custom Prompts:** Create multiple prompts for different use cases (e.g., "Explain like I'm 5", "Translate to Hindi").
 - **Source Tracking:** Automatically saves the URL and page title where each word was looked up.

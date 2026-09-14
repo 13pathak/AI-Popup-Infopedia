@@ -84,7 +84,11 @@ function assert(cond, label, extra) {
 
 async function main() {
     const targets = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json();
-    const page = targets.find(t => t.type === 'page');
+    // Prefer real http(s) pages: an Edge first-run sync-confirmation dialog
+    // can appear mid-session as a tiny window and is listed first among
+    // page targets — see e2e-deeplink.js.
+    const page = targets.filter(t => t.type === 'page').find(t => /^https?:/.test(t.url)) ||
+        targets.find(t => t.type === 'page');
     if (!page) throw new Error('no page target');
     ws = new WebSocket(page.webSocketDebuggerUrl);
     await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });

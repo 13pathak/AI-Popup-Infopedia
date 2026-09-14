@@ -2256,8 +2256,17 @@ async function loadPDF() {
             renderOutline(outline);
         }).catch(err => console.error("Error fetching outline", err));
         
-        // Auto-resume
-        if (autoSavedLastPage > 1 && autoSavedLastPage <= pdfDoc.numPages) {
+        // Deep link or auto-resume. A #page=N / named-destination fragment
+        // forwarded from the original URL names a page explicitly and so
+        // outranks the saved reading position; scrollToPage falls back to
+        // the deferred-scroll machinery when the target's layout has not
+        // caught up yet, exactly like the auto-resume path below.
+        const deepLinkPage = await resolveDeepLinkPage();
+        if (deepLinkPage !== null) {
+            setTimeout(() => {
+                scrollToPage(deepLinkPage);
+            }, 300); // small delay to ensure rendering has caught up
+        } else if (autoSavedLastPage > 1 && autoSavedLastPage <= pdfDoc.numPages) {
             setTimeout(() => {
                 scrollToPage(autoSavedLastPage);
             }, 300); // small delay to ensure rendering has caught up
@@ -5365,6 +5374,77 @@ async function renderLinkAnnotations(page, pageDiv, viewport) {
     } catch (e) {
         console.error("Error rendering annotations", e);
     }
+}
+
+// ==================== Deep links (#page=N) ====================
+// The background interception re-attaches the original PDF URL's fragment
+// to this page's own URL, so #page=N links (arXiv, docs sites) survive the
+// takeover. Parse it into a target — a page number, a named destination,
+// or nothing usable — mirroring the conventions of the stock pdf.js
+// viewer: "#page=3&zoom=100" is a parameter list where only page and
+// nameddest matter here, while a bare "#Chapter1" is a named destination.
+function parseDeepLinkTarget() {
+    const raw = window.location.hash;
+    if (!raw || raw.charAt(0) !== '#') return null;
+    const fragment = raw.slice(1).trim();
+    if (!fragment) return null;
+    let pageParam = null;
+    let destParam = null;
+    if (fragment.includes('=')) {
+        for (const pair of fragment.split('&')) {
+            const eq = pair.indexOf('=');
+            if (eq === -1) continue;
+            const key = pair.slice(0, eq).trim().toLowerCase();
+            const value = pair.slice(eq + 1).trim();
+            if (key === 'page' && pageParam === null) pageParam = value;
+            else if (key === 'nameddest' && destParam === null) destParam = value;
+        }
+    } else {
+        destParam = fragment;
+    }
+    if (pageParam !== null) {
+        const num = parseInt(pageParam, 10);
+        // An explicit-but-unusable page (#page=0, #page=abc) means the
+        // link named no valid page; it does not silently become a
+        // named-destination lookup.
+        return Number.isInteger(num) && num >= 1 ? { page: num } : null;
+    }
+    if (destParam) {
+        try { return { dest: decodeURIComponent(destParam) }; } catch (e) {
+            return { dest: destParam }; // malformed %-escape: try it raw
+        }
+    }
+    return null;
+}
+
+// Resolve the deep-link target against the loaded document. Returns a
+// 1-based page number, or null when there is no usable target (also the
+// no-fragment fast path every ordinary open takes).
+async function resolveDeepLinkPage() {
+    const target = parseDeepLinkTarget();
+    if (!target || !pdfDoc) return null;
+    if (target.page !== undefined) {
+        // Out-of-range high pages clamp to the document's end, like the
+        // native viewer's treatment of #page=9999.
+        return Math.min(target.page, pdfDoc.numPages);
+    }
+    try {
+        const dest = await pdfDoc.getDestination(target.dest);
+        if (!Array.isArray(dest) || dest.length === 0) return null;
+        const ref = dest[0];
+        let pageIndex = null;
+        if (typeof ref === 'number' && Number.isInteger(ref)) {
+            pageIndex = ref; // explicit destinations may carry a 0-based index
+        } else if (ref && typeof ref === 'object') {
+            pageIndex = await pdfDoc.getPageIndex(ref); // {num, gen} page reference
+        }
+        if (pageIndex !== null && pageIndex >= 0 && pageIndex < pdfDoc.numPages) {
+            return pageIndex + 1;
+        }
+    } catch (e) {
+        // Unknown or malformed destination name: no deep-link jump.
+    }
+    return null;
 }
 
 function scrollToPage(pageNumber) {

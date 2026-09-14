@@ -7,18 +7,22 @@ const pagesText = [
 ];
 
 // Object layout: 1 Catalog, 2 Pages, 3-5 Page dicts, 6-8 content
-// streams, 9 font.
+// streams, 9 font, 10 named destinations (old-style /Dests dictionary,
+// exercised by the #page deep-link tests).
 const contentStreams = pagesText.map(lines =>
   'BT /F1 24 Tf 72 700 Td ' +
   lines.map(l => `(${l}) Tj 0 -40 Td`).join(' ').replace(/ Tj 0 -40 Td$/, ' Tj') + ' ET');
 
 const objects = [
-  '<< /Type /Catalog /Pages 2 0 R >>',
+  '<< /Type /Catalog /Pages 2 0 R /Dests 10 0 R >>',
   '<< /Type /Pages /Kids [3 0 R 4 0 R 5 0 R] /Count 3 >>',
   ...pagesText.map((lines, i) =>
     `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 9 0 R >> >> /Contents ${6 + i} 0 R >>`),
   ...contentStreams.map(s => ({ stream: s })),
-  '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'
+  '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+  // /Final#20Page decodes to the name "Final Page", covering the
+  // percent-encoded named-destination form of deep links.
+  '<< /ChapterTwo [4 0 R /XYZ null null null] /Final#20Page [5 0 R /XYZ null null null] >>'
 ];
 
 let out = '%PDF-1.4\n';

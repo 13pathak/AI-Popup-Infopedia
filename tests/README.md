@@ -21,7 +21,8 @@ The runner automatically:
 
 * **`run-all.js`**: Single-command test runner (auto-spawns browser, server, and runs tests).
 * **`e2e-undo.js`**: CDP-driven end-to-end test verifying highlight creation, deletions, recoloring, markup conversions, note coalescing, bookmarks, and undo/redo stacks.
+* **`e2e-deeplink.js`**: CDP-driven end-to-end test for `#page=N` deep links (issue #17): page-number fragments, clamping, invalid values, named destinations (bare, `nameddest=`, percent-encoded), and unchanged no-fragment load behavior.
 * **`serve.js`**: Local HTTP server for serving the viewer files.
 * **`check-pdf.js`**: Validator for PDF xref tables and offsets.
-* **`make-test-pdf.js`**: Generator for the minimal 3-page test PDF fixture.
+* **`make-test-pdf.js`**: Generator for the minimal 3-page test PDF fixture (includes named destinations used by the deep-link tests).
 * **`test_highlight.pdf`**: Valid 3-page PDF fixture used by the viewer tests.

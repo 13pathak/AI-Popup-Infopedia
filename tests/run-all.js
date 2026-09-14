@@ -71,11 +71,11 @@ async function run() {
   console.log('=== Starting Test Suite ===');
 
   // 1. Check test PDF fixture
-  console.log('[1/4] Checking PDF fixture integrity...');
+  console.log('[1/5] Checking PDF fixture integrity...');
   require('./check-pdf');
 
   // 2. Start HTTP server
-  console.log(`[2/4] Starting local HTTP server on port ${PORT}...`);
+  console.log(`[2/5] Starting local HTTP server on port ${PORT}...`);
   const server = createServer();
   await new Promise((res, rej) => {
     server.listen(PORT, '127.0.0.1', (err) => err ? rej(err) : res());
@@ -88,13 +88,15 @@ async function run() {
     server.close();
     throw new Error('No compatible browser (Edge or Chrome) found on this system.');
   }
-  console.log(`[3/4] Launching headless browser: ${path.basename(browserBin)}...`);
+  console.log(`[3/5] Launching headless browser: ${path.basename(browserBin)}...`);
   const tempProfile = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-test-profile-'));
 
   const browserProc = spawn(browserBin, [
     '--headless=new',
     `--remote-debugging-port=${CDP_PORT}`,
     '--remote-allow-origins=*',
+    '--window-size=1280,900',
+    '--disable-sync',
     `--user-data-dir=${tempProfile}`,
     '--no-first-run',
     '--no-default-browser-check',
@@ -106,13 +108,21 @@ async function run() {
     await pollEndpoint(`http://127.0.0.1:${CDP_PORT}/json`, 15000);
     console.log(`  CDP ready on port ${CDP_PORT}`);
 
-    // 4. Run E2E test
-    console.log('[4/4] Executing E2E undo/redo test harness...');
+    // 4. Run E2E tests
+    console.log('[4/5] Executing E2E undo/redo test harness...');
     const testProc = spawn(process.execPath, [path.join(__dirname, 'e2e-undo.js')], {
       stdio: 'inherit'
     });
 
     exitCode = await new Promise(res => testProc.on('exit', code => res(code ?? 0)));
+
+    console.log('[5/5] Executing E2E deep-link test harness...');
+    const deeplinkProc = spawn(process.execPath, [path.join(__dirname, 'e2e-deeplink.js')], {
+      stdio: 'inherit'
+    });
+
+    const deeplinkCode = await new Promise(res => deeplinkProc.on('exit', code => res(code ?? 0)));
+    if (deeplinkCode !== 0) exitCode = deeplinkCode;
   } catch (err) {
     console.error('Test runner failed:', err.message);
     exitCode = 1;

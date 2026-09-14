@@ -2156,6 +2156,53 @@ function persistRedirectedTabs() {
   } catch (e) {}
 }
 
+// URL fragment (#…) without a URL round-trip: keep the raw string so the
+// key stays byte-identical to what the listeners saw. An encoded %23 in
+// the path/query is not a fragment and is correctly left alone.
+function urlWithoutFragment(url) {
+  const i = url.indexOf('#');
+  return i === -1 ? url : url.slice(0, i);
+}
+
+// Deep-link fragment memory for the Content-Type interception path.
+// webRequest URLs never carry the fragment (the network stack strips it
+// before the request), so a #page=N on a URL that only reveals its PDF
+// nature through response headers would be lost. webNavigation URLs do
+// carry it, and onBeforeNavigate fires for every main-frame navigation
+// before its request starts, so the fragment can be remembered per tab
+// there and grafted back on when the header-based listener redirects.
+const NAV_FRAGMENT_TTL_MS = 30000;
+const navFragments = new Map(); // tabId -> { urlNoHash, hash, ts }
+
+function rememberNavFragment(tabId, url) {
+  const now = Date.now();
+  // Sweep expired entries while writing, like markRedirected does, so the
+  // Map cannot grow with dead tabs between navigations.
+  for (const [id, e] of navFragments) {
+    if (!e || now - e.ts >= NAV_FRAGMENT_TTL_MS) navFragments.delete(id);
+  }
+  const hashIdx = url.indexOf('#');
+  navFragments.set(tabId, {
+    urlNoHash: urlWithoutFragment(url),
+    hash: hashIdx === -1 ? '' : url.slice(hashIdx),
+    ts: now
+  });
+}
+
+// Fragment to re-attach for a redirect of `url` in `tabId`: '' when none
+// is known. The fragment-less URL must match the remembered navigation,
+// so an entry left over from an older navigation can never graft its hash
+// onto an unrelated redirect; TTL guards the matching-URL-slow-server case.
+function recallNavFragment(tabId, url) {
+  const e = navFragments.get(tabId);
+  if (!e) return '';
+  if (Date.now() - e.ts >= NAV_FRAGMENT_TTL_MS) {
+    navFragments.delete(tabId);
+    return '';
+  }
+  return e.urlNoHash === urlWithoutFragment(url) ? e.hash : '';
+}
+
 function isAlreadyRedirected(tabId, url) {
   const entry = redirectedTabs.get(tabId);
   if (!entry) return false;
@@ -2184,7 +2231,11 @@ function isAlreadyRedirected(tabId, url) {
     redirectedTabs.delete(tabId); // lazy expiry replaces the lost timer
     return false;
   }
-  return entry.url === url;
+  // Compare modulo the fragment: webNavigation reports URLs with their
+  // #hash, webRequest without it, so an exact match would let the second
+  // listener re-redirect (and reload the viewer) for exactly the
+  // fragment-bearing deep links this feature exists to honor.
+  return urlWithoutFragment(entry.url) === urlWithoutFragment(url);
 }
 
 function markRedirected(tabId, originalUrl, isBypass) {
@@ -2206,6 +2257,7 @@ function markRedirected(tabId, originalUrl, isBypass) {
 
 // Closed tabs release their entries immediately instead of lingering to TTL.
 chrome.tabs.onRemoved.addListener((tabId) => {
+  navFragments.delete(tabId);
   if (redirectedTabs.delete(tabId)) {
     persistRedirectedTabs();
   }
@@ -2291,7 +2343,17 @@ async function redirectToPdfViewer(tabId, originalUrl) {
   if (!pdfViewerEnabled) return;
   if (isAlreadyRedirected(tabId, originalUrl)) return; // dedupe across listeners
   markRedirected(tabId, originalUrl);
-  const viewerUrl = chrome.runtime.getURL('pdf/web/custom-viewer.html?file=' + encodeURIComponent(originalUrl));
+  // Deep links (#page=N, named destinations): re-attach the original URL's
+  // fragment to the viewer's own URL, where the viewer reads it back after
+  // the document loads. URLs arriving from the header listener carry no
+  // fragment (the network stack strips it), so recover it from the
+  // onBeforeNavigate memory for this tab when the URLs agree.
+  const hashIdx = originalUrl.indexOf('#');
+  const fragment = hashIdx !== -1
+    ? originalUrl.slice(hashIdx)
+    : recallNavFragment(tabId, originalUrl);
+  let viewerUrl = chrome.runtime.getURL('pdf/web/custom-viewer.html?file=' + encodeURIComponent(originalUrl));
+  if (fragment) viewerUrl += fragment;
   chrome.tabs.update(tabId, { url: viewerUrl }, () => {
     const err = chrome.runtime.lastError;
     if (err) {
@@ -2312,6 +2374,11 @@ chrome.webNavigation.onBeforeNavigate.addListener((details) => {
   if (details.frameId !== 0) return;
   const url = details.url;
   if (url.includes(chrome.runtime.id) && url.includes('/pdf/web/custom-viewer.html')) return;
+  // Remember this navigation's fragment (absent from webRequest URLs) so
+  // the Content-Type listener can still honor #page=N deep links — see
+  // rememberNavFragment. Every main-frame navigation overwrites the slot
+  // before its own response can arrive, keeping the entry current.
+  rememberNavFragment(details.tabId, url);
   try {
     const urlObj = new URL(url);
     const pathLower = urlObj.pathname.toLowerCase();
