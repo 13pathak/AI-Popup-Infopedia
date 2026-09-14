@@ -12,16 +12,18 @@ node tests/run-all.js
 
 The runner automatically:
 1. Validates the test PDF fixture xref tables.
-2. Starts the local HTTP static server on port 8793.
-3. Spawns a headless browser (Edge or Chrome) on port 9333 using Chrome DevTools Protocol (CDP).
-4. Executes the full end-to-end test scenarios.
-5. Cleanly terminates the browser and server processes.
+2. Unit-tests the background viewer-URL construction.
+3. Starts the local HTTP static server on port 8793.
+4. Spawns a headless browser (Edge or Chrome) on port 9333 using Chrome DevTools Protocol (CDP).
+5. Executes the full end-to-end test scenarios.
+6. Cleanly terminates the browser and server processes.
 
 ## Files
 
 * **`run-all.js`**: Single-command test runner (auto-spawns browser, server, and runs tests).
 * **`e2e-undo.js`**: CDP-driven end-to-end test verifying highlight creation, deletions, recoloring, markup conversions, note coalescing, bookmarks, and undo/redo stacks.
-* **`e2e-deeplink.js`**: CDP-driven end-to-end test for `#page=N` deep links (issue #17): page-number fragments, clamping, invalid values, named destinations (bare, `nameddest=`, percent-encoded), and unchanged no-fragment load behavior.
+* **`e2e-deeplink.js`**: CDP-driven end-to-end test for `#page=N` deep links (issue #17): page-number fragments, clamping, invalid values, named destinations (bare, `nameddest=`, percent-encoded), unchanged no-fragment load behavior, and same-document hash edits while the viewer is open (address-bar style changes, clamping, history Back, no-op on unusable fragments).
+* **`test-viewer-url.js`**: Unit test that loads the real `background.js` under a stubbed `chrome` API and fires the actual `webNavigation`/`webRequest` listeners, asserting the viewer-URL shape: `?file=` is always fragment-free and the deep link rides the viewer's own hash (plus fragment recovery and fragment-aware cross-listener dedupe — same document with a different fragment inside the TTL is a new navigation and redirects again).
 * **`serve.js`**: Local HTTP server for serving the viewer files.
 * **`check-pdf.js`**: Validator for PDF xref tables and offsets.
 * **`make-test-pdf.js`**: Generator for the minimal 3-page test PDF fixture (includes named destinations used by the deep-link tests).

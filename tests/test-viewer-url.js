@@ -170,6 +170,61 @@ async function main() {
     assert(ups.length === 1 && ups[0].url === fileOf('https://example.com/plain.pdf'),
         'fragment-less PDF builds the historical viewer URL', ups);
 
+    // ---- New navigation, different fragment, inside the dedupe TTL ----
+    // The reported regression: doc.pdf#page=2, Back, then doc.pdf#page=40
+    // within 10s. The marks share the fragment-stripped URL, so naive
+    // modulo-fragment matching suppressed the second redirect; the mark's
+    // navHash (the navigation's fragment) must tell them apart.
+    events.webNavigationOnBeforeNavigate._fire({ frameId: 0, tabId: 4, url: 'https://example.com/doc.pdf#page=2' });
+    await settle();
+    events.webNavigationOnBeforeNavigate._fire({ frameId: 0, tabId: 4, url: 'https://example.com/doc.pdf#page=40' });
+    await settle();
+    ups = updatesFor(4);
+    assert(ups.length === 2, 'same document with a different fragment redirects again inside the TTL', ups);
+    assert(ups[1] && ups[1].url === fileOf('https://example.com/doc.pdf') + '#page=40',
+        'second fragment navigation carries its own deep link', ups[1] && ups[1].url);
+
+    // An identical full URL within the TTL stays suppressed (the
+    // historical tradeoff of the dedupe window) — asserted against the
+    // current mark, i.e. before any other navigation re-marks the tab.
+    events.webNavigationOnBeforeNavigate._fire({ frameId: 0, tabId: 4, url: 'https://example.com/doc.pdf#page=40' });
+    await settle();
+    assert(updatesFor(4).length === 2, 'identical URL within the TTL stays deduped', updatesFor(4).length);
+
+    // Bare re-navigation of a previously-fragmented URL is also new.
+    events.webNavigationOnBeforeNavigate._fire({ frameId: 0, tabId: 4, url: 'https://example.com/doc.pdf' });
+    await settle();
+    ups = updatesFor(4);
+    assert(ups.length === 3 && ups[2].url === fileOf('https://example.com/doc.pdf'),
+        'bare re-navigation of the same document redirects again', ups);
+
+    events.webNavigationOnBeforeNavigate._fire({ frameId: 0, tabId: 4, url: 'https://example.com/doc.pdf' });
+    await settle();
+    assert(updatesFor(4).length === 3, 'identical bare URL within the TTL stays deduped', updatesFor(4).length);
+
+    // ---- Content-Type path: fragments the webRequest URL cannot show ----
+    // Marks made from the header listener store the remembered fragment,
+    // so a later navigation whose remembered fragment differs redirects
+    // even though both webRequest URLs are byte-identical.
+    events.webNavigationOnBeforeNavigate._fire({ frameId: 0, tabId: 5, url: 'https://example.com/view?id=3#page=5' });
+    await settle();
+    events.webRequestOnHeadersReceived._fire({
+        type: 'main_frame', tabId: 5, url: 'https://example.com/view?id=3',
+        responseHeaders: [{ name: 'Content-Type', value: 'application/pdf' }]
+    });
+    await settle();
+    events.webNavigationOnBeforeNavigate._fire({ frameId: 0, tabId: 5, url: 'https://example.com/view?id=3#page=9' });
+    await settle();
+    events.webRequestOnHeadersReceived._fire({
+        type: 'main_frame', tabId: 5, url: 'https://example.com/view?id=3',
+        responseHeaders: [{ name: 'Content-Type', value: 'application/pdf' }]
+    });
+    await settle();
+    ups = updatesFor(5);
+    assert(ups.length === 2, 'same Content-Type document with a different remembered fragment redirects again', ups);
+    assert(ups[1] && ups[1].url === fileOf('https://example.com/view?id=3') + '#page=9',
+        'Content-Type re-navigation carries the new fragment', ups[1] && ups[1].url);
+
     console.log(process.exitCode ? 'VIEWER-URL TEST FAILED' : 'VIEWER-URL TEST PASSED');
     process.exit(process.exitCode || 0);
 }

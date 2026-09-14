@@ -2137,7 +2137,10 @@ const redirectedTabsLoaded = (async () => {
           url: entry.url,
           ts: entry.ts,
           born: typeof entry.born === 'number' ? entry.born : undefined,
-          bypass: Boolean(entry.bypass)
+          bypass: Boolean(entry.bypass),
+          // Marks persisted before navHash existed load without it and
+          // simply take the lenient comparison path in isAlreadyRedirected.
+          navHash: typeof entry.navHash === 'string' ? entry.navHash : undefined
         });
       }
     }
@@ -2164,13 +2167,16 @@ function urlWithoutFragment(url) {
   return i === -1 ? url : url.slice(0, i);
 }
 
-// Deep-link fragment memory for the Content-Type interception path.
-// webRequest URLs never carry the fragment (the network stack strips it
-// before the request), so a #page=N on a URL that only reveals its PDF
-// nature through response headers would be lost. webNavigation URLs do
-// carry it, and onBeforeNavigate fires for every main-frame navigation
-// before its request starts, so the fragment can be remembered per tab
-// there and grafted back on when the header-based listener redirects.
+// Per-tab memory of the latest main-frame navigation's fragment. Two
+// consumers: (1) deep-link recovery for the Content-Type interception
+// path — webRequest URLs never carry the fragment (the network stack
+// strips it before the request), so a #page=N on a URL that only reveals
+// its PDF nature through response headers would be lost, while
+// webNavigation URLs do carry it and onBeforeNavigate fires for every
+// main-frame navigation before its request starts; (2) navigation
+// identity for the redirect dedupe — markRedirected snapshots the
+// recorded hash so isAlreadyRedirected can tell a second listener's view
+// of one navigation apart from a new navigation to the same document.
 const NAV_FRAGMENT_TTL_MS = 30000;
 const navFragments = new Map(); // tabId -> { urlNoHash, hash, ts }
 
@@ -2235,7 +2241,19 @@ function isAlreadyRedirected(tabId, url) {
   // #hash, webRequest without it, so an exact match would let the second
   // listener re-redirect (and reload the viewer) for exactly the
   // fragment-bearing deep links this feature exists to honor.
-  return urlWithoutFragment(entry.url) === urlWithoutFragment(url);
+  if (urlWithoutFragment(entry.url) !== urlWithoutFragment(url)) return false;
+  // Same document — but the same NAVIGATION? The mark remembers the
+  // fragment of the navigation that created it (navHash, captured from
+  // the navFragments record), and the tab's current navigation fragment
+  // lives in that record now. When they differ, doc.pdf#page=2 followed
+  // within the TTL by doc.pdf#page=40 (or a bare doc.pdf, or the same
+  // address after a detour through another page) is a new navigation and
+  // must be redirected, not suppressed into Chrome's native handling.
+  // Without navigation memory (freshly restarted SW) or on legacy marks
+  // predating navHash, fall back to the lenient same-document match.
+  const navRec = navFragments.get(tabId);
+  if (!navRec || entry.navHash === undefined) return true;
+  return entry.navHash === navRec.hash;
 }
 
 function markRedirected(tabId, originalUrl, isBypass) {
@@ -2249,9 +2267,17 @@ function markRedirected(tabId, originalUrl, isBypass) {
     const originTs = typeof e.born === 'number' ? e.born : e.ts;
     if (now - originTs >= maxAge) redirectedTabs.delete(id);
   }
+  // navHash pins the mark to one navigation — the fragment of whatever
+  // the tab is currently loading (recorded by rememberNavFragment before
+  // either listener can mark, so webNavigation- and webRequest-sourced
+  // marks agree). isAlreadyRedirected compares it against the tab's
+  // current fragment to tell a second view of the same navigation apart
+  // from a new navigation to the same document. Bypass marks never reach
+  // that comparison, so they skip the field.
+  const navRec = navFragments.get(tabId);
   redirectedTabs.set(tabId, isBypass
     ? { url: originalUrl, ts: now, born: now, bypass: true }
-    : { url: originalUrl, ts: now });
+    : { url: originalUrl, ts: now, navHash: navRec ? navRec.hash : undefined });
   persistRedirectedTabs();
 }
 
@@ -2338,6 +2364,7 @@ async function handleOpenNativeViewer(request, sender, sendResponse) {
 // path never pays this cost: webNavigation.onBeforeNavigate fires before
 // commit, so those navigations are replaced pre-response. The Promise.all
 // below just keeps the takeover window as short as the platform allows.
+
 // The takeover target for an intercepted PDF. ?file= carries the document
 // address WITHOUT its #fragment: fragments are view state, and encoding
 // one into the query (as %23page%3D2) put the same deep link in two places
