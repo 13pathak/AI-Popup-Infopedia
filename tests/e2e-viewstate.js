@@ -246,6 +246,39 @@ async function main() {
     s = await readViewerState();
     assert(s.page === 1 && s.zoomLabel === '125%', 'corrupt fields are ignored, fresh view at page 1', s);
 
+    // ---- Coercion guards (parseStoredViewState): only number primitives
+    // count as zoom/scrollRatio. Number(null)===0, Number('')===0 and
+    // Number([])===0 used to turn an absent scrollRatio into "restore at
+    // the very top" (bypassing the page-top fallback below), and
+    // Number(true)===1 accepted booleans as zoom 1.0 / document bottom.
+    for (const badRatio of [null, false, '', [], true]) {
+        await writeStoredLastPage({ page: 2, zoom: 1.5, scrollRatio: badRatio });
+        await openViewer();
+        s = await readViewerState();
+        assert(s.page === 2 && s.zoomLabel === '150%' && s.targetOffset !== null && s.targetOffset >= 0 && s.targetOffset < 40,
+            'non-number scrollRatio (' + JSON.stringify(badRatio) + ') means absent: page-top resume, saved zoom', s);
+    }
+    await writeStoredLastPage({ page: 2, zoom: true, scrollRatio: true });
+    await openViewer();
+    s = await readViewerState();
+    assert(s.page === 2 && s.zoomLabel === '125%' && s.targetOffset !== null && s.targetOffset >= 0 && s.targetOffset < 40,
+        'boolean zoom/scrollRatio rejected: default zoom, page-top resume', s);
+
+    // ---- Dirty-check coercion guard (viewStateDirty): a partial record
+    // with a numeric zoom and null ratio must still compare dirty at the
+    // document top. null coerces to 0 in the drift arithmetic, so a tiny
+    // scroll (< ratio epsilon) used to compare clean and the record never
+    // upgraded to the full schema. ----
+    await writeStoredLastPage({ page: 1, zoom: 1.25, scrollRatio: null });
+    await openViewer();
+    await evalPage(`document.getElementById('viewerContainer').scrollTop += 5`); // below the ratio epsilon
+    await sleep(1800); // debounce (1s) must fire and upgrade the record
+    const upgradedPartial = await readStoredLastPage();
+    assert(upgradedPartial && typeof upgradedPartial === 'object' &&
+        upgradedPartial.page === 1 && Math.abs(upgradedPartial.zoom - 1.25) < 0.001 &&
+        typeof upgradedPartial.scrollRatio === 'number',
+        'null scrollRatio with matching zoom still upgrades at the first natural save', upgradedPartial);
+
     // ---- Out-of-range zoom clamps into the allowed range ----
     await writeStoredLastPage({ page: 1, zoom: 50, scrollRatio: 0 });
     await openViewer();

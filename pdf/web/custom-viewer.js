@@ -968,9 +968,16 @@ function parseStoredViewState(stored) {
     if (!stored || typeof stored !== 'object' || Array.isArray(stored)) {
         return { page: 1, zoom: null, scrollRatio: null };
     }
+    // zoom/scrollRatio must be number primitives — no Number() coercion.
+    // Number(null)===0, Number("")===0 and Number([])===0 all used to slip
+    // through the isFinite+range checks, so a partial record with
+    // scrollRatio: null parsed as 0 ("restore at the very top") instead of
+    // absent (page-top fallback), and Number(true)===1 accepted booleans
+    // as zoom 1.0 / scroll bottom. typeof NaN is 'number' too, so a NaN
+    // field still lands at null via the isFinite gate.
     const pageNum = parseInt(stored.page, 10);
-    const zoomNum = Number(stored.zoom);
-    const ratioNum = Number(stored.scrollRatio);
+    const zoomNum = typeof stored.zoom === 'number' ? stored.zoom : NaN;
+    const ratioNum = typeof stored.scrollRatio === 'number' ? stored.scrollRatio : NaN;
     return {
         page: Number.isFinite(pageNum) && pageNum >= 1 ? pageNum : 1,
         zoom: Number.isFinite(zoomNum) && zoomNum > 0 ? clampScaleValue(zoomNum) : null,
@@ -3347,9 +3354,14 @@ function buildCurrentViewState() {
 function viewStateDirty() {
     if (!persistedViewState) return true;
     if (autoSavedLastPage !== persistedViewState.page) return true;
-    // A null persisted zoom/ratio (legacy data) always compares dirty on
-    // the first check, which is what upgrades old records to the new
-    // schema at the first natural save.
+    // A persisted zoom/ratio that is not a number (null — legacy or
+    // partial records) always compares dirty, which is what upgrades old
+    // records to the new schema at the first natural save. Arithmetic
+    // alone can't express that: null coerces to 0 in the subtractions
+    // below, so e.g. { zoom: 1.25, scrollRatio: null } viewed at the
+    // document top (live ratio 0) used to compare clean and never
+    // upgrade.
+    if (typeof persistedViewState.zoom !== 'number' || typeof persistedViewState.scrollRatio !== 'number') return true;
     if (Math.abs(scale - persistedViewState.zoom) > VIEW_STATE_ZOOM_EPSILON) return true;
     return Math.abs(currentScrollRatio() - persistedViewState.scrollRatio) > VIEW_STATE_RATIO_EPSILON;
 }
