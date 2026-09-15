@@ -258,6 +258,26 @@ let pendingFlashHighlightUntil = 0;
 let bookmarks = [];
 let bookmarkCounter = 0;
 let autoSavedLastPage = 1;
+// Per-document view state restored from the pdf_lastpage_ key (issue #16):
+// savedViewState is the load-time snapshot that drives zoom/scroll resume,
+// persistedViewState the last value this tab believes storage holds (the
+// dirty-check baseline for the debounced saves). Both stay null without
+// chrome.storage or with no usable stored value — the pre-feature behavior
+// of page-only resume then still works through autoSavedLastPage alone.
+// Declared here, ahead of every function that closes over them, so no
+// future top-level call can hit the temporal dead zone (same rule as the
+// SYNC_KEYS block below).
+let savedViewState = null;
+let persistedViewState = null;
+// False from load until the resume decision (deep link, saved ratio, or
+// saved page) has been applied. updatePageNumber's initial pass runs while
+// the view is still at the document top and used to stomp the tracker —
+// and the debounced save it scheduled — down to page 1 before the resume
+// could land, so the stored position regressed to page 1 on every open
+// (the pre-#16 page-resume race). Saves stay gated until the resume
+// settles; every resume path re-runs updatePageNumber, so a genuine
+// change made during the window is still caught by the dirty check then.
+let initialResumeSettled = false;
 let cachedPdfAuthorName = 'You';
 
 // Extract PDF URL from query string, e.g. custom-viewer.html?file=abc.pdf
@@ -373,7 +393,12 @@ async function loadStorageData() {
                 pendingIdentityFromLoad = true;
             }
             if (result[lastPageKey]) {
-                autoSavedLastPage = parseInt(result[lastPageKey], 10) || 1;
+                const parsedViewState = parseStoredViewState(result[lastPageKey]);
+                autoSavedLastPage = parsedViewState.page;
+                // Seed both the load-time restore snapshot and the dirty
+                // baseline: an untouched session then writes nothing back.
+                savedViewState = parsedViewState;
+                persistedViewState = parsedViewState;
             }
             if (typeof renderSidebar === 'function') renderSidebar();
             if (typeof renderBookmarks === 'function') renderBookmarks();
@@ -920,11 +945,44 @@ function saveBookmarks() {
     recordDocumentIdentity();
 }
 
-function saveLastPage(pageNum) {
+// ---- Per-document view state (issue #16) ----
+// The resume key (SYNC_KEYS.lastPage) historically held a bare page
+// number; it now holds the full reading state { page, zoom, scrollRatio }
+// so reopening lands on the exact spot, not just the right page. Storage
+// is untrusted and version-mixed: parseStoredViewState accepts the legacy
+// number (zoom/ratio null → page-top resume, exactly the old behavior)
+// and validates every field of the object form. An older build reading
+// the object gets NaN→1 from its parseInt — a graceful fall back to page
+// 1, never a crash.
+function clampScaleValue(value) {
+    if (value < MIN_SCALE) return MIN_SCALE;
+    if (value > MAX_SCALE) return MAX_SCALE;
+    return value;
+}
+
+function parseStoredViewState(stored) {
+    if (typeof stored === 'number' || typeof stored === 'string') {
+        const n = parseInt(stored, 10);
+        return { page: Number.isFinite(n) && n >= 1 ? n : 1, zoom: null, scrollRatio: null };
+    }
+    if (!stored || typeof stored !== 'object' || Array.isArray(stored)) {
+        return { page: 1, zoom: null, scrollRatio: null };
+    }
+    const pageNum = parseInt(stored.page, 10);
+    const zoomNum = Number(stored.zoom);
+    const ratioNum = Number(stored.scrollRatio);
+    return {
+        page: Number.isFinite(pageNum) && pageNum >= 1 ? pageNum : 1,
+        zoom: Number.isFinite(zoomNum) && zoomNum > 0 ? clampScaleValue(zoomNum) : null,
+        scrollRatio: Number.isFinite(ratioNum) && ratioNum >= 0 && ratioNum <= 1 ? ratioNum : null
+    };
+}
+
+function saveLastPage(viewState) {
     if (!hasChromeStorage()) return;
     const storageKey = SYNC_KEYS.lastPage;
-    const entry = rememberOwnWrite(storageKey, pageNum);
-    chrome.storage.local.set({ [storageKey]: pageNum }, () => settlePendingWrite(entry));
+    const entry = rememberOwnWrite(storageKey, viewState);
+    chrome.storage.local.set({ [storageKey]: viewState }, () => settlePendingWrite(entry));
 }
 
 // ==================== Undo / redo for annotation mutations ====================
@@ -1475,11 +1533,16 @@ if (hasChromeStorage()) {
             } else if (which === 'bookmarks') {
                 adoptRemoteBookmarks(Array.isArray(incoming) ? incoming : []);
             } else {
-                // Resume position: adopt silently so this tab's next
-                // debounced save doesn't restore a stale page — but do
-                // not yank this tab's scroll to the other tab's spot.
-                const num = parseInt(incoming, 10);
-                if (num >= 1) autoSavedLastPage = num;
+                // Resume position: adopt the page silently so this tab's
+                // next debounced save doesn't restore a stale page — but
+                // do not yank this tab's scroll or zoom to the other
+                // tab's spot; both stay live and win the next write (the
+                // same last-writer-wins rule the page always followed).
+                // Removals are not adoptions: nothing to parse.
+                if (incoming === undefined) continue;
+                const parsedRemote = parseStoredViewState(incoming);
+                autoSavedLastPage = parsedRemote.page;
+                persistedViewState = parsedRemote;
             }
         }
     });
@@ -1667,7 +1730,10 @@ function variantDataSignature(hlCount, bmCount, lastPage) {
 // Page count is an extra guard when known: an incremental save keeps the
 // trailer /ID, so fingerprint alone can call two revisions of a document
 // identical; a differing page count is cheap proof they are not.
-// Legacy string lastPage values parse the same way loadStorageData does.
+// lastPage values parse the same way loadStorageData does — legacy bare
+// numbers and the newer { page, zoom, scrollRatio } objects both yield a
+// page number (only the page feeds candidates and dismissal signatures,
+// so signatures survive the schema change unchanged).
 function pickVariantMergeCandidates(registry, decisions, currentUrl, fingerprint, variantData, currentPageCount) {
     const candidates = [];
     for (const [url, meta] of Object.entries(asStorageObject(registry))) {
@@ -1679,8 +1745,7 @@ function pickVariantMergeCandidates(registry, decisions, currentUrl, fingerprint
         const hls = sanitizeStoredHighlights(data.highlights);
         const bms = sanitizeStoredBookmarks(data.bookmarks);
         if (hls.length === 0 && bms.length === 0) continue;
-        const parsedPage = parseInt(data.lastPage, 10);
-        const lastPage = Number.isFinite(parsedPage) && parsedPage >= 1 ? parsedPage : 1;
+        const lastPage = parseStoredViewState(data.lastPage).page;
         const key = variantDecisionKey(currentUrl, url, fingerprint);
         if (decisions && decisions[key] === variantDataSignature(hls.length, bms.length, lastPage)) continue;
         candidates.push({ url, highlights: hls, bookmarks: bms, lastPage });
@@ -1815,12 +1880,11 @@ function mergeVariantAnnotations(fingerprint, candidates) {
             const hls = sanitizeStoredHighlights(data['pdf_highlights_' + c.url]);
             const bms = sanitizeStoredBookmarks(data['pdf_bookmarks_' + c.url]);
             if (hls.length === 0 && bms.length === 0) continue;
-            const parsedPage = parseInt(data['pdf_lastpage_' + c.url], 10);
             fresh.push({
                 url: c.url,
                 highlights: hls,
                 bookmarks: bms,
-                lastPage: Number.isFinite(parsedPage) && parsedPage >= 1 ? parsedPage : 1
+                lastPage: parseStoredViewState(data['pdf_lastpage_' + c.url]).page
             });
         }
         if (fresh.length === 0) {
@@ -1860,7 +1924,13 @@ function applyMergedVariantAnnotations(fingerprint, candidates) {
     // echo-suppression FIFO like every other save.
     saveHighlights(false);
     saveBookmarks();
-    saveLastPage(merged.lastPage);
+    // The merged resume page rides inside this tab's live view state —
+    // the merge moves annotations, not the viewport, so zoom/scroll stay
+    // what this tab is showing. autoSavedLastPage was set to
+    // merged.lastPage above, which is exactly buildCurrentViewState()'s
+    // page.
+    persistedViewState = buildCurrentViewState();
+    saveLastPage(persistedViewState);
     // Belt for the prune below failing (storage error): recording the
     // dismissal signatures first keeps a survived variant namespace from
     // re-offering an identical merge — which would duplicate every
@@ -2250,12 +2320,27 @@ async function loadPDF() {
             pendingIdentityFromLoad = false;
             recordDocumentIdentity();
         }
+        // Saved zoom (issue #16) applies before the initial build so every
+        // page skeleton is sized at it in one pass — restoring after the
+        // build would run the whole Case-1 resize immediately and flash.
+        // Deep links name a page, never a zoom, so this outranks nothing.
+        if (savedViewState && savedViewState.zoom !== null) {
+            scale = savedViewState.zoom;
+        }
+        // Capture the stored resume page before the build too:
+        // renderAllPages' tail runs updatePageNumber while the view is
+        // still at the document top, which resets the live tracker to
+        // page 1 — reading the tracker after the build (both in the
+        // resume condition and the timer closure) used to no-op the
+        // resume entirely, regressing every stored position to page 1 on
+        // reopen (the pre-#16 race).
+        const savedResumePage = autoSavedLastPage;
         await renderAllPages();
-        
+
         pdfDoc.getOutline().then(outline => {
             renderOutline(outline);
         }).catch(err => console.error("Error fetching outline", err));
-        
+
         // Deep link or auto-resume. A #page=N / named-destination fragment
         // forwarded from the original URL names a page explicitly and so
         // outranks the saved reading position; scrollToPage falls back to
@@ -2270,11 +2355,31 @@ async function loadPDF() {
             const gen = deepLinkGeneration;
             setTimeout(() => {
                 if (gen === deepLinkGeneration) scrollToPage(deepLinkPage);
+                initialResumeSettled = true;
             }, 300); // small delay to ensure rendering has caught up
-        } else if (autoSavedLastPage > 1 && autoSavedLastPage <= pdfDoc.numPages) {
+        } else if (savedViewState && savedViewState.scrollRatio !== null) {
+            // Exact reading position: replaying the saved fraction of the
+            // scrollable height at the same zoom lands on the same spot
+            // (page-top resume below remains the legacy fallback when no
+            // ratio was stored). Same generation guard as the deep link:
+            // a hashchange inside the delay names a newer target.
+            const gen = deepLinkGeneration;
+            const savedRatio = savedViewState.scrollRatio;
             setTimeout(() => {
-                scrollToPage(autoSavedLastPage);
+                const scrollContainer = document.getElementById('viewerContainer');
+                if (gen === deepLinkGeneration && scrollContainer && scrollContainer.scrollHeight > 0) {
+                    scrollContainer.scrollTop = savedRatio * scrollContainer.scrollHeight;
+                    updatePageNumber();
+                }
+                initialResumeSettled = true;
             }, 300); // small delay to ensure rendering has caught up
+        } else if (savedResumePage > 1 && savedResumePage <= pdfDoc.numPages) {
+            setTimeout(() => {
+                scrollToPage(savedResumePage);
+                initialResumeSettled = true;
+            }, 300); // small delay to ensure rendering has caught up
+        } else {
+            initialResumeSettled = true;
         }
 
         // URL-variant annotation merge offer (issue #21): after the
@@ -3132,7 +3237,8 @@ async function calculateScaleAndRender() {
     
     if (scale < MIN_SCALE) scale = MIN_SCALE;
     if (scale > MAX_SCALE) scale = MAX_SCALE;
-    
+
+    scheduleViewStateSave();
     renderAllPages();
 }
 
@@ -3142,6 +3248,7 @@ document.getElementById('zoom_in').addEventListener('click', () => {
     const newScale = Math.min(scale + 0.25, MAX_SCALE);
     if (newScale === scale) return; // already at max, nothing to re-render
     scale = newScale;
+    scheduleViewStateSave();
     renderAllPages();
 });
 
@@ -3151,6 +3258,7 @@ document.getElementById('zoom_out').addEventListener('click', () => {
     const newScale = Math.max(scale - 0.25, MIN_SCALE);
     if (newScale === scale) return; // already at min, nothing to re-render
     scale = newScale;
+    scheduleViewStateSave();
     renderAllPages();
 });
 
@@ -3210,6 +3318,55 @@ container.addEventListener('scroll', () => {
 }, { passive: true });
 let scrollSaveTimeout = null;
 
+// ---- View-state save path (issue #16) ----
+// Every resume write funnels through scheduleViewStateSave(): scroll-driven
+// changes in updatePageNumber and each zoom mutation (buttons, fit modes,
+// pinch, Ctrl+0) re-arm one debounce, and the write itself carries the
+// live { page, zoom, scrollRatio }. The dirty-check baseline in
+// persistedViewState keeps an untouched session — including one that lands
+// exactly on its restored position — from writing anything back.
+const VIEW_STATE_SAVE_DEBOUNCE_MS = 1000;
+// Ratio drift worth persisting on its own (within-page reading movement).
+// Smaller deltas are layout jitter and never trigger a write.
+const VIEW_STATE_RATIO_EPSILON = 0.005;
+// Zoom drift threshold — float compare against the persisted scale.
+const VIEW_STATE_ZOOM_EPSILON = 0.001;
+
+function currentScrollRatio() {
+    return container.scrollHeight > 0 ? container.scrollTop / container.scrollHeight : 0;
+}
+
+function buildCurrentViewState() {
+    return {
+        page: autoSavedLastPage,
+        zoom: clampScaleValue(scale),
+        scrollRatio: Math.min(1, Math.max(0, currentScrollRatio()))
+    };
+}
+
+function viewStateDirty() {
+    if (!persistedViewState) return true;
+    if (autoSavedLastPage !== persistedViewState.page) return true;
+    // A null persisted zoom/ratio (legacy data) always compares dirty on
+    // the first check, which is what upgrades old records to the new
+    // schema at the first natural save.
+    if (Math.abs(scale - persistedViewState.zoom) > VIEW_STATE_ZOOM_EPSILON) return true;
+    return Math.abs(currentScrollRatio() - persistedViewState.scrollRatio) > VIEW_STATE_RATIO_EPSILON;
+}
+
+function saveCurrentViewState() {
+    if (!hasChromeStorage()) return;
+    if (!viewStateDirty()) return;
+    persistedViewState = buildCurrentViewState();
+    saveLastPage(persistedViewState);
+}
+
+function scheduleViewStateSave() {
+    if (!initialResumeSettled) return;
+    clearTimeout(scrollSaveTimeout);
+    scrollSaveTimeout = setTimeout(saveCurrentViewState, VIEW_STATE_SAVE_DEBOUNCE_MS);
+}
+
 function updatePageNumber() {
     // Do not update while the user is actively typing in the input
     if (document.activeElement === document.getElementById('page_num')) return;
@@ -3246,16 +3403,15 @@ function updatePageNumber() {
     const currentNum = parseInt(pages[idx].dataset.pageNumber, 10);
     document.getElementById('page_num').value = currentNum;
 
-    // Auto-resume save logic (debounced to avoid spamming storage)
     if (autoSavedLastPage !== currentNum) {
         autoSavedLastPage = currentNum;
         // The current-page comment filter follows the view
         refreshCommentsForPageFilter();
-        clearTimeout(scrollSaveTimeout);
-        scrollSaveTimeout = setTimeout(() => {
-            saveLastPage(currentNum);
-        }, 1000);
     }
+    // Auto-resume save logic (debounced to avoid spamming storage): page
+    // changes and within-page scroll both count now — the dirty check in
+    // the writer gates the actual storage write.
+    if (viewStateDirty()) scheduleViewStateSave();
 }
 
 // Handle page navigation via input
@@ -5281,6 +5437,7 @@ document.addEventListener('keydown', (e) => {
         currentZoomMode = 'custom';
         if (scale === 1) return; // already actual size, nothing to re-render
         scale = 1;
+        scheduleViewStateSave();
         renderAllPages();
         return;
     }
@@ -6280,6 +6437,7 @@ window.addEventListener('wheel', (e) => {
         if (newScale > MAX_SCALE) newScale = MAX_SCALE;
 
         scale = newScale;
+        scheduleViewStateSave();
 
         // Update UI
         updateZoomLabel();

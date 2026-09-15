@@ -71,12 +71,12 @@ async function run() {
   console.log('=== Starting Test Suite ===');
 
   // 1. Check test PDF fixture
-  console.log('[1/6] Checking PDF fixture integrity...');
+  console.log('[1/7] Checking PDF fixture integrity...');
   require('./check-pdf');
 
   // 2. Unit-test the background viewer-URL construction (no server or
   // browser needed; runs the real background.js under a chrome stub)
-  console.log('[2/6] Testing background viewer-URL construction...');
+  console.log('[2/7] Testing background viewer-URL construction...');
   const urlProc = spawn(process.execPath, [path.join(__dirname, 'test-viewer-url.js')], {
     stdio: 'inherit'
   });
@@ -86,7 +86,7 @@ async function run() {
   }
 
   // 3. Start HTTP server
-  console.log(`[3/6] Starting local HTTP server on port ${PORT}...`);
+  console.log(`[3/7] Starting local HTTP server on port ${PORT}...`);
   const server = createServer();
   await new Promise((res, rej) => {
     server.listen(PORT, '127.0.0.1', (err) => err ? rej(err) : res());
@@ -99,7 +99,7 @@ async function run() {
     server.close();
     throw new Error('No compatible browser (Edge or Chrome) found on this system.');
   }
-  console.log(`[4/6] Launching headless browser: ${path.basename(browserBin)}...`);
+  console.log(`[4/7] Launching headless browser: ${path.basename(browserBin)}...`);
   const tempProfile = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-test-profile-'));
 
   const browserProc = spawn(browserBin, [
@@ -120,20 +120,28 @@ async function run() {
     console.log(`  CDP ready on port ${CDP_PORT}`);
 
     // 5. Run E2E tests
-    console.log('[5/6] Executing E2E undo/redo test harness...');
+    console.log('[5/7] Executing E2E undo/redo test harness...');
     const testProc = spawn(process.execPath, [path.join(__dirname, 'e2e-undo.js')], {
       stdio: 'inherit'
     });
 
     exitCode = await new Promise(res => testProc.on('exit', code => res(code ?? 0)));
 
-    console.log('[6/6] Executing E2E deep-link test harness...');
+    console.log('[6/7] Executing E2E deep-link test harness...');
     const deeplinkProc = spawn(process.execPath, [path.join(__dirname, 'e2e-deeplink.js')], {
       stdio: 'inherit'
     });
 
     const deeplinkCode = await new Promise(res => deeplinkProc.on('exit', code => res(code ?? 0)));
     if (deeplinkCode !== 0) exitCode = deeplinkCode;
+
+    console.log('[7/7] Executing E2E view-state persistence test harness...');
+    const viewstateProc = spawn(process.execPath, [path.join(__dirname, 'e2e-viewstate.js')], {
+      stdio: 'inherit'
+    });
+
+    const viewstateCode = await new Promise(res => viewstateProc.on('exit', code => res(code ?? 0)));
+    if (viewstateCode !== 0) exitCode = viewstateCode;
   } catch (err) {
     console.error('Test runner failed:', err.message);
     exitCode = 1;
