@@ -227,6 +227,56 @@ async function main() {
     assert(JSON.stringify(storedAfterReopen) === savedBeforeReopen,
         'untouched session writes nothing back (no redundant save after restore)', storedAfterReopen);
 
+    // ---- Cross-tab adoption (storage.onChanged): another tab's write
+    // updates only this tab's persistence baseline, never its live page
+    // tracker. The tracker feeds the current-page comment filter and every
+    // save's page field, so adopting the remote page re-targeted the
+    // filter to a page this tab isn't viewing and let a zoom-only save
+    // splice the other tab's page with this tab's scroll into one
+    // inconsistent record. The injected set() goes through the stub's
+    // chrome.storage API, firing this tab's real onChanged listener with a
+    // pending-write-free queue — exactly how a genuine cross-tab write
+    // arrives. ----
+    await evalPage(`(() => {
+        const all = window.__stubStorage.read();
+        delete all[${JSON.stringify(LASTPAGE_KEY)}];
+        // One highlight so the comments sidebar renders past its empty
+        // state — the current-page filter chip (the tracker's DOM window)
+        // is only created for a non-empty list.
+        all['pdf_highlights_${DEFAULT_FILE}'] = [{
+            id: 1, pageNumber: 1, color: '#FFFF98', text: 'cross-tab probe',
+            rects: [{ pdfX: 50, pdfY: 700, pdfWidth: 200, pdfHeight: 12 }]
+        }];
+        window.__stubStorage.write(all);
+        return true;
+    })()`);
+    await openViewer(); // fresh tab B: page 1, top, nothing stored
+    await evalPage(`document.getElementById('icon-tab-comments').click()`);
+    let chipText = await evalPage(`document.querySelector('.sidebar-filter-chip').textContent`);
+    assert(chipText === 'Current page', 'filter chip present with filter off (baseline)', chipText);
+    await evalPage(`document.querySelector('.sidebar-filter-chip').click()`);
+    chipText = await evalPage(`document.querySelector('.sidebar-filter-chip').textContent`);
+    assert(chipText === 'Page 1 only', 'filter chip follows this tab\u2019s view (page 1)', chipText);
+    await evalPage(`new Promise(res => {
+        chrome.storage.local.set({ ${JSON.stringify(LASTPAGE_KEY)}:
+            { page: 3, zoom: 1.25, scrollRatio: 0.7 } }, res);
+    })`, true);
+    await sleep(400); // stub fires onChanged asynchronously
+    // Re-open the comments tab (what a user glancing at the sidebar does):
+    // the re-render reads the live page tracker into the filter chip.
+    await evalPage(`document.getElementById('icon-tab-comments').click()`);
+    chipText = await evalPage(`document.querySelector('.sidebar-filter-chip').textContent`);
+    assert(chipText === 'Page 1 only',
+        'another tab\u2019s write never re-targets this tab\u2019s current-page filter', chipText);
+    s = await readViewerState();
+    assert(s.page === 1 && Math.abs(s.scrollRatio) < 0.01,
+        'another tab\u2019s write does not move this tab\u2019s view', s);
+    await evalPage(`document.getElementById('zoom_in').click()`); // zoom-only: no scrolling
+    await sleep(1800); // debounce (1s) must fire
+    const crossTabSave = await readStoredLastPage();
+    assert(crossTabSave && crossTabSave.page === 1 && Math.abs(crossTabSave.zoom - 1.5) < 0.001,
+        'zoom-only save after another tab\u2019s write persists THIS tab\u2019s page, not the remote page', crossTabSave);
+
     // ---- Legacy bare-number record: page-top resume, then schema upgrade ----
     await writeStoredLastPage(2);
     await openViewer();

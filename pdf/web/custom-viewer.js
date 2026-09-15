@@ -1540,16 +1540,21 @@ if (hasChromeStorage()) {
             } else if (which === 'bookmarks') {
                 adoptRemoteBookmarks(Array.isArray(incoming) ? incoming : []);
             } else {
-                // Resume position: adopt the page silently so this tab's
-                // next debounced save doesn't restore a stale page — but
-                // do not yank this tab's scroll or zoom to the other
-                // tab's spot; both stay live and win the next write (the
-                // same last-writer-wins rule the page always followed).
+                // Resume position from another tab of this document. Only
+                // the dirty-check baseline adopts the remote record — the
+                // live page tracker (autoSavedLastPage) must keep
+                // reflecting what THIS tab is viewing: it feeds the
+                // current-page comment filter, and every save composes it
+                // as the record's page. Adopting the remote page there
+                // made the filter label name a page this tab isn't showing
+                // and let a zoom-only save splice the other tab's page
+                // with this tab's scroll into one inconsistent record.
+                // Last-writer-wins is unchanged: this tab's next save
+                // writes its own full live state, and no scroll means no
+                // save, so the other tab's position survives untouched.
                 // Removals are not adoptions: nothing to parse.
                 if (incoming === undefined) continue;
-                const parsedRemote = parseStoredViewState(incoming);
-                autoSavedLastPage = parsedRemote.page;
-                persistedViewState = parsedRemote;
+                persistedViewState = parseStoredViewState(incoming);
             }
         }
     });
@@ -5799,8 +5804,10 @@ function renderSidebar() {
     });
 
     // --- Current-page filter (scan aid for documents with many comments) ---
-    // autoSavedLastPage is the viewer's live page tracker (load, scroll,
-    // and cross-tab adoption all keep it current).
+    // autoSavedLastPage is the viewer's live page tracker: load and this
+    // tab's own scrolling keep it current. Cross-tab resume writes never
+    // touch it — the filter must name the page THIS tab is showing (see
+    // the adoption branch in the storage.onChanged listener).
     const filterPage = commentsCurrentPageOnly ? autoSavedLastPage : null;
     const visibleHighlights = filterPage === null
         ? sortedHighlights
