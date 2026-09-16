@@ -193,7 +193,14 @@ function consumeSseLine(line, acc, onDelta) {
   }
 }
 
-// Peeks at a 400 error body (through a clone, leaving the original response
+// Statuses providers use to reject an unknown request field: 400 is the
+// OpenAI/Groq convention, while FastAPI/Pydantic proxies configured to
+// forbid extra body fields answer 422 (Unprocessable Entity) instead.
+function isStreamOptionsRejectionStatus(status) {
+  return status === 400 || status === 422;
+}
+
+// Peeks at the error body (through a clone, leaving the original response
 // untouched for the caller's own error handling) to tell whether a provider
 // rejected the stream_options field rather than the request itself.
 async function bodyRejectsStreamOptions(response) {
@@ -975,11 +982,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           body: JSON.stringify(payload)
         }, 30000, emitStreamDelta, 120000, cancelController.signal);
 
-        // Some strict OpenAI-compatible servers 400 on stream_options instead
-        // of ignoring it. Peek at the error (through a clone, so the regular
-        // error handling below can still read the original body) and retry
-        // once without the field — usage tracking must never break a lookup.
-        if (!result.ok && result.response.status === 400 && await bodyRejectsStreamOptions(result.response)) {
+        // Some strict OpenAI-compatible servers reject stream_options
+        // instead of ignoring it (400 by convention, or 422 from
+        // extra-field-forbidding FastAPI-style proxies). Peek at the error
+        // (through a clone, so the regular error handling below can still
+        // read the original body) and retry once without the field — usage
+        // tracking must never break a lookup.
+        if (!result.ok && isStreamOptionsRejectionStatus(result.response.status) && await bodyRejectsStreamOptions(result.response)) {
           delete payload.stream_options;
           streamResetPending = true;
           result = await streamChatWithTimeout(endpointUrl, {
