@@ -71,12 +71,12 @@ async function run() {
   console.log('=== Starting Test Suite ===');
 
   // 1. Check test PDF fixture
-  console.log('[1/7] Checking PDF fixture integrity...');
+  console.log('[1/8] Checking PDF fixture integrity...');
   require('./check-pdf');
 
   // 2. Unit-test the background viewer-URL construction (no server or
   // browser needed; runs the real background.js under a chrome stub)
-  console.log('[2/7] Testing background viewer-URL construction...');
+  console.log('[2/8] Testing background viewer-URL construction...');
   const urlProc = spawn(process.execPath, [path.join(__dirname, 'test-viewer-url.js')], {
     stdio: 'inherit'
   });
@@ -85,21 +85,32 @@ async function run() {
     throw new Error('Viewer-URL unit tests failed.');
   }
 
-  // 3. Start HTTP server
-  console.log(`[3/7] Starting local HTTP server on port ${PORT}...`);
+  // 3. Unit-test the toolbar launcher popup (snapshot wiring + rendering;
+  // also chrome-stubbed, so it runs before any server or browser starts)
+  console.log('[3/8] Testing toolbar launcher popup...');
+  const launcherProc = spawn(process.execPath, [path.join(__dirname, 'test-launcher-popup.js')], {
+    stdio: 'inherit'
+  });
+  const launcherCode = await new Promise(res => launcherProc.on('exit', code => res(code ?? 0)));
+  if (launcherCode !== 0) {
+    throw new Error('Launcher popup unit tests failed.');
+  }
+
+  // 4. Start HTTP server
+  console.log(`[4/8] Starting local HTTP server on port ${PORT}...`);
   const server = createServer();
   await new Promise((res, rej) => {
     server.listen(PORT, '127.0.0.1', (err) => err ? rej(err) : res());
   });
   console.log(`  Server ready at http://127.0.0.1:${PORT}`);
 
-  // 3. Launch headless browser
+  // 5. Launch headless browser
   const browserBin = findBrowserBinary();
   if (!browserBin) {
     server.close();
     throw new Error('No compatible browser (Edge or Chrome) found on this system.');
   }
-  console.log(`[4/7] Launching headless browser: ${path.basename(browserBin)}...`);
+  console.log(`[5/8] Launching headless browser: ${path.basename(browserBin)}...`);
   const tempProfile = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-test-profile-'));
 
   const browserProc = spawn(browserBin, [
@@ -119,15 +130,15 @@ async function run() {
     await pollEndpoint(`http://127.0.0.1:${CDP_PORT}/json`, 15000);
     console.log(`  CDP ready on port ${CDP_PORT}`);
 
-    // 5. Run E2E tests
-    console.log('[5/7] Executing E2E undo/redo test harness...');
+    // 6. Run E2E tests
+    console.log('[6/8] Executing E2E undo/redo test harness...');
     const testProc = spawn(process.execPath, [path.join(__dirname, 'e2e-undo.js')], {
       stdio: 'inherit'
     });
 
     exitCode = await new Promise(res => testProc.on('exit', code => res(code ?? 0)));
 
-    console.log('[6/7] Executing E2E deep-link test harness...');
+    console.log('[7/8] Executing E2E deep-link test harness...');
     const deeplinkProc = spawn(process.execPath, [path.join(__dirname, 'e2e-deeplink.js')], {
       stdio: 'inherit'
     });
@@ -135,7 +146,7 @@ async function run() {
     const deeplinkCode = await new Promise(res => deeplinkProc.on('exit', code => res(code ?? 0)));
     if (deeplinkCode !== 0) exitCode = deeplinkCode;
 
-    console.log('[7/7] Executing E2E view-state persistence test harness...');
+    console.log('[8/8] Executing E2E view-state persistence test harness...');
     const viewstateProc = spawn(process.execPath, [path.join(__dirname, 'e2e-viewstate.js')], {
       stdio: 'inherit'
     });
