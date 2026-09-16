@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>AI Popup Infopedia</title>
+    <!--
+        Toolbar launcher popup. One click on the extension icon now offers
+        BOTH destinations — flashcard review and the options page — instead
+        of the old single-purpose open-settings click. All logic lives in
+        popup.js; MV3 extension-page CSP forbids inline scripts.
+    -->
+    <style>
+        @font-face {
+            font-family: 'Google Sans';
+            src: url('fonts/GoogleSans-VariableFont_GRAD,opsz,wght.ttf') format('truetype');
+            font-weight: 100 900;
+            font-style: normal;
+            font-display: swap;
+        }
+
+        /* Theme variables mirror options.html so the launcher always matches
+           the user's chosen interface theme. */
+        :root {
+            --bg-color: #0F172A;
+            --card-bg: #1E293B;
+            --text-color: #F8FAFC;
+            --text-muted: #94A3B8;
+            --primary-color: #3B82F6;
+            --danger-color: #EF4444;
+            --border-color: #334155;
+            --button-bg: #334155;
+            --button-hover-bg: #475569;
+            color-scheme: dark;
+        }
+
+        :root[data-theme="light"] {
+            --bg-color: #F8FAFC;
+            --card-bg: #FFFFFF;
+            --text-color: #0F172A;
+            --text-muted: #64748B;
+            --primary-color: #2563EB;
+            --danger-color: #DC2626;
+            --border-color: #E2E8F0;
+            --button-bg: #E2E8F0;
+            --button-hover-bg: #CBD5E1;
+            color-scheme: light;
+        }
+
+        @media (prefers-color-scheme: light) {
+            :root:not([data-theme="dark"]) {
+                --bg-color: #F8FAFC;
+                --card-bg: #FFFFFF;
+                --text-color: #0F172A;
+                --text-muted: #64748B;
+                --primary-color: #2563EB;
+                --danger-color: #DC2626;
+                --border-color: #E2E8F0;
+                --button-bg: #E2E8F0;
+                --button-hover-bg: #CBD5E1;
+                color-scheme: light;
+            }
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            width: 300px;
+            margin: 0;
+            padding: 14px;
+            background: var(--bg-color);
+            color: var(--text-color);
+            font-family: 'Google Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-size: 14px;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .popup-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .popup-header img {
+            width: 20px;
+            height: 20px;
+            flex-shrink: 0;
+        }
+
+        .popup-title {
+            font-weight: 700;
+            font-size: 15px;
+        }
+
+        .popup-version {
+            margin-left: auto;
+            color: var(--text-muted);
+            font-size: 11px;
+        }
+
+        .popup-actions {
+            display: grid;
+            gap: 8px;
+        }
+
+        .popup-btn {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            width: 100%;
+            padding: 11px 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            background: var(--card-bg);
+            color: var(--text-color);
+            font: inherit;
+            text-align: left;
+            cursor: pointer;
+            transition: background-color 120ms ease;
+        }
+
+        .popup-btn:hover {
+            background: var(--button-hover-bg);
+        }
+
+        .popup-btn:focus-visible {
+            outline: 2px solid var(--primary-color);
+            outline-offset: 2px;
+        }
+
+        .popup-btn.primary {
+            background: var(--primary-color);
+            border-color: transparent;
+            color: #FFFFFF;
+        }
+
+        .popup-btn.primary:hover {
+            filter: brightness(1.1);
+            background: var(--primary-color);
+        }
+
+        .popup-btn .oi {
+            width: 20px;
+            height: 20px;
+            flex-shrink: 0;
+        }
+
+        .popup-btn-text {
+            display: flex;
+            flex-direction: column;
+            gap: 1px;
+            min-width: 0;
+        }
+
+        .popup-btn-sub {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .popup-btn.primary .popup-btn-sub {
+            color: rgba(255, 255, 255, 0.8);
+        }
+
+        /* Due-count chip: red pill matching the toolbar badge; muted outline
+           when nothing is due so the state stays legible either way. */
+        .due-chip {
+            margin-left: auto;
+            flex-shrink: 0;
+            padding: 2px 9px;
+            border-radius: 999px;
+            background: var(--danger-color);
+            color: #FFFFFF;
+            font-size: 11px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .due-chip.none {
+            background: transparent;
+            border: 1px solid var(--border-color);
+            color: var(--text-muted);
+            font-weight: 500;
+            padding: 1px 8px;
+        }
+
+        .popup-usage {
+            margin-top: 12px;
+            padding-top: 10px;
+            border-top: 1px solid var(--border-color);
+            color: var(--text-muted);
+            font-size: 12px;
+            text-align: center;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+    </style>
+    <script src="popup.js"></script>
+</head>
+
+<body>
+    <header class="popup-header">
+        <img src="icons/icon32.png" alt="">
+        <span class="popup-title">AI Popup Infopedia</span>
+        <span class="popup-version" id="popup-version"></span>
+    </header>
+
+    <main class="popup-actions">
+        <button type="button" id="open-review" class="popup-btn primary" title="Open the Flashcards tab and start reviewing">
+            <svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+            <span class="popup-btn-text">
+                <span>Review flashcards</span>
+            </span>
+            <span class="due-chip none" id="due-chip">…</span>
+        </button>
+
+        <button type="button" id="open-settings" class="popup-btn" title="Open settings, including the Usage &amp; Token Tracking dashboard">
+            <svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+            <span class="popup-btn-text">
+                <span>Settings &amp; Usage</span>
+                <span class="popup-btn-sub">Models, prompts &amp; token dashboard</span>
+            </span>
+        </button>
+    </main>
+
+    <footer class="popup-usage" id="usage-line" role="status">Today · loading…</footer>
+</body>
+
+</html>

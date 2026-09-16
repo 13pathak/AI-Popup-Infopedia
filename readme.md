@@ -159,7 +159,7 @@ The default FSRS model uses global baseline parameters fitted on millions of rev
 
 ### 2. Configure AI Model (Required)
 
-1. Click the extension icon in your toolbar to open **Settings**.
+1. Click the extension icon in your toolbar and choose **Settings & Usage** to open the settings page.
 2. Click the **+** button to add a new model:
    - **Configuration Name:** A friendly name (e.g., "Gemini Flash").
    - **Endpoint URL:**
@@ -184,7 +184,7 @@ The default FSRS model uses global baseline parameters fitted on millions of rev
 4. **Save:** Select a list and click "Save" to store the definition.
 
 ### Managing History & Flashcard Review
-1. Click the extension icon to view your **History** and **Flashcards** tabs.
+1. Click the extension icon and choose **Review flashcards** (the button shows how many cards are due) to jump straight to the **Flashcards** tab; your saved words live under **Saved Words**.
 2. Search, filter, bulk-select items, or click **Start Review** to study via spaced repetition.
 3. To send an item to Anki, make sure the Anki Connect add-on (code: `2055492159`) is installed and running, then click the **A** button.
 

@@ -1,7 +1,8 @@
-// --- NEW: Open options page when toolbar icon is clicked ---
-chrome.action.onClicked.addListener((tab) => {
-  chrome.runtime.openOptionsPage();
-});
+// The toolbar icon opens the launcher popup (popup.html via "default_popup"
+// in the manifest): one click now offers both flashcard review and the
+// options page. chrome.action.onClicked no longer fires once a popup is
+// bound, so the old open-options listener is gone; the popup routes through
+// the openOptionsTab message below.
 
 // In-flight generations keyed by the popup-chosen requestId (Issue #24). The
 // popup's Stop button aborts through here instead of waiting out the timeout
@@ -1467,6 +1468,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     });
   }
 
+  // --- Launcher popup: due-card count + today's usage snapshot ---
+  if (request.type === "getLauncherSnapshot") {
+    getLauncherSnapshot().then(sendResponse);
+    return true; // async
+  }
+
   // --- Case 3: Get all word lists ---
   if (request.type === "getWordLists") {
     // --- UPDATED: Now also get the lastUsedListId ---
@@ -1727,6 +1734,15 @@ function applyDueCardsBadge(dueCount) {
   setBadgeTextChecked(text);
 }
 
+function computeDueCardsCount(history, now) {
+  const items = Array.isArray(history) ? history : [];
+  let due = 0;
+  for (const item of items) {
+    if (isDueForBadge(item, now)) due++;
+  }
+  return due;
+}
+
 function updateDueCardsBadge() {
   chrome.storage.sync.get({ dueBadgeEnabled: true }, (syncData) => {
     if (syncData.dueBadgeEnabled === false) {
@@ -1734,15 +1750,33 @@ function updateDueCardsBadge() {
       return;
     }
     chrome.storage.local.get({ history: [] }, (localData) => {
-      const now = Date.now();
-      const history = Array.isArray(localData.history) ? localData.history : [];
-      let due = 0;
-      for (const item of history) {
-        if (isDueForBadge(item, now)) due++;
-      }
-      applyDueCardsBadge(due);
+      applyDueCardsBadge(computeDueCardsCount(localData.history, Date.now()));
     });
   });
+}
+
+// Serves the toolbar launcher popup in one round trip: how many cards are
+// due right now, plus today's usage bucket for the Issue #28 snapshot line.
+// Keeping the due and day-bucket rules here (isDueForBadge, localDayKey)
+// means popup.js only renders what the worker computed.
+async function getLauncherSnapshot() {
+  const emptyToday = { requests: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+  try {
+    const store = await chrome.storage.local.get({ history: [], [AI_USAGE_STATS_KEY]: null });
+    const dueCount = computeDueCardsCount(store.history, Date.now());
+    const stats = store[AI_USAGE_STATS_KEY];
+    const dayBucket = stats && stats.byDay ? stats.byDay[localDayKey(Date.now())] : null;
+    const today = emptyToday;
+    if (dayBucket && typeof dayBucket === 'object') {
+      for (const field of Object.keys(emptyToday)) {
+        today[field] = Number(dayBucket[field]) || 0;
+      }
+    }
+    return { dueCount, today };
+  } catch (err) {
+    console.warn('Failed to build launcher snapshot:', err);
+    return { dueCount: 0, today: emptyToday };
+  }
 }
 
 // Review sessions write history once per rated card, and saves/imports can
