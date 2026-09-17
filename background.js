@@ -685,7 +685,7 @@ function setConvoStash(payload) {
 // Cleans a model answer down to a plausible IPA transcription. Models wrap
 // the notation in slashes or brackets, prefix prose ("The IPA is…"), or
 // answer with a respelling; the badge must never display any of that.
-const IPA_MAX_LENGTH = 40;
+const IPA_MAX_LENGTH = 50;
 // IPA is letters and combining marks of any script plus a small punctuation
 // set (stress marks, length mark, syllable dots, ties, grouping parens) and
 // the spaces of syllable-spaced styles. Digits, sentence punctuation, or
@@ -710,7 +710,7 @@ function sanitizeIpaText(raw, sourceWord) {
   text = text.replace(/```[a-zA-Z]*\s?/g, '').replace(/["“”‘’]/g, '').trim();
   // Prefer a slash- or bracket-delimited span when the answer carries one;
   // bare parenthesization is the same intent.
-  const delimited = text.match(/\/([^/\n]{1,40})\//) || text.match(/\[([^\]\n]{1,40})\]/);
+  const delimited = text.match(/\/([^/\n]{1,50})\//) || text.match(/\[([^\]\n]{1,50})\]/);
   if (delimited) text = delimited[1].trim();
   else if (/^\(.+\)$/.test(text)) text = text.slice(1, -1).trim();
   // Providers that lack the length mark often type an ASCII colon.
@@ -720,7 +720,7 @@ function sanitizeIpaText(raw, sourceWord) {
   // Spaced IPA ("ˈaɪs ˌkriːm") qualifies token by token, while prose with a
   // stray glyph ("pronounced wɜːrd-ish") fails on its plain-ASCII words.
   const tokens = text.split(/\s+/);
-  if (tokens.length > 4) return null;
+  if (tokens.length > 6) return null;
   if (!tokens.every(tok => IPA_PHONETIC_GLYPHS.test(tok))) {
     // Zero-glyph answers are usually respellings ("ih-FEM-er-ul") or the
     // word echoed back ("study"), which the badge must never display. The
@@ -818,7 +818,7 @@ const pronunciationInFlight = new Map();
 // symbols go; letters, digits, and internal marks stay — "42nd" and "e.g."
 // survive intact.
 function normalizePronunciationWord(word) {
-  return String(word).trim().replace(/^[\p{P}\p{S}]+|[\p{P}\p{S}]+$/gu, '');
+  return String(word).trim().replace(/^[\p{P}\p{S}]+|[\p{P}\p{S}]+$/gu, '').trim();
 }
 
 function pronunciationCacheKey(word) {
@@ -837,7 +837,7 @@ async function requestPronunciationFromModel(word, model) {
     model: model.modelName,
     messages: [{
       role: 'user',
-      content: `Give the IPA pronunciation of the English word "${word}". Use proper IPA symbols (ə, ɪ, ɛ, ʃ, ŋ, ʌ, æ, ɑ, ɔ, ʊ, ˈ, ˌ, ː) rather than plain-letter respellings. Reply with ONLY the IPA transcription in square brackets, like [ɪˈfem.ər.əl]. No explanation, no other text.`
+      content: `Give the IPA pronunciation of the English term "${word}". Use proper IPA symbols (ə, ɪ, ɛ, ʃ, ŋ, ʌ, æ, ɑ, ɔ, ʊ, ˈ, ˌ, ː) rather than plain-letter respellings. Reply with ONLY the IPA transcription in square brackets, like [ɪˈfem.ər.əl]. No explanation, no other text.`
     }],
     stream: false
   };
@@ -1666,10 +1666,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // that succeeded on its own.
   if (request.type === "getWordPronunciation") {
     const word = typeof request.word === 'string' ? normalizePronunciationWord(request.word) : '';
-    if (!word || /\s/.test(word) || word.length > 40) {
-      // IPA is a per-word dictionary affordance; phrases, over-long "words",
-      // and punctuation-only selections never get one. Same thresholds as
-      // the popup's header gate.
+    const wordCount = word ? word.split(/\s+/).length : 0;
+    if (!word || wordCount > 3 || word.length > 50) {
+      // IPA is a dictionary affordance for words and short terms (≤3 words, ≤50 chars);
+      // longer phrases, over-long text, and punctuation-only selections never get one.
+      // Same thresholds as the popup's header gate.
       sendResponse({ ipa: null });
       return;
     }

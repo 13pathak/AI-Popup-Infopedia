@@ -4416,14 +4416,15 @@ function createSelectors(instance, models, prompts, currentModelId, currentPromp
   // whole definition), plus an IPA badge that fills in asynchronously from
   // a cached model side-ask. The cluster is a DICTIONARY affordance, so it
   // renders only for single-term lookups — the same gate the badge fetch
-  // and the worker's getWordPronunciation apply (no whitespace, ≤40 chars,
+  // and the worker's getWordPronunciation apply (≤3 words, ≤50 chars,
   // after trimming adjacent punctuation so "ephemeral." and "ephemeral"
-  // share one term). Phrase and passage selections keep a clean header:
+  // share one term). Longer passage selections keep a clean header:
   // the toolbar's speak button already reads the full definition.
   // "Custom Question" is the empty hotkey popup's sentinel, not a real
   // term — no controls there.
   const headerWord = selectedText === 'Custom Question' ? '' : normalizePronunciationTerm(selectedText);
-  if (headerWord && !/\s/.test(headerWord) && headerWord.length <= 40) {
+  const headerWordCount = headerWord ? headerWord.split(/\s+/).length : 0;
+  if (headerWord && headerWordCount <= 3 && headerWord.length <= 50) {
     const pronounceButton = document.createElement('button');
     pronounceButton.type = 'button';
     pronounceButton.id = 'ai-popup-pronounce-btn';
@@ -5424,16 +5425,16 @@ function toggleSpeech(instance, text) {
 // marks stay — "42nd" and "e.g." survive intact. Must match
 // normalizePronunciationWord in background.js.
 function normalizePronunciationTerm(text) {
-  return String(text || '').trim().replace(/^[\p{P}\p{S}]+|[\p{P}\p{S}]+$/gu, '');
+  return String(text || '').trim().replace(/^[\p{P}\p{S}]+|[\p{P}\p{S}]+$/gu, '').trim();
 }
 
 // Fetches the IPA transcription for the header word. The badge is pure
 // decoration: a closed popup, a rebuilt header, or any error just leaves it
 // hidden — nothing here can disturb the lookup flow around it.
 function requestHeaderPronunciation(instance, word, modelId, badge) {
-  // Only dictionary-style single terms get a transcription; a phrase's
-  // "phonetic spelling" is not a thing readers use.
-  if (!word || /\s/.test(word) || word.length > 40) return;
+  // Dictionary affordance for words and short terms (≤3 words, ≤50 chars).
+  const wordCount = word ? word.split(/\s+/).length : 0;
+  if (!word || wordCount > 3 || word.length > 50) return;
   chrome.runtime.sendMessage({ type: 'getWordPronunciation', word: word, modelId: modelId || undefined }, (response) => {
     if (chrome.runtime.lastError) return; // worker unavailable — badge stays hidden
     if (!activePopups.includes(instance)) return; // popup closed meanwhile

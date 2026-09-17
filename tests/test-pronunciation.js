@@ -178,6 +178,7 @@ async function main() {
     assert(s('x'.repeat(60)) === null, 'over-long junk is rejected');
     assert(s('') === null && s(undefined) === null && s(42) === null, 'non-string inputs return null');
     assert(s('```ipa\n[əˈfɛməɹəl]\n```') === 'əˈfɛməɹəl', 'code-fenced answers are unwrapped');
+    assert(s('[ˈsɪlɪkən ˈvæli]', 'Silicon Valley') === 'ˈsɪlɪkən ˈvæli', '2-word term transcription is accepted');
 
     // Cambridge-style DRESS-vowel rescue: plain-ASCII broad transcriptions
     // ([bed], [teksts], [helpt]) are legitimate dictionary output.
@@ -267,15 +268,15 @@ async function main() {
     await flush();
     assert(resp && resp.ipa === null, 'non-JSON body answers ipa null', resp);
 
-    // 7. Guard rails: phrases, over-long words, punctuation-only selections,
-    //    and empty words never reach the network (same thresholds as the
-    //    popup's header gate).
+    // 7. Guard rails: phrases over 3 words, over-long terms (>50 chars),
+    //    punctuation-only selections, and empty words never reach the network
+    //    (same thresholds as the popup's header gate).
     fetchCalls = [];
     fetchImpl = () => Promise.resolve(okChatResponse('[ɪˈfem.ər.əl]'));
-    resp = await askPronunciation({ type: 'getWordPronunciation', word: 'artificial intelligence' });
-    assert(resp && resp.ipa === null, 'multi-word phrase answers ipa null', resp);
-    resp = await askPronunciation({ type: 'getWordPronunciation', word: 'a'.repeat(41) });
-    assert(resp && resp.ipa === null, 'over-long single word answers ipa null', resp);
+    resp = await askPronunciation({ type: 'getWordPronunciation', word: 'the quick brown fox' });
+    assert(resp && resp.ipa === null, 'phrase over 3 words answers ipa null', resp);
+    resp = await askPronunciation({ type: 'getWordPronunciation', word: 'a'.repeat(51) });
+    assert(resp && resp.ipa === null, 'over-long term answers ipa null', resp);
     resp = await askPronunciation({ type: 'getWordPronunciation', word: '...' });
     assert(resp && resp.ipa === null, 'punctuation-only selection answers ipa null', resp);
     resp = await askPronunciation({ type: 'getWordPronunciation', word: '   ' });
@@ -335,6 +336,21 @@ async function main() {
       assert(resp && resp.ipa === 'ˌserənˈdɪpəti', `variant "${variant}" is a cache hit`, resp);
     }
     assert(fetchCalls.length === 1, 'all punctuation variants shared one network ask', fetchCalls.length);
+
+    // 12. Short phrases (up to 3 words) pass validation and surface IPA.
+    fetchCalls = [];
+    fetchImpl = () => Promise.resolve(okChatResponse('[ˈsɪlɪkən ˈvæli]'));
+    resp = await askPronunciation({ type: 'getWordPronunciation', word: 'Silicon Valley', modelId: 'm1' });
+    await flush();
+    assert(resp && resp.ipa === 'ˈsɪlɪkən ˈvæli', '2-word phrase surfaces the IPA', resp);
+    assert(fetchCalls.length === 1, '2-word phrase spent one network ask', fetchCalls.length);
+
+    fetchCalls = [];
+    fetchImpl = () => Promise.resolve(okChatResponse('[məˈʃiːn ˈlɜːnɪŋ ˈælɡərɪðəm]'));
+    resp = await askPronunciation({ type: 'getWordPronunciation', word: 'machine learning algorithm', modelId: 'm1' });
+    await flush();
+    assert(resp && resp.ipa === 'məˈʃiːn ˈlɜːnɪŋ ˈælɡərɪðəm', '3-word phrase surfaces the IPA', resp);
+    assert(fetchCalls.length === 1, '3-word phrase spent one network ask', fetchCalls.length);
 
     console.log(process.exitCode ? 'PRONUNCIATION TEST FAILED' : 'PRONUNCIATION TEST PASSED');
 }
