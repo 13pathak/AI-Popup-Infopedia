@@ -890,8 +890,9 @@ async function getPronunciationForWord(word, model) {
 }
 
 // --- Piggybacked follow-up suggestions (Issue #35) ---
-// The one-click chips above the popup's follow-up input come from the SAME
-// request that answers: when the setting is on, the outbound user message
+// The one-click chips rendered inside the answer card, right after the
+// latest settled reply, come from the SAME request that answers: when the
+// setting is on, the outbound user message
 // asks the model to end its reply with a [[SUGGESTIONS]] trailer, which is
 // stripped here so nothing downstream (display, saves, PDF export, the
 // conversation stash, Hallucination Guard) ever sees the marker. Stripping

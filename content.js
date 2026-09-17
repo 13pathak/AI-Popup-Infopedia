@@ -813,24 +813,26 @@ const popupStyles = `
   /* --- Follow-up Prompt --- */
   #ai-popup-followup-container {
     display: flex;
-    flex-direction: column; /* chips row stacks above the input row */
-    align-items: stretch;
-    gap: 8px;
     position: relative;
     margin-top: 10px;
     padding-top: 10px;
     border-top: 1px solid var(--popup-border);
+    align-items: center;
     flex-shrink: 0;
   }
 
   /* --- Follow-up action chips (Issue #35) --- */
-  /* One-click prompts above the input: field-styled pills (quieter than the
-     accent action buttons) that pick up the accent on hover. */
-  #ai-popup-followup-chips {
+  /* Rendered INSIDE the answer card, right after the latest settled answer:
+     they scroll with the conversation instead of occupying fixed height
+     between the answer and the input (which clipped long answers). Field-
+     styled pills — quieter than the accent action buttons — that pick up
+     the accent on hover. */
+  .ai-compare-chips {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
     align-items: center;
+    margin: 12px 0 2px;
   }
 
   .ai-popup-followup-chip {
@@ -855,17 +857,6 @@ const popupStyles = `
     background: rgba(var(--popup-accent-rgb), 0.12);
     border-color: rgba(var(--popup-accent-rgb), 0.45);
     color: rgba(var(--popup-accent-rgb), 1);
-  }
-
-  .ai-popup-followup-chip:disabled {
-    opacity: 0.55;
-    cursor: default;
-  }
-
-  .ai-popup-followup-chip:disabled:hover {
-    background: var(--popup-field-bg);
-    border-color: var(--popup-field-border);
-    color: var(--popup-text);
   }
   
   #ai-popup-followup-input {
@@ -2697,8 +2688,14 @@ function showPopup(x, y, content) {
     models: []               // configured models (filled by createSelectors / init)
   };
 
-  chrome.storage.sync.get({ showUserQuestions: false }, (data) => {
+  chrome.storage.sync.get({ showUserQuestions: false, followupChips: DEFAULT_FOLLOWUP_CHIPS, enableFollowupSuggestions: true }, (data) => {
     instance.showUserQuestions = data.showUserQuestions;
+    // Issue #35 chip settings, cached for the card renderer — the compare
+    // cards rebuild on every stream tick, so storage reads belong here at
+    // popup creation, not in render. Edits apply to the next popup, the
+    // same freshness showUserQuestions has.
+    instance.followupChips = Array.isArray(data.followupChips) ? data.followupChips : [];
+    instance.enableFollowupSuggestions = data.enableFollowupSuggestions !== false;
   });
 
   makePopupDraggable(instance);
@@ -3488,92 +3485,72 @@ function updateCompareFollowupState(instance, wasFollowup) {
   // input's right padding to match.
   const container = instance.popup.querySelector('#ai-popup-followup-container');
   if (container) container.classList.toggle('ai-popup-followup-straggler', anyBusy && !busy);
-  // Chips follow the lock they just computed: same front card, same busy
-  // gate, re-rendered on every state change (settle, dispatch, restore).
-  refreshFollowupChipRow(instance);
   if (!busy && wasFollowup) input.focus();
 }
 
 // --- Follow-up action chips (Issue #35) ---
-// One-click prompts above the follow-up input: the user's customizable
-// static chips (options → Follow-up Settings) plus contextual suggestions
-// the answering model piggybacked onto its reply through the
-// [[SUGGESTIONS]] trailer — parsed and stripped by the background worker,
-// so the model's answer text never contains them. The row mirrors the
-// FRONT card's latest settled answer (the card the input itself is gated
-// on) and shares its lock state: chips are unclickable exactly while
-// typing would be.
+// One-click prompts rendered INSIDE the answer card, right after the latest
+// settled answer: the user's customizable static chips (options → Follow-up
+// Settings) plus contextual suggestions the answering model piggybacked onto
+// its reply through the [[SUGGESTIONS]] trailer — parsed and stripped by the
+// background worker, so the answer text never contains them. Living in the
+// card's scrollable body (not between the answer and the input) means they
+// never steal fixed height from the answer, and each compare model shows
+// its OWN suggestions.
 const DEFAULT_FOLLOWUP_CHIPS = ['💡 Simpler', '📝 2 Examples', '🏛️ Etymology'];
 const FOLLOWUP_CHIPS_MAX = 8;
 
-function refreshFollowupChipRow(instance) {
-  if (!instance || !instance.popup) return;
-  const container = instance.popup.querySelector('#ai-popup-followup-container');
-  const row = container ? container.querySelector('#ai-popup-followup-chips') : null;
-  if (!row) return;
-
-  const slots = instance.compareSlots || [];
-  const front = slots[Math.max(0, Math.min(instance.compareIndex || 0, slots.length - 1))];
-  // The latest SETTLED assistant turn owns the chips: a turn without
-  // suggestions clears the AI ones (deterministic per turn) instead of
-  // showing an older turn's stale set.
-  let suggestions = null;
-  if (front && Array.isArray(front.messages)) {
-    for (let i = front.messages.length - 1; i >= 0; i--) {
-      const m = front.messages[i];
-      if (m && m.role === 'assistant' && !m.isThinking && !m.isStreaming) {
-        if (Array.isArray(m.suggestions)) suggestions = m.suggestions;
-        break;
-      }
-    }
+// Appends the chip row to a card body. Rendered only when the slot's last
+// non-volatile message is a settled assistant turn — the chips appear after
+// the AI output ends and vanish the moment a new question is asked (the
+// pending turn's placeholder becomes the last message). Clicks go through
+// dispatchFollowupText, exactly like a typed question; while ANOTHER card is
+// still streaming, the shared pending-followup queue absorbs the click, the
+// same straggler behavior the unlocked input box has.
+function appendFollowupChips(instance, body, slot) {
+  const msgs = Array.isArray(slot.messages) ? slot.messages : [];
+  let lastAnswer = null;
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m = msgs[i];
+    if (!m || m.isError || m.isThinking || m.isStreaming || m.isStatus) continue;
+    if (m.role === 'assistant') lastAnswer = m;
+    break; // the first settled message from the end decides
   }
+  if (!lastAnswer) return;
 
-  chrome.storage.sync.get({ followupChips: DEFAULT_FOLLOWUP_CHIPS, enableFollowupSuggestions: true }, (settings) => {
-    // The popup (or just its followup container) can be rebuilt while the
-    // settings load; a detached row must not resurrect itself.
-    if (!row.isConnected || !instance.popup || instance.popup.querySelector('#ai-popup-followup-chips') !== row) return;
-    const chips = [];
-    const seen = new Set();
-    const addChip = (label) => {
-      const text = String(label || '').trim();
-      const key = text.toLowerCase();
-      if (!text || seen.has(key)) return;
-      seen.add(key);
-      chips.push(text);
-    };
-    (Array.isArray(settings.followupChips) ? settings.followupChips : []).forEach(addChip);
-    if (settings.enableFollowupSuggestions !== false && suggestions) suggestions.forEach(addChip);
+  const chips = [];
+  const seen = new Set();
+  const addChip = (label) => {
+    const text = String(label || '').trim();
+    if (!text || seen.has(text.toLowerCase())) return;
+    seen.add(text.toLowerCase());
+    chips.push(text);
+  };
+  (Array.isArray(instance.followupChips) ? instance.followupChips : []).forEach(addChip);
+  if (instance.enableFollowupSuggestions !== false && Array.isArray(lastAnswer.suggestions)) {
+    lastAnswer.suggestions.forEach(addChip);
+  }
+  if (chips.length === 0) return;
 
-    if (chips.length === 0) {
-      row.style.display = 'none';
-      row.textContent = '';
-      return;
-    }
-    row.textContent = '';
-    // The lock was applied to the input just before this refresh ran;
-    // reading it back keeps chips and input in lockstep by construction.
-    const input = container.querySelector('#ai-popup-followup-input');
-    const disabled = !!(input && input.disabled);
-    chips.slice(0, FOLLOWUP_CHIPS_MAX).forEach((label) => {
-      const chip = document.createElement('button');
-      chip.type = 'button';
-      chip.className = 'ai-popup-followup-chip';
-      chip.textContent = label; // model-authored text, assigned as text only
-      chip.title = label;
-      chip.disabled = disabled;
-      chip.addEventListener('pointerdown', (e) => {
-        e.stopPropagation();
-        instance.isInteracting = true; // clicking a chip must not dismiss the popup
-      });
-      chip.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (chip.disabled) return;
-        dispatchFollowupText(instance, label);
-      });
-      row.appendChild(chip);
+  const row = document.createElement('div');
+  row.className = 'ai-compare-chips';
+  chips.slice(0, FOLLOWUP_CHIPS_MAX).forEach((label) => {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'ai-popup-followup-chip';
+    chip.textContent = label; // model-authored text, assigned as text only
+    chip.title = label;
+    chip.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+      instance.isInteracting = true; // clicking a chip must not dismiss the popup
     });
-    row.style.display = '';
+    chip.addEventListener('click', (e) => {
+      e.stopPropagation();
+      dispatchFollowupText(instance, label);
+    });
+    row.appendChild(chip);
   });
+  body.appendChild(row);
 }
 
 // Sends `text` as a follow-up exactly as if the user had typed it into the
@@ -4022,7 +3999,11 @@ function appendCompareConversation(instance, body, slot) {
   // flight, and animated dots above the error would read as a contradiction.
   if (!drewAny && slot.status !== 'error') {
     body.insertAdjacentHTML('beforeend', buildLoadingHtml('Thinking...'));
+    return;
   }
+  // One-click follow-up chips close out the conversation — rendered only
+  // when the latest answer has settled (Issue #35).
+  appendFollowupChips(instance, body, slot);
 }
 
 // Arrows + one dot per model; the dot doubles as that model's status light.
@@ -4881,15 +4862,6 @@ function createFollowupInput(instance, word) {
   inputWrapper.appendChild(sendBtn);
   inputWrapper.appendChild(stopBtn);
 
-  // Issue #35: action chips live INSIDE the container (above the input row)
-  // because the compare nav and toolbar anchor their insertions on the
-  // container itself — anything mounted before it would be shoved between
-  // the nav and the input. Hidden until refreshFollowupChipRow fills it.
-  const chipRow = document.createElement('div');
-  chipRow.id = 'ai-popup-followup-chips';
-  chipRow.style.display = 'none';
-
-  container.appendChild(chipRow);
   container.appendChild(inputWrapper);
   popup.appendChild(container);
 
