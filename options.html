@@ -1894,6 +1894,17 @@
             <label for="followup-custom-message">Custom Follow-up Message</label>
             <textarea id="followup-custom-message" rows="3" placeholder="e.g., restrict your reply within 500 characters"></textarea>
             <small style="display: block; margin-top: 5px;">This message will be automatically appended to every subsequent question you ask in the popup. For example, 'Provide a maximum 6-sentence response with each sentence not containing more than 10 words.'</small>
+
+            <label for="static-followup-chips" style="display: block; margin-top: 18px;">Quick Follow-up Chips (Issue #35)</label>
+            <textarea id="static-followup-chips" rows="3" placeholder="One chip per line, e.g.&#10;💡 Simpler&#10;📝 2 Examples&#10;🏛️ Etymology"></textarea>
+            <small style="display: block; margin-top: 5px;">One chip label per line. These pills appear above the follow-up input for one-click questions; emoji prefixes are optional. Leave empty for none.</small>
+
+            <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; margin-top: 14px;">
+                <input type="checkbox" id="ai-followup-suggestions-checkbox" style="margin-top: 4px;">
+                <span><strong>AI-suggested follow-up chips</strong><br>
+                    <small>After each answer, the same model also suggests up to 3 contextual follow-up questions, shown as chips after your custom ones. Rides the existing request — no extra API calls — and models that ignore the instruction simply show none.</small></span>
+            </label>
+
             <button id="save-followup-settings-btn" style="margin-top: 10px; background-color: var(--secondary-color);">Save Follow-up Settings</button>
             <div id="followup-status" style="margin-top: 10px; font-weight: bold; min-height: 1em;"></div>
         </div>

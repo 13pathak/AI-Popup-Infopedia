@@ -109,7 +109,7 @@ async function run() {
 
   // 5. Unit-test the pronunciation & IPA badge (sanitizer + message
   // handler; same chrome-stub approach, no server or browser needed)
-  console.log('[5/10] Testing pronunciation & IPA badge...');
+  console.log('[5/11] Testing pronunciation & IPA badge...');
   const pronProc = spawn(process.execPath, [path.join(__dirname, 'test-pronunciation.js')], {
     stdio: 'inherit'
   });
@@ -118,21 +118,33 @@ async function run() {
     throw new Error('Pronunciation unit tests failed.');
   }
 
-  // 6. Start HTTP server
-  console.log(`[6/10] Starting local HTTP server on port ${PORT}...`);
+  // 6. Unit-test the piggybacked follow-up suggestions (Issue #35):
+  // trailer extraction, the live-delta marker filter, and the
+  // getAiDefinition handler end-to-end under a streaming fetch stub
+  console.log('[6/11] Testing follow-up suggestion chips...');
+  const sugProc = spawn(process.execPath, [path.join(__dirname, 'test-suggestions.js')], {
+    stdio: 'inherit'
+  });
+  const sugCode = await new Promise(res => sugProc.on('exit', code => res(code ?? 0)));
+  if (sugCode !== 0) {
+    throw new Error('Follow-up suggestions unit tests failed.');
+  }
+
+  // 7. Start HTTP server
+  console.log(`[7/11] Starting local HTTP server on port ${PORT}...`);
   const server = createServer();
   await new Promise((res, rej) => {
     server.listen(PORT, '127.0.0.1', (err) => err ? rej(err) : res());
   });
   console.log(`  Server ready at http://127.0.0.1:${PORT}`);
 
-  // 7. Launch headless browser
+  // 8. Launch headless browser
   const browserBin = findBrowserBinary();
   if (!browserBin) {
     server.close();
     throw new Error('No compatible browser (Edge or Chrome) found on this system.');
   }
-  console.log(`[7/10] Launching headless browser: ${path.basename(browserBin)}...`);
+  console.log(`[8/11] Launching headless browser: ${path.basename(browserBin)}...`);
   const tempProfile = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-test-profile-'));
 
   const browserProc = spawn(browserBin, [
@@ -152,15 +164,15 @@ async function run() {
     await pollEndpoint(`http://127.0.0.1:${CDP_PORT}/json`, 15000);
     console.log(`  CDP ready on port ${CDP_PORT}`);
 
-    // 8. Run E2E tests
-    console.log('[8/10] Executing E2E undo/redo test harness...');
+    // 9. Run E2E tests
+    console.log('[9/11] Executing E2E undo/redo test harness...');
     const testProc = spawn(process.execPath, [path.join(__dirname, 'e2e-undo.js')], {
       stdio: 'inherit'
     });
 
     exitCode = await new Promise(res => testProc.on('exit', code => res(code ?? 0)));
 
-    console.log('[9/10] Executing E2E deep-link test harness...');
+    console.log('[10/11] Executing E2E deep-link test harness...');
     const deeplinkProc = spawn(process.execPath, [path.join(__dirname, 'e2e-deeplink.js')], {
       stdio: 'inherit'
     });
@@ -168,7 +180,7 @@ async function run() {
     const deeplinkCode = await new Promise(res => deeplinkProc.on('exit', code => res(code ?? 0)));
     if (deeplinkCode !== 0) exitCode = deeplinkCode;
 
-    console.log('[10/10] Executing E2E view-state persistence test harness...');
+    console.log('[11/11] Executing E2E view-state persistence test harness...');
     const viewstateProc = spawn(process.execPath, [path.join(__dirname, 'e2e-viewstate.js')], {
       stdio: 'inherit'
     });

@@ -1891,10 +1891,27 @@ function saveDefaultPromptId(promptId) {
   });
 }
 
+// One chip label per line in the textarea; blank lines drop out. Kept as a
+// plain string array in sync storage — the popup reads it on every chip
+// refresh (Issue #35).
+function parseFollowupChipsTextarea(raw) {
+  return String(raw || '')
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(line => line.length > 0 && line.length <= 80);
+}
+
 function saveFollowupSettings() {
   const customMessage = document.getElementById('followup-custom-message').value;
   const showUserQuestions = document.getElementById('show-user-questions-checkbox').checked;
-  chrome.storage.sync.set({ followupCustomMessage: customMessage, showUserQuestions: showUserQuestions }, () => {
+  const followupChips = parseFollowupChipsTextarea(document.getElementById('static-followup-chips').value);
+  const enableFollowupSuggestions = document.getElementById('ai-followup-suggestions-checkbox').checked;
+  chrome.storage.sync.set({
+    followupCustomMessage: customMessage,
+    showUserQuestions: showUserQuestions,
+    followupChips: followupChips,
+    enableFollowupSuggestions: enableFollowupSuggestions
+  }, () => {
     const statusEl = document.getElementById('followup-status');
     statusEl.textContent = 'Follow-up settings saved successfully!';
     statusEl.style.color = '#5cb85c';
@@ -1905,12 +1922,25 @@ function saveFollowupSettings() {
 }
 
 function loadFollowupSettings() {
-  chrome.storage.sync.get(['followupCustomMessage', 'showUserQuestions'], (data) => {
+  // Must stay in sync with DEFAULT_FOLLOWUP_CHIPS in content.js: options
+  // pre-fills them so what the user sees is what a fresh install gets.
+  chrome.storage.sync.get({
+    followupCustomMessage: '',
+    showUserQuestions: false,
+    followupChips: ['💡 Simpler', '📝 2 Examples', '🏛️ Etymology'],
+    enableFollowupSuggestions: true
+  }, (data) => {
     if (data.followupCustomMessage !== undefined) {
       document.getElementById('followup-custom-message').value = data.followupCustomMessage;
     }
     if (data.showUserQuestions !== undefined) {
       document.getElementById('show-user-questions-checkbox').checked = data.showUserQuestions;
+    }
+    if (Array.isArray(data.followupChips)) {
+      document.getElementById('static-followup-chips').value = data.followupChips.join('\n');
+    }
+    if (data.enableFollowupSuggestions !== undefined) {
+      document.getElementById('ai-followup-suggestions-checkbox').checked = data.enableFollowupSuggestions;
     }
   });
 }
@@ -3990,6 +4020,7 @@ function restoreBackup() {
             'enableModelFallback', 'enableImplicitContext',
             'ttsSettings', 'ankiSettings', 'backupReminderFrequency', 'backupSubfolder',
             'backupInclude', 'followupCustomMessage', 'showUserQuestions',
+            'followupChips', 'enableFollowupSuggestions',
             'sttEngine', 'sttApiKey', 'sttApiUrl', 'sttModel', 'sttCustomHeaders',
             'sttCustomFormData', 'pdfViewerEnabled', 'uiTheme',
             'customFsrsWeights', 'customFsrsWeightsMeta', 'secretsLocalOnly'

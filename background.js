@@ -889,6 +889,99 @@ async function getPronunciationForWord(word, model) {
   return request;
 }
 
+// --- Piggybacked follow-up suggestions (Issue #35) ---
+// The one-click chips above the popup's follow-up input come from the SAME
+// request that answers: when the setting is on, the outbound user message
+// asks the model to end its reply with a [[SUGGESTIONS]] trailer, which is
+// stripped here so nothing downstream (display, saves, PDF export, the
+// conversation stash, Hallucination Guard) ever sees the marker. Stripping
+// always runs — only the instruction is gated — so a stale cached answer or
+// an over-eager model is cleaned regardless of the current setting.
+
+const SUGGESTIONS_MARKER = '[[SUGGESTIONS]]';
+const SUGGESTIONS_INSTRUCTION = `\n\nAfter your answer, start a new line with exactly ${SUGGESTIONS_MARKER} and then list 3 short follow-up questions a curious reader might ask next, one per line. Each question must be under 60 characters, with no numbering and no bullet points, written in the same language as your answer. Write nothing after the list.`;
+const SUGGESTIONS_MAX_COUNT = 4;
+const SUGGESTIONS_MAX_LENGTH = 80;
+
+// The authoritative parse, run on the fully-assembled answer text. From the
+// LAST marker occurrence to end-of-text is the trailer: that span is cut
+// from the returned text, and its lines are sanitized into chip labels. A
+// trailer with no valid lines still truncates — the marker itself must
+// never reach the user.
+function extractSuggestions(fullText) {
+  const result = { text: fullText, suggestions: null };
+  if (typeof fullText !== 'string') return result;
+  const markerIndex = fullText.lastIndexOf(SUGGESTIONS_MARKER);
+  if (markerIndex === -1) return result;
+  const seen = new Set();
+  const suggestions = [];
+  for (let raw of fullText.slice(markerIndex + SUGGESTIONS_MARKER.length).split(/\r?\n/)) {
+    let line = raw.trim().replace(/^[-*•]\s+/, '').replace(/^\d+[.)]\s+/, '').trim();
+    if (!line || line.length > SUGGESTIONS_MAX_LENGTH) continue;
+    if (line.includes(SUGGESTIONS_MARKER)) continue;
+    const key = line.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    suggestions.push(line);
+    if (suggestions.length >= SUGGESTIONS_MAX_COUNT) break;
+  }
+  // Whitespace just before the marker belongs to the trailer too, or every
+  // chipped answer would end on a blank gap.
+  let cut = markerIndex;
+  while (cut > 0 && /\s/.test(fullText[cut - 1])) cut--;
+  result.text = fullText.slice(0, cut);
+  if (suggestions.length > 0) result.suggestions = suggestions;
+  return result;
+}
+
+// Longest suffix of `s` that is a proper prefix of the marker — the text a
+// holdback filter must sit on because the next chunk could complete it.
+function markerPrefixSuffixLength(s) {
+  const max = Math.min(s.length, SUGGESTIONS_MARKER.length - 1);
+  for (let len = max; len > 0; len--) {
+    if (SUGGESTIONS_MARKER.startsWith(s.slice(s.length - len))) return len;
+  }
+  return 0;
+}
+
+// Cosmetic-only filter for the live delta channel: extractSuggestions cleans
+// the final text, this keeps the marker from FLASHING on screen while the
+// answer streams. Text is held back only while it could still be the start
+// of the marker (a trailing "[" or "[[" costs a few ms, not a redraw), and
+// everything from a completed marker onward is swallowed. flush() releases
+// an unterminated partial marker when the stream ends without one; reset()
+// drops all state so a fallback retry never inherits the dead attempt's.
+function createSuggestionsStreamFilter() {
+  let pending = '';
+  let capturing = false;
+  return {
+    push(delta) {
+      if (typeof delta !== 'string' || !delta || capturing) return '';
+      pending += delta;
+      const markerIndex = pending.indexOf(SUGGESTIONS_MARKER);
+      if (markerIndex !== -1) {
+        capturing = true;
+        const visible = pending.slice(0, markerIndex);
+        pending = '';
+        return visible;
+      }
+      const hold = markerPrefixSuffixLength(pending);
+      const visible = pending.slice(0, pending.length - hold);
+      pending = pending.slice(pending.length - hold);
+      return visible;
+    },
+    flush() {
+      const visible = pending;
+      pending = '';
+      return visible;
+    },
+    reset() {
+      pending = '';
+      capturing = false;
+    }
+  };
+}
+
 // --- This listener now handles multiple message types ---
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
@@ -915,16 +1008,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
     // Get all saved models and the ID of the default one (routed through secret storage accessor)
-    getSecretStorageConfig(['models', 'defaultModelId', 'customPrompts', 'defaultPromptId', 'tavilyApiKey', 'enableModelFallback', 'enableImplicitContext'], {
+    getSecretStorageConfig(['models', 'defaultModelId', 'customPrompts', 'defaultPromptId', 'tavilyApiKey', 'enableModelFallback', 'enableImplicitContext', 'enableFollowupSuggestions'], {
       models: [],
       defaultModelId: null,
       customPrompts: [],
       defaultPromptId: null,
       tavilyApiKey: '',
       enableModelFallback: true,
-      enableImplicitContext: true
+      enableImplicitContext: true,
+      enableFollowupSuggestions: true
     }).then(async (data) => {
-      const { models, defaultModelId, customPrompts, defaultPromptId, tavilyApiKey, enableModelFallback, enableImplicitContext } = data;
+      const { models, defaultModelId, customPrompts, defaultPromptId, tavilyApiKey, enableModelFallback, enableImplicitContext, enableFollowupSuggestions } = data;
 
       if (!models || models.length === 0 || !defaultModelId) {
         sendResponse({ error: "No default AI model configured. Please set one in the options page.", models: [], defaultModelId: null });
@@ -959,14 +1053,28 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           chrome.runtime.sendMessage(message, () => { void chrome.runtime.lastError; });
         }
       };
-      const emitStreamDelta = (delta) => {
-        if (typeof delta !== 'string' || !delta) return;
-        const message = { type: 'aiDefinitionDelta', requestId: streamRequestId, delta: delta };
+      // Issue #35: the [[SUGGESTIONS]] trailer is filtered out of the live
+      // deltas. The filter resets on the same streamResetPending flag every
+      // re-fetch already sets (fallback chain, search passes, stream_options
+      // retry), so a restarted stream never inherits marker state. When the
+      // visible part of a delta is empty (pure marker text), the reset flag
+      // stays pending and rides the first delta the popup can actually see.
+      const suggestionsFilter = createSuggestionsStreamFilter();
+      const emitVisibleDelta = (visible) => {
+        const message = { type: 'aiDefinitionDelta', requestId: streamRequestId, delta: visible };
         if (streamResetPending) {
           message.reset = true;
           streamResetPending = false;
         }
         emitToPopup(message);
+      };
+      const emitStreamDelta = (delta) => {
+        if (typeof delta !== 'string' || !delta) return;
+        if (streamResetPending) {
+          suggestionsFilter.reset();
+        }
+        const visible = suggestionsFilter.push(delta);
+        if (visible) emitVisibleDelta(visible);
       };
 
       // Tells the popup a chain model just died so it can swap the (possibly
@@ -1015,8 +1123,22 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       let safeMessagesText = [];
       if (request.messages && Array.isArray(request.messages)) {
          safeMessagesText = request.messages.map(m => ({ role: m.role, content: m.content }));
+         // Issue #35: every follow-up turn re-requests fresh suggestions by
+         // appending the instruction to the LAST user message of this local
+         // copy only — the popup's own conversation is never mutated, so the
+         // instruction cannot echo back inside a later turn's history.
+         if (enableFollowupSuggestions !== false) {
+           for (let i = safeMessagesText.length - 1; i >= 0; i--) {
+             if (safeMessagesText[i] && safeMessagesText[i].role === 'user' && typeof safeMessagesText[i].content === 'string') {
+               safeMessagesText[i] = { role: 'user', content: safeMessagesText[i].content + SUGGESTIONS_INSTRUCTION };
+               break;
+             }
+           }
+         }
       } else {
-         safeMessagesText = [{ role: "user", content: prompt }];
+         // The instruction rides the same ask — never a second request — and
+         // stays out of `prompt` so the usedPrompt echo is unchanged.
+         safeMessagesText = [{ role: "user", content: prompt + (enableFollowupSuggestions !== false ? SUGGESTIONS_INSTRUCTION : '') }];
       }
       // A turn that never got its assistant reply (user Stop, a failed ask,
       // or a straggler interrupted by a newer question) leaves the next
@@ -1078,6 +1200,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           const liveUsedModel = models.find(m => m.id === cachedAnswer.usedModelId);
           sendResponse({
             definition: cachedAnswer.definition,
+            // Issue #35: a cached hit replays its stored chips — unless the
+            // setting has been switched off since the answer was cached.
+            suggestions: (enableFollowupSuggestions !== false && Array.isArray(cachedAnswer.suggestions)) ? cachedAnswer.suggestions : null,
             usedWebSearch: cachedAnswer.usedWebSearch,
             citations: cachedAnswer.citations || [],
             usedModelId: cachedAnswer.usedModelId,
@@ -1418,7 +1543,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           aiText = fallbackContent || "The AI reached maximum search depth or returned an empty response.";
         }
 
-        return { definition: aiText, usedWebSearch: usedWebSearch, citations: citations };
+        // Issue #35: the [[SUGGESTIONS]] trailer never leaves the worker —
+        // the returned definition, the lookup cache, and every downstream
+        // consumer (display, saves, PDF, stash, verification) see clean
+        // text, with the parsed chips riding alongside as a field. Runs
+        // even when the instruction is disabled: defense in depth against
+        // a cached era or an over-eager model.
+        const { text: cleanText, suggestions } = extractSuggestions(aiText);
+
+        return { definition: cleanText, suggestions: suggestions, usedWebSearch: usedWebSearch, citations: citations };
       }
 
       const failures = [];
@@ -1427,6 +1560,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       for (let i = 0; i < modelChain.length; i++) {
         try {
           answer = await requestDefinitionFromModel(modelChain[i]);
+          // Issue #35: release any tail the marker holdback is still sitting
+          // on (an answer genuinely ending in "[" etc.) so the live view
+          // matches the final text before the popup settles the card.
+          const heldTail = suggestionsFilter.flush();
+          if (heldTail) emitVisibleDelta(heldTail);
           usedModel = modelChain[i];
           break;
         } catch (error) {
@@ -1467,6 +1605,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       if (lookupCacheKey) {
         void lookupCacheSet(lookupCacheKey, {
           definition: answer.definition,
+          suggestions: answer.suggestions || null,
           usedWebSearch: answer.usedWebSearch,
           citations: answer.citations,
           usedModelId: usedModel.id,
@@ -1478,6 +1617,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
       sendResponse({
         definition: answer.definition,
+        suggestions: answer.suggestions || null,
         usedWebSearch: answer.usedWebSearch,
         citations: answer.citations,
         // Which model actually answered (differs from the requested one when
@@ -2326,6 +2466,8 @@ function triggerBackup(type = "Auto", customBackupInclude = null) {
         if (syncData.uiTheme !== undefined) backupData.uiTheme = syncData.uiTheme;
         if (syncData.followupCustomMessage !== undefined) backupData.followupCustomMessage = syncData.followupCustomMessage;
         if (syncData.showUserQuestions !== undefined) backupData.showUserQuestions = syncData.showUserQuestions;
+        if (syncData.enableFollowupSuggestions !== undefined) backupData.enableFollowupSuggestions = syncData.enableFollowupSuggestions;
+        if (syncData.followupChips !== undefined) backupData.followupChips = syncData.followupChips;
         if (syncData.backupReminderFrequency !== undefined) backupData.backupReminderFrequency = syncData.backupReminderFrequency;
         if (syncData.backupSubfolder !== undefined) backupData.backupSubfolder = syncData.backupSubfolder;
       }
