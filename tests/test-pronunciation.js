@@ -179,6 +179,17 @@ async function main() {
     assert(s('') === null && s(undefined) === null && s(42) === null, 'non-string inputs return null');
     assert(s('```ipa\n[əˈfɛməɹəl]\n```') === 'əˈfɛməɹəl', 'code-fenced answers are unwrapped');
 
+    // Cambridge-style DRESS-vowel rescue: plain-ASCII broad transcriptions
+    // ([bed], [teksts], [helpt]) are legitimate dictionary output.
+    assert(s('[teksts]', 'texts') === 'teksts', 'ASCII broad transcription differing from the word is rescued');
+    assert(s('/helpt/', 'helped') === 'helpt', 'past-tense ASCII transcription is rescued');
+    assert(s('[bed]', 'beds') === 'bed', 'transcription for an inflected lookup still counts as differing');
+    assert(s('[bed]', 'bed') === null, 'answer equal to the word is rejected (lazy-echo signature)');
+    assert(s('study', 'study') === null, 'echo of an opaque spelling is rejected');
+    assert(s('[unknown]', 'esoteric') === null, 'filler non-answer word is rejected');
+    assert(s('its ipa is bed', 'bed') === null, 'multi-token zero-glyph prose is rejected');
+    assert(s('ih-fem-er-ul', 'ephemeral') === null, 'lowercase respelling shape is still rejected');
+
     // ---------- getWordPronunciation handler ----------
     syncBacking.models = [
         { id: 'm1', name: 'Default Model', endpointUrl: 'https://api.default/v1/chat/completions', modelName: 'default-1', apiKey: 'sk-default' },
@@ -200,6 +211,8 @@ async function main() {
     assert(body.stream === false, 'ask is non-streaming', body);
     assert(!body.tools, 'no search tools on the pronunciation ask', body);
     assert(body.messages.length === 1 && body.messages[0].role === 'user', 'single user message', body.messages);
+    assert(body.messages[0].content.includes('ephemeral'), 'prompt names the queried word', body.messages[0].content);
+    assert(body.messages[0].content.includes('IPA symbols'), 'prompt nudges toward proper IPA symbols over respellings', body.messages[0].content);
     assert(init.headers['Authorization'] === undefined || init.headers['Authorization'] === '', 'no auth header without an api key', init.headers);
 
     // 2. Same word again (different popup): served from the session cache.
@@ -281,6 +294,18 @@ async function main() {
     assert(fetchCalls.length === 1 && fetchCalls[0][0] === 'https://api.default/v1/chat/completions', 'fallback ask hit the default model endpoint', fetchCalls[0] && fetchCalls[0][0]);
     const authHeader = fetchCalls[0][1].headers['Authorization'];
     assert(authHeader === 'Bearer sk-default', 'api key model sends its bearer token', authHeader);
+
+    // 10. Cambridge-style ASCII transcriptions flow through the handler:
+    // rescued when they differ from the word, hidden when they echo it.
+    fetchCalls = [];
+    fetchImpl = () => Promise.resolve(okChatResponse('[helpt]'));
+    resp = await askPronunciation({ type: 'getWordPronunciation', word: 'helped', modelId: 'm1' });
+    await flush();
+    assert(resp && resp.ipa === 'helpt', 'ASCII broad transcription passes for a differing word', resp);
+    fetchImpl = () => Promise.resolve(okChatResponse('[bed]'));
+    resp = await askPronunciation({ type: 'getWordPronunciation', word: 'bed', modelId: 'm1' });
+    await flush();
+    assert(resp && resp.ipa === null, 'exact echo answer stays null through the handler', resp);
 
     console.log(process.exitCode ? 'PRONUNCIATION TEST FAILED' : 'PRONUNCIATION TEST PASSED');
 }

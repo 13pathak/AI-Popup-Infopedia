@@ -692,11 +692,17 @@ const IPA_MAX_LENGTH = 40;
 // symbols mean the answer is prose.
 const IPA_ALLOWED_CHARS = /^[\p{L}\p{M}\u02C8\u02CC\u02D0\u02D1\u02E5-\u02E9\u203F() .\-']+$/u;
 // Every real English transcription carries phonetic glyphs outside plain
-// ASCII; all-ASCII answers are respellings ("ih-FEM-er-ul") or the word
-// itself, not IPA.
+// ASCII — with one exception: Cambridge-style broad transcription writes
+// the DRESS vowel as plain ASCII e ([bed], [help], [teksts]). sanitizeIpaText
+// admits that class through a narrow single-token rescue below instead of
+// widening this set.
 const IPA_PHONETIC_GLYPHS = /[əɪɛɒʊæʌʃθðʒŋɑɔɜːˈˌ]/;
+// Single words a model may emit in place of a transcription when it gives
+// up; they are short lowercase tokens the rescue path would otherwise let
+// through.
+const IPA_NON_ANSWER_WORDS = new Set(['unknown', 'none', 'null', 'error', 'sorry']);
 
-function sanitizeIpaText(raw) {
+function sanitizeIpaText(raw, sourceWord) {
   if (typeof raw !== 'string') return null;
   let text = raw.trim();
   if (!text) return null;
@@ -711,11 +717,26 @@ function sanitizeIpaText(raw) {
   text = text.replace(/:/g, 'ː');
   if (!text || text.length > IPA_MAX_LENGTH) return null;
   if (!IPA_ALLOWED_CHARS.test(text)) return null;
-  // Each whitespace-separated token must carry a phonetic glyph: syllable-
-  // spaced IPA ("ˈaɪs ˌkriːm") qualifies token by token, while prose with a
+  // Spaced IPA ("ˈaɪs ˌkriːm") qualifies token by token, while prose with a
   // stray glyph ("pronounced wɜːrd-ish") fails on its plain-ASCII words.
   const tokens = text.split(/\s+/);
-  if (tokens.length > 4 || !tokens.every(tok => IPA_PHONETIC_GLYPHS.test(tok))) return null;
+  if (tokens.length > 4) return null;
+  if (!tokens.every(tok => IPA_PHONETIC_GLYPHS.test(tok))) {
+    // Zero-glyph answers are usually respellings ("ih-FEM-er-ul") or the
+    // word echoed back ("study"), which the badge must never display. The
+    // rescue admits only the Cambridge-style class above: the WHOLE answer
+    // is one short lowercase token with a vowel — no respelling shapes
+    // (capitals, hyphens, dots) — that is not a filler non-answer and does
+    // not equal the queried word. An exact match is rejected on purpose:
+    // for transparent spellings it carries no information the reader does
+    // not already have, and for the rest it is the echo signature.
+    if (tokens.length !== 1) return null;
+    const tok = tokens[0];
+    if (!/^[a-z]{1,8}$/.test(tok) || !/[aeiou]/.test(tok)) return null;
+    if (IPA_NON_ANSWER_WORDS.has(tok)) return null;
+    const echo = String(sourceWord || '').toLowerCase().replace(/[^a-z]/g, '');
+    if (echo && tok === echo) return null;
+  }
   return text;
 }
 
@@ -807,7 +828,7 @@ async function requestPronunciationFromModel(word, model) {
     model: model.modelName,
     messages: [{
       role: 'user',
-      content: `Give the IPA pronunciation of the English word "${word}". Reply with ONLY the IPA transcription in square brackets, like [ɪˈfem.ər.əl]. No explanation, no other text.`
+      content: `Give the IPA pronunciation of the English word "${word}". Use proper IPA symbols (ə, ɪ, ɛ, ʃ, ŋ, ʌ, æ, ɑ, ɔ, ʊ, ˈ, ˌ, ː) rather than plain-letter respellings. Reply with ONLY the IPA transcription in square brackets, like [ɪˈfem.ər.əl]. No explanation, no other text.`
     }],
     stream: false
   };
@@ -836,7 +857,7 @@ async function requestPronunciationFromModel(word, model) {
   const content = data.choices && data.choices[0] && data.choices[0].message
     ? data.choices[0].message.content
     : null;
-  return sanitizeIpaText(content);
+  return sanitizeIpaText(content, word);
 }
 
 async function getPronunciationForWord(word, model) {
