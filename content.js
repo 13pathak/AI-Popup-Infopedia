@@ -302,11 +302,16 @@ const popupStyles = `
     flex-shrink: 0;
   }
   #ai-popup-context:active { cursor: grabbing; }
-  .ai-popup-context-copy { min-width: 0; flex: 1 1 auto; }
+  /* Flex row so the word, the inline pronounce button, and the IPA badge
+     (Issue #37) share the header line; the word keeps its ellipsis via
+     min-width:0 on both the wrapper and the query itself. */
+  .ai-popup-context-copy { min-width: 0; flex: 1 1 auto; display: flex; align-items: center; gap: 7px; }
   .ai-popup-context-label {
     display: none;
   }
   .ai-popup-context-query {
+    flex: 1 1 auto;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -328,6 +333,43 @@ const popupStyles = `
     border-radius: 999px;
     font-size: 10px;
     font-weight: 650;
+  }
+
+  /* DIRECT PRONUNCIATION & IPA BADGE (Issue #37) */
+  .ai-popup-pronounce-btn {
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--popup-text-muted);
+    background: transparent;
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: color 140ms ease, background-color 140ms ease, transform 140ms ease;
+  }
+  .ai-popup-pronounce-btn:hover {
+    color: var(--popup-btn-icon-hover);
+    background: rgba(var(--popup-accent-rgb), 0.14);
+  }
+  .ai-popup-pronounce-btn:active { transform: scale(0.92); }
+  .ai-popup-ipa-badge {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 2px 8px;
+    color: rgba(var(--popup-accent-rgb), 1);
+    background: rgba(var(--popup-accent-rgb), 0.1);
+    border: 1px solid rgba(var(--popup-accent-rgb), 0.22);
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 550;
+    letter-spacing: 0.01em;
   }
 
   /* --- Styles for custom dropdown --- */
@@ -4197,6 +4239,35 @@ function createSelectors(instance, models, prompts, currentModelId, currentPromp
   contextQuery.title = contextQuery.textContent;
   contextCopy.append(contextQuery);
 
+  // Direct pronunciation (Issue #37): an inline speaker next to the word
+  // header that reads ONLY the word (the toolbar's speak button reads the
+  // whole definition), plus an IPA badge that fills in asynchronously from
+  // a cached model side-ask. "Custom Question" is the empty hotkey popup's
+  // sentinel, not a real term — that header gets no pronunciation controls.
+  const headerWord = selectedText === 'Custom Question' ? '' : String(selectedText || '').trim();
+  if (headerWord) {
+    const pronounceButton = document.createElement('button');
+    pronounceButton.type = 'button';
+    pronounceButton.id = 'ai-popup-pronounce-btn';
+    pronounceButton.className = 'ai-popup-pronounce-btn';
+    pronounceButton.innerHTML = iconSvg('volume', 14);
+    pronounceButton.title = `Pronounce "${headerWord}"`;
+    pronounceButton.setAttribute('aria-label', pronounceButton.title);
+    pronounceButton.onclick = (e) => {
+      e.stopPropagation();
+      toggleWordSpeech(instance, headerWord);
+    };
+    contextCopy.append(pronounceButton);
+
+    const ipaBadge = document.createElement('span');
+    ipaBadge.id = 'ai-popup-ipa-badge';
+    ipaBadge.className = 'ai-popup-ipa-badge';
+    ipaBadge.hidden = true;
+    contextCopy.append(ipaBadge);
+
+    requestHeaderPronunciation(instance, headerWord, currentModelId, ipaBadge);
+  }
+
   // Top-right window Pin button (stays pinned on screen)
   // Kept in the title header row (#ai-popup-context) so it reads as part of
   // the header, not a floating control. No DOM move — alignment only.
@@ -5133,6 +5204,15 @@ function toggleSpeech(instance, text) {
       // Cancel any previous speech
       window.speechSynthesis.cancel();
 
+      // Definition speech and word pronunciation share one speechSynthesis
+      // queue (Issue #37); starting this stops that, so restore its header
+      // button here — cancel-fired onend is unreliable in some engines.
+      if (instance.isSpeakingWord) {
+        instance.isSpeakingWord = false;
+        const pronounceBtn = popup.querySelector('#ai-popup-pronounce-btn');
+        if (pronounceBtn) pronounceBtn.innerHTML = iconSvg('volume', 14);
+      }
+
       // Prepare text: Remove markdown for cleaner reading
       const cleanText = text.replace(/\*\*/g, '').replace(/<br>/g, ' ').replace(/\n/g, ' ');
 
@@ -5163,6 +5243,78 @@ function toggleSpeech(instance, text) {
       if (btn) btn.innerHTML = iconSvg('stop', 16); // Stop icon
     });
   }
+}
+
+// --- Direct word pronunciation & IPA badge (Issue #37) ---
+
+// Fetches the IPA transcription for the header word. The badge is pure
+// decoration: a closed popup, a rebuilt header, or any error just leaves it
+// hidden — nothing here can disturb the lookup flow around it.
+function requestHeaderPronunciation(instance, word, modelId, badge) {
+  // Only dictionary-style single terms get a transcription; a phrase's
+  // "phonetic spelling" is not a thing readers use.
+  if (!word || /\s/.test(word) || word.length > 40) return;
+  chrome.runtime.sendMessage({ type: 'getWordPronunciation', word: word, modelId: modelId || undefined }, (response) => {
+    if (chrome.runtime.lastError) return; // worker unavailable — badge stays hidden
+    if (!activePopups.includes(instance)) return; // popup closed meanwhile
+    if (!badge.isConnected) return; // header rebuilt; the new badge owns itself now
+    const ipa = response && typeof response.ipa === 'string' ? response.ipa : null;
+    if (!ipa) return;
+    badge.textContent = ipa;
+    badge.title = `IPA: ${ipa}`;
+    badge.setAttribute('aria-label', `IPA pronunciation: ${ipa}`);
+    badge.hidden = false;
+  });
+}
+
+// Speaks ONLY the looked-up word, using the same voice/rate settings as the
+// definition reader. Shares the page's single speechSynthesis queue with
+// toggleSpeech, so each starter resets the other's button state — see the
+// matching block inside toggleSpeech.
+function toggleWordSpeech(instance, word) {
+  const popup = instance.popup;
+  const btn = popup ? popup.querySelector('#ai-popup-pronounce-btn') : null;
+
+  if (instance.isSpeakingWord) {
+    window.speechSynthesis.cancel();
+    instance.isSpeakingWord = false;
+    if (btn) btn.innerHTML = iconSvg('volume', 14);
+    return;
+  }
+
+  chrome.storage.sync.get(['ttsSettings'], (data) => {
+    if (!activePopups.includes(instance)) return;
+    const settings = data.ttsSettings || { rate: 1.0, voiceURI: null };
+
+    // One queue: stop definition speech and restore its button.
+    if (instance.isSpeaking) {
+      instance.isSpeaking = false;
+      const speakBtn = popup.querySelector('#ai-popup-speak-btn');
+      if (speakBtn) speakBtn.innerHTML = iconSvg('volume', 16);
+    }
+    window.speechSynthesis.cancel();
+
+    const utterance = new SpeechSynthesisUtterance(word);
+    utterance.rate = settings.rate;
+    if (settings.voiceURI) {
+      const voices = window.speechSynthesis.getVoices();
+      const selectedVoice = voices.find(v => v.voiceURI === settings.voiceURI);
+      if (selectedVoice) {
+        utterance.voice = selectedVoice;
+      }
+    }
+
+    const resetButton = () => {
+      instance.isSpeakingWord = false;
+      if (btn) btn.innerHTML = iconSvg('volume', 14);
+    };
+    utterance.onend = resetButton;
+    utterance.onerror = resetButton;
+
+    window.speechSynthesis.speak(utterance);
+    instance.isSpeakingWord = true;
+    if (btn) btn.innerHTML = iconSvg('stop', 14);
+  });
 }
 
 // --- UPDATED adjustPopupPosition ---

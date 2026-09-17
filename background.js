@@ -675,6 +675,190 @@ function setConvoStash(payload) {
   });
 }
 
+// --- Direct pronunciation & IPA (Issue #37) ---
+// A tiny metadata sidecar to the main lookup: the IPA transcription of the
+// header word, displayed next to it in the popup. It runs against the model
+// the popup is already using (falling back to the default model) as ONE
+// non-streaming ask — no fallback chain, no search tools — and any failure
+// resolves to { ipa: null } so the optional badge simply stays hidden.
+
+// Cleans a model answer down to a plausible IPA transcription. Models wrap
+// the notation in slashes or brackets, prefix prose ("The IPA is…"), or
+// answer with a respelling; the badge must never display any of that.
+const IPA_MAX_LENGTH = 40;
+// IPA is letters and combining marks of any script plus a small punctuation
+// set (stress marks, length mark, syllable dots, ties, grouping parens) and
+// the spaces of syllable-spaced styles. Digits, sentence punctuation, or
+// symbols mean the answer is prose.
+const IPA_ALLOWED_CHARS = /^[\p{L}\p{M}\u02C8\u02CC\u02D0\u02D1\u02E5-\u02E9\u203F() .\-']+$/u;
+// Every real English transcription carries phonetic glyphs outside plain
+// ASCII; all-ASCII answers are respellings ("ih-FEM-er-ul") or the word
+// itself, not IPA.
+const IPA_PHONETIC_GLYPHS = /[əɪɛɒʊæʌʃθðʒŋɑɔɜːˈˌ]/;
+
+function sanitizeIpaText(raw) {
+  if (typeof raw !== 'string') return null;
+  let text = raw.trim();
+  if (!text) return null;
+  // Fences and quotation marks some models add around the answer.
+  text = text.replace(/```[a-zA-Z]*\s?/g, '').replace(/["“”‘’]/g, '').trim();
+  // Prefer a slash- or bracket-delimited span when the answer carries one;
+  // bare parenthesization is the same intent.
+  const delimited = text.match(/\/([^/\n]{1,40})\//) || text.match(/\[([^\]\n]{1,40})\]/);
+  if (delimited) text = delimited[1].trim();
+  else if (/^\(.+\)$/.test(text)) text = text.slice(1, -1).trim();
+  // Providers that lack the length mark often type an ASCII colon.
+  text = text.replace(/:/g, 'ː');
+  if (!text || text.length > IPA_MAX_LENGTH) return null;
+  if (!IPA_ALLOWED_CHARS.test(text)) return null;
+  // Each whitespace-separated token must carry a phonetic glyph: syllable-
+  // spaced IPA ("ˈaɪs ˌkriːm") qualifies token by token, while prose with a
+  // stray glyph ("pronounced wɜːrd-ish") fails on its plain-ASCII words.
+  const tokens = text.split(/\s+/);
+  if (tokens.length > 4 || !tokens.every(tok => IPA_PHONETIC_GLYPHS.test(tok))) return null;
+  return text;
+}
+
+// Session-local LRU for transcriptions (same pattern as the lookup cache).
+// A pronunciation cannot go stale, so entries live for the whole session and
+// are keyed by word alone — the model that answered first serves every later
+// popup for that word. On legacy Chrome without storage.session both helpers
+// degrade to no-ops and each popup asks once.
+const PRON_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const PRON_CACHE_CAPACITY = 100;
+const PRON_CACHE_STORAGE_KEY = 'pronunciationCache';
+let pronCacheMem = null;
+
+function pronCacheArea() {
+  return (chrome.storage && chrome.storage.session) ? chrome.storage.session : null;
+}
+
+function hydratePronCache() {
+  const area = pronCacheArea();
+  if (!area) return Promise.resolve();
+  return new Promise((resolve) => {
+    area.get(PRON_CACHE_STORAGE_KEY, (stored) => {
+      const raw = stored && stored[PRON_CACHE_STORAGE_KEY];
+      pronCacheMem = (raw && Array.isArray(raw.order) && raw.entries && typeof raw.entries === 'object')
+        ? { order: raw.order.slice(), entries: raw.entries }
+        : { order: [], entries: {} };
+      resolve();
+    });
+  });
+}
+
+function persistPronCache() {
+  const area = pronCacheArea();
+  if (!area || !pronCacheMem) return;
+  area.set({ [PRON_CACHE_STORAGE_KEY]: { order: pronCacheMem.order, entries: pronCacheMem.entries } }, () => {
+    void chrome.runtime.lastError;
+  });
+}
+
+async function pronCacheGet(key) {
+  if (!pronCacheArea()) return undefined;
+  if (!pronCacheMem) await hydratePronCache();
+  const entry = pronCacheMem.entries[key];
+  if (!entry) return undefined;
+  if (Date.now() - entry.t > PRON_CACHE_TTL_MS) {
+    delete pronCacheMem.entries[key];
+    pronCacheMem.order = pronCacheMem.order.filter(k => k !== key);
+    persistPronCache();
+    return undefined;
+  }
+  // LRU touch: requeue as most recently used.
+  pronCacheMem.order = pronCacheMem.order.filter(k => k !== key);
+  pronCacheMem.order.push(key);
+  persistPronCache();
+  return entry.data;
+}
+
+async function pronCacheSet(key, data) {
+  if (!pronCacheArea()) return;
+  if (!pronCacheMem) await hydratePronCache();
+  if (pronCacheMem.entries[key]) {
+    pronCacheMem.order = pronCacheMem.order.filter(k => k !== key);
+  }
+  pronCacheMem.entries[key] = { t: Date.now(), data: data };
+  pronCacheMem.order.push(key);
+  while (pronCacheMem.order.length > PRON_CACHE_CAPACITY) {
+    delete pronCacheMem.entries[pronCacheMem.order.shift()];
+  }
+  persistPronCache();
+}
+
+// Concurrent popups (and repeated header rebuilds) asking for the same word
+// share one in-flight request instead of billing one ask each.
+const pronunciationInFlight = new Map();
+
+function pronunciationCacheKey(word) {
+  return String(word).trim().toLowerCase();
+}
+
+// One non-streaming ask on the user's own configured model. Search grounding
+// stays off: a dictionary transcription never needs the web, and the tools
+// loop would only add failure modes to a decoration request.
+async function requestPronunciationFromModel(word, model) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (model.apiKey) {
+    headers['Authorization'] = `Bearer ${model.apiKey}`;
+  }
+  const payload = {
+    model: model.modelName,
+    messages: [{
+      role: 'user',
+      content: `Give the IPA pronunciation of the English word "${word}". Reply with ONLY the IPA transcription in square brackets, like [ɪˈfem.ər.əl]. No explanation, no other text.`
+    }],
+    stream: false
+  };
+
+  const response = await fetchWithTimeout(model.endpointUrl, {
+    method: 'POST',
+    headers: headers,
+    body: JSON.stringify(payload)
+  }, 15000, null);
+
+  if (!response.ok) return null;
+  const data = await response.json().catch(() => null);
+  if (!data) return null;
+  // Usage accounting mirrors the lookup path; a provider that omits the
+  // usage object simply skips it — usage tracking must not fail the ask.
+  if (data.usage) {
+    void recordAiUsage([{
+      modelKey: model.id || ('unsaved:' + (model.name || model.modelName)),
+      modelName: model.name || model.modelName,
+      host: hostFromEndpoint(model.endpointUrl),
+      promptName: 'Pronunciation',
+      kind: 'pronunciation',
+      usage: data.usage
+    }]);
+  }
+  const content = data.choices && data.choices[0] && data.choices[0].message
+    ? data.choices[0].message.content
+    : null;
+  return sanitizeIpaText(content);
+}
+
+async function getPronunciationForWord(word, model) {
+  const key = pronunciationCacheKey(word);
+  const cached = await pronCacheGet(key);
+  if (cached && typeof cached.ipa === 'string') return cached.ipa;
+
+  const inFlight = pronunciationInFlight.get(key);
+  if (inFlight) return inFlight;
+
+  const request = requestPronunciationFromModel(word, model).then(async (ipa) => {
+    // Only successes are cached: a transient failure (offline, timeout)
+    // must not hide the badge for the rest of the session.
+    if (ipa) await pronCacheSet(key, { ipa: ipa });
+    return ipa;
+  }).finally(() => {
+    pronunciationInFlight.delete(key);
+  });
+  pronunciationInFlight.set(key, request);
+  return request;
+}
+
 // --- This listener now handles multiple message types ---
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
@@ -1304,6 +1488,38 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       sendResponse({ cancelled: false });
     }
     return;
+  }
+
+  // --- Case 1.5: IPA transcription for the header word (Issue #37) ---
+  // Decoration only: every failure path answers { ipa: null } so the popup's
+  // badge stays hidden instead of surfacing an error next to a definition
+  // that succeeded on its own.
+  if (request.type === "getWordPronunciation") {
+    const word = typeof request.word === 'string' ? request.word.trim() : '';
+    if (!word || /\s/.test(word)) {
+      // IPA is a per-word dictionary affordance; phrases never get one.
+      sendResponse({ ipa: null });
+      return;
+    }
+    getSecretStorageConfig(['models', 'defaultModelId'], { models: [], defaultModelId: null }).then(async (data) => {
+      const models = Array.isArray(data.models) ? data.models : [];
+      // The popup's active model knows the language best; otherwise the
+      // default, otherwise the first configured model.
+      const model = (request.modelId ? models.find(m => m.id === request.modelId) : null)
+        || models.find(m => m.id === data.defaultModelId)
+        || models[0];
+      if (!model || !model.endpointUrl) {
+        sendResponse({ ipa: null });
+        return;
+      }
+      try {
+        sendResponse({ ipa: await getPronunciationForWord(word, model) });
+      } catch (error) {
+        console.error('Pronunciation lookup failed:', error);
+        sendResponse({ ipa: null });
+      }
+    });
+    return true;
   }
 
   // --- Case 2: Save an item to history ---
