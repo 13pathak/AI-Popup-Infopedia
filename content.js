@@ -303,14 +303,16 @@ const popupStyles = `
   }
   #ai-popup-context:active { cursor: grabbing; }
   /* Flex row so the word, the inline pronounce button, and the IPA badge
-     (Issue #37) share the header line; the word keeps its ellipsis via
-     min-width:0 on both the wrapper and the query itself. */
+     (Issue #37) share the header line. The query must NOT grow (flex-grow
+     0): growing would push the pronunciation controls to the far edge of
+     the card for short words. It only shrinks, so the controls hug the
+     word and the word still ellipsizes when space runs out. */
   .ai-popup-context-copy { min-width: 0; flex: 1 1 auto; display: flex; align-items: center; gap: 7px; }
   .ai-popup-context-label {
     display: none;
   }
   .ai-popup-context-query {
-    flex: 1 1 auto;
+    flex: 0 1 auto;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -4242,10 +4244,14 @@ function createSelectors(instance, models, prompts, currentModelId, currentPromp
   // Direct pronunciation (Issue #37): an inline speaker next to the word
   // header that reads ONLY the word (the toolbar's speak button reads the
   // whole definition), plus an IPA badge that fills in asynchronously from
-  // a cached model side-ask. "Custom Question" is the empty hotkey popup's
-  // sentinel, not a real term — that header gets no pronunciation controls.
+  // a cached model side-ask. The cluster is a DICTIONARY affordance, so it
+  // renders only for single-term lookups — the same gate the badge fetch
+  // and the worker's getWordPronunciation apply (no whitespace, ≤40 chars).
+  // Phrase and passage selections keep a clean header: the toolbar's speak
+  // button already reads the full definition. "Custom Question" is the
+  // empty hotkey popup's sentinel, not a real term — no controls there.
   const headerWord = selectedText === 'Custom Question' ? '' : String(selectedText || '').trim();
-  if (headerWord) {
+  if (headerWord && !/\s/.test(headerWord) && headerWord.length <= 40) {
     const pronounceButton = document.createElement('button');
     pronounceButton.type = 'button';
     pronounceButton.id = 'ai-popup-pronounce-btn';

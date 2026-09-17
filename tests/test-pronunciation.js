@@ -244,11 +244,14 @@ async function main() {
     await flush();
     assert(resp && resp.ipa === null, 'non-JSON body answers ipa null', resp);
 
-    // 7. Guard rails: phrases and empty words never reach the network.
+    // 7. Guard rails: phrases, over-long words, and empty words never reach
+    //    the network (same thresholds as the popup's header gate).
     fetchCalls = [];
     fetchImpl = () => Promise.resolve(okChatResponse('[ɪˈfem.ər.əl]'));
     resp = await askPronunciation({ type: 'getWordPronunciation', word: 'artificial intelligence' });
     assert(resp && resp.ipa === null, 'multi-word phrase answers ipa null', resp);
+    resp = await askPronunciation({ type: 'getWordPronunciation', word: 'a'.repeat(41) });
+    assert(resp && resp.ipa === null, 'over-long single word answers ipa null', resp);
     resp = await askPronunciation({ type: 'getWordPronunciation', word: '   ' });
     assert(resp && resp.ipa === null, 'blank word answers ipa null', resp);
     resp = await askPronunciation({ type: 'getWordPronunciation' });

@@ -1496,8 +1496,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // that succeeded on its own.
   if (request.type === "getWordPronunciation") {
     const word = typeof request.word === 'string' ? request.word.trim() : '';
-    if (!word || /\s/.test(word)) {
-      // IPA is a per-word dictionary affordance; phrases never get one.
+    if (!word || /\s/.test(word) || word.length > 40) {
+      // IPA is a per-word dictionary affordance; phrases and over-long
+      // "words" never get one. Same thresholds as the popup's header gate.
       sendResponse({ ipa: null });
       return;
     }
