@@ -812,8 +812,17 @@ async function pronCacheSet(key, data) {
 // share one in-flight request instead of billing one ask each.
 const pronunciationInFlight = new Map();
 
+// Selections often drag in adjacent punctuation ("ephemeral.", "(word)").
+// The pronunciation ask and its cache key must use the bare term, or
+// "ephemeral." and "ephemeral" bill as two words. Edge punctuation and
+// symbols go; letters, digits, and internal marks stay — "42nd" and "e.g."
+// survive intact.
+function normalizePronunciationWord(word) {
+  return String(word).trim().replace(/^[\p{P}\p{S}]+|[\p{P}\p{S}]+$/gu, '');
+}
+
 function pronunciationCacheKey(word) {
-  return String(word).trim().toLowerCase();
+  return normalizePronunciationWord(word).toLowerCase();
 }
 
 // One non-streaming ask on the user's own configured model. Search grounding
@@ -1516,10 +1525,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // badge stays hidden instead of surfacing an error next to a definition
   // that succeeded on its own.
   if (request.type === "getWordPronunciation") {
-    const word = typeof request.word === 'string' ? request.word.trim() : '';
+    const word = typeof request.word === 'string' ? normalizePronunciationWord(request.word) : '';
     if (!word || /\s/.test(word) || word.length > 40) {
-      // IPA is a per-word dictionary affordance; phrases and over-long
-      // "words" never get one. Same thresholds as the popup's header gate.
+      // IPA is a per-word dictionary affordance; phrases, over-long "words",
+      // and punctuation-only selections never get one. Same thresholds as
+      // the popup's header gate.
       sendResponse({ ipa: null });
       return;
     }

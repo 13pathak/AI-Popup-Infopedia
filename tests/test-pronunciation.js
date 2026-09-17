@@ -190,6 +190,16 @@ async function main() {
     assert(s('its ipa is bed', 'bed') === null, 'multi-token zero-glyph prose is rejected');
     assert(s('ih-fem-er-ul', 'ephemeral') === null, 'lowercase respelling shape is still rejected');
 
+    // Edge-punctuation normalization: the term, not the selection noise,
+    // reaches the prompt and the cache key.
+    const n = context.normalizePronunciationWord;
+    assert(n('ephemeral.') === 'ephemeral' && n('ephemeral,') === 'ephemeral', 'trailing punctuation is stripped');
+    assert(n('(ephemeral)') === 'ephemeral' && n('"ephemeral"') === 'ephemeral', 'wrapping punctuation is stripped');
+    assert(n('  (ephemeral). ') === 'ephemeral', 'whitespace and punctuation strip together');
+    assert(n('42nd') === '42nd', 'leading digits are kept (unlike a letter-only strip)');
+    assert(n('e.g.') === 'e.g', 'internal punctuation is kept, only edge punctuation goes');
+    assert(n('...') === '' && n('—') === '', 'punctuation-only selections normalize to nothing');
+
     // ---------- getWordPronunciation handler ----------
     syncBacking.models = [
         { id: 'm1', name: 'Default Model', endpointUrl: 'https://api.default/v1/chat/completions', modelName: 'default-1', apiKey: 'sk-default' },
@@ -257,14 +267,17 @@ async function main() {
     await flush();
     assert(resp && resp.ipa === null, 'non-JSON body answers ipa null', resp);
 
-    // 7. Guard rails: phrases, over-long words, and empty words never reach
-    //    the network (same thresholds as the popup's header gate).
+    // 7. Guard rails: phrases, over-long words, punctuation-only selections,
+    //    and empty words never reach the network (same thresholds as the
+    //    popup's header gate).
     fetchCalls = [];
     fetchImpl = () => Promise.resolve(okChatResponse('[ɪˈfem.ər.əl]'));
     resp = await askPronunciation({ type: 'getWordPronunciation', word: 'artificial intelligence' });
     assert(resp && resp.ipa === null, 'multi-word phrase answers ipa null', resp);
     resp = await askPronunciation({ type: 'getWordPronunciation', word: 'a'.repeat(41) });
     assert(resp && resp.ipa === null, 'over-long single word answers ipa null', resp);
+    resp = await askPronunciation({ type: 'getWordPronunciation', word: '...' });
+    assert(resp && resp.ipa === null, 'punctuation-only selection answers ipa null', resp);
     resp = await askPronunciation({ type: 'getWordPronunciation', word: '   ' });
     assert(resp && resp.ipa === null, 'blank word answers ipa null', resp);
     resp = await askPronunciation({ type: 'getWordPronunciation' });
@@ -306,6 +319,22 @@ async function main() {
     resp = await askPronunciation({ type: 'getWordPronunciation', word: 'bed', modelId: 'm1' });
     await flush();
     assert(resp && resp.ipa === null, 'exact echo answer stays null through the handler', resp);
+
+    // 11. Punctuation variants of one word share a single cache entry: the
+    // first ask bills once and every later variant is a cache hit.
+    fetchCalls = [];
+    fetchImpl = () => Promise.resolve(okChatResponse('[ˌserənˈdɪpəti]'));
+    resp = await askPronunciation({ type: 'getWordPronunciation', word: 'serendipity.', modelId: 'm1' });
+    await flush();
+    assert(resp && resp.ipa === 'ˌserənˈdɪpəti', 'punctuated selection answers normally', resp);
+    const askedWord = JSON.parse(fetchCalls[0][1].body).messages[0].content;
+    assert(askedWord.includes('"serendipity"') && !askedWord.includes('"serendipity."'), 'prompt receives the bare term, period excluded', askedWord);
+    for (const variant of ['serendipity', '(Serendipity)', '"serendipity",']) {
+      resp = await askPronunciation({ type: 'getWordPronunciation', word: variant, modelId: 'm1' });
+      await flush();
+      assert(resp && resp.ipa === 'ˌserənˈdɪpəti', `variant "${variant}" is a cache hit`, resp);
+    }
+    assert(fetchCalls.length === 1, 'all punctuation variants shared one network ask', fetchCalls.length);
 
     console.log(process.exitCode ? 'PRONUNCIATION TEST FAILED' : 'PRONUNCIATION TEST PASSED');
 }

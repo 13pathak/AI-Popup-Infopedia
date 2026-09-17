@@ -4246,11 +4246,13 @@ function createSelectors(instance, models, prompts, currentModelId, currentPromp
   // whole definition), plus an IPA badge that fills in asynchronously from
   // a cached model side-ask. The cluster is a DICTIONARY affordance, so it
   // renders only for single-term lookups — the same gate the badge fetch
-  // and the worker's getWordPronunciation apply (no whitespace, ≤40 chars).
-  // Phrase and passage selections keep a clean header: the toolbar's speak
-  // button already reads the full definition. "Custom Question" is the
-  // empty hotkey popup's sentinel, not a real term — no controls there.
-  const headerWord = selectedText === 'Custom Question' ? '' : String(selectedText || '').trim();
+  // and the worker's getWordPronunciation apply (no whitespace, ≤40 chars,
+  // after trimming adjacent punctuation so "ephemeral." and "ephemeral"
+  // share one term). Phrase and passage selections keep a clean header:
+  // the toolbar's speak button already reads the full definition.
+  // "Custom Question" is the empty hotkey popup's sentinel, not a real
+  // term — no controls there.
+  const headerWord = selectedText === 'Custom Question' ? '' : normalizePronunciationTerm(selectedText);
   if (headerWord && !/\s/.test(headerWord) && headerWord.length <= 40) {
     const pronounceButton = document.createElement('button');
     pronounceButton.type = 'button';
@@ -5252,6 +5254,16 @@ function toggleSpeech(instance, text) {
 }
 
 // --- Direct word pronunciation & IPA badge (Issue #37) ---
+
+// Trims a selection down to the term itself: adjacent punctuation
+// ("ephemeral.", "(word)") must not reach the speaker, the IPA ask, or the
+// worker's cache key ("ephemeral." and "ephemeral" would bill as two
+// words). Edge punctuation and symbols go; letters, digits, and internal
+// marks stay — "42nd" and "e.g." survive intact. Must match
+// normalizePronunciationWord in background.js.
+function normalizePronunciationTerm(text) {
+  return String(text || '').trim().replace(/^[\p{P}\p{S}]+|[\p{P}\p{S}]+$/gu, '');
+}
 
 // Fetches the IPA transcription for the header word. The badge is pure
 // decoration: a closed popup, a rebuilt header, or any error just leaves it
