@@ -9,13 +9,14 @@ const content = read('content.js');
 const background = read('background.js');
 const session = {};
 let submissions = 0;
+const input = value => ({ value, disabled: false, focus() { this.focused = true; }, setSelectionRange(start, end) { this.selectionStart = start; this.selectionEnd = end; } });
 const context = vm.createContext({
   chrome: { runtime: {}, storage: { session: {
     set(values, callback) { Object.assign(session, JSON.parse(JSON.stringify(values))); callback(); },
     get(key, callback) { callback(JSON.parse(JSON.stringify(session))); }
   } } },
   COMPARE_MODEL_CAP: 4,
-  createFollowupInput(instance) { instance.input = { value: '', disabled: true }; },
+  createFollowupInput(instance) { instance.input = input(''); },
   renderCompareView() {},
   updateCompareFollowupState(instance) { instance.input.disabled = false; },
   dispatchFollowupText() { submissions++; }
@@ -25,7 +26,7 @@ vm.runInContext(background.slice(background.indexOf('const CONVO_STASH_KEY'), ba
 
 function popup(value, withInput = true) {
   const instance = {
-    input: withInput ? { value, disabled: false } : null,
+    input: withInput ? input(value) : null,
     compareWord: 'Cell',
     compareIndex: 0,
     compareSlots: [{ modelId: 'model', modelName: 'Model', started: true, messages: [
@@ -55,6 +56,9 @@ async function run() {
   assert.equal(context.restoreConversationFromStash(reopened, recovered, models), true);
   assert.equal(reopened.input.value, draft, 'draft survives the session-storage round trip');
   assert.equal(reopened.input.disabled, false);
+  assert.equal(reopened.input.focused, true);
+  assert.equal(reopened.input.selectionStart, draft.length);
+  assert.equal(reopened.input.selectionEnd, draft.length);
   assert.equal(submissions, 0, 'restoring must not submit the draft');
   assert.equal(reopened.compareSlots[0].messages.length, 2, 'draft is not a conversation turn');
 
@@ -73,7 +77,24 @@ async function run() {
   }
   const empty = popup('No answered conversation');
   empty.compareSlots = [];
-  assert.equal(context.buildConversationStash(empty), null, 'empty popups do not replace recoverable conversations');
+  const initialDraft = context.buildConversationStash(empty);
+  assert.equal(initialDraft.followupDraft, 'No answered conversation', 'initial drafts survive without an assistant answer');
+  assert.equal(initialDraft.slots.length, 0);
+  const initialTarget = popup('', false);
+  initialTarget.compareSlots = [];
+  assert.equal(context.restoreConversationFromStash(initialTarget, initialDraft, []), true, 'drafts restore even with no configured models');
+  assert.equal(initialTarget.input.value, initialDraft.followupDraft);
+  empty.input.value = '';
+  assert.equal(context.buildConversationStash(empty), null, 'truly empty popups do not replace recovery');
+  empty.input.value = '   ';
+  assert.equal(context.buildConversationStash(empty), null, 'whitespace alone is not an unfinished question');
+  // The clear must run after a pending save; reopening waits for both.
+  const saving = context.setConvoStash(stash);
+  const clearing = context.clearConvoDraft();
+  const afterClear = await context.getConvoStash();
+  await Promise.all([saving, clearing]);
+  assert.equal(afterClear.followupDraft, '');
+  assert.equal(afterClear.slots[0].messages.length, 2, 'clearing retains conversation recovery');
   console.log('Follow-up draft preservation and restoration tests passed.');
 }
 run().catch(error => { console.error(error); process.exitCode = 1; });

@@ -209,6 +209,11 @@ async function run() {
     const meaningsBrowserProc = spawn(process.execPath, [path.join(__dirname, 'e2e-saved-meanings.js')], { stdio: 'inherit' });
     const meaningsBrowserCode = await new Promise(res => meaningsBrowserProc.on('exit', code => res(code ?? 0)));
     if (meaningsBrowserCode !== 0) exitCode = meaningsBrowserCode;
+
+    console.log('Testing automatic draft recovery in the popup...');
+    const draftBrowserProc = spawn(process.execPath, [path.join(__dirname, 'e2e-followup-draft.js')], { stdio: 'inherit' });
+    const draftBrowserCode = await new Promise(res => draftBrowserProc.on('exit', code => res(code ?? 0)));
+    if (draftBrowserCode !== 0) exitCode = draftBrowserCode;
   } catch (err) {
     console.error('Test runner failed:', err.message);
     exitCode = 1;

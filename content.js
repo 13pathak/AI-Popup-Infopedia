@@ -2062,38 +2062,47 @@ function initiateEmptyPopupSequence() {
       // follow-up box (with its mic) is needed up front.
       createFollowupInput(popupInstance, "Custom Question");
 
-      // One-tap resume for the last dismissed conversation (Issue #26):
-      // shown only when there is actually something to restore. The
-      // greeting popup itself stashes nothing (no model ever answered), so
-      // making way for the restore can never overwrite the saved thread.
-      chrome.runtime.sendMessage({ type: 'getLastConversation' }, (resp) => {
-        if (chrome.runtime.lastError || !resp || !resp.payload) return;
-        if (!activePopups.includes(popupInstance)) return;
-        const contentEl = popupInstance.popup.querySelector('#ai-popup-content');
-        if (!contentEl) return;
-        const restoreBtn = document.createElement('button');
-        restoreBtn.type = 'button';
-        restoreBtn.className = 'ai-popup-button ai-popup-restore-btn';
-        restoreBtn.innerHTML = iconSvg('refresh', 13) + '<span>Open last conversation</span>';
-        restoreBtn.title = 'Reopen the conversation that was closed';
-        restoreBtn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          restoreBtn.disabled = true;
-          removePopupInstance(popupInstance);
-          reopenLastConversationPopup();
-        });
-        contentEl.appendChild(restoreBtn);
-      });
     } else {
-      // No models: keep the greeting and the action row; a typed question
-      // lands on the setup error instead of being silently swallowed.
-      const defaultModelName = 'Unknown Model';
-      createActionButtons(popupInstance, "Custom Question", "Conversation started from hotkey.", defaultModelName, "Default");
+      // Keep drafting available even before a model has been configured.
+      createActionButtons(popupInstance, "Custom Question", "Conversation started from hotkey.", 'Unknown Model', "Default");
     }
+
+    // An unfinished question resumes automatically. Completed threads
+    // without a draft retain the explicit recovery action.
+    chrome.runtime.sendMessage({ type: 'getLastConversation' }, (resp) => {
+      if (chrome.runtime.lastError || !resp || !resp.payload) return;
+      if (!activePopups.includes(popupInstance)) return;
+      const input = popupInstance.popup.querySelector('#ai-popup-followup-input');
+      const stash = resp.payload;
+      if (!popupInstance.followupDraftEdited && input && !input.value &&
+          typeof stash.followupDraft === 'string' && stash.followupDraft.trim()) {
+        if (restoreConversationFromStash(popupInstance, stash, models)) {
+          if (models.length) createSelectors(popupInstance, models, customPrompts, defaultModelId, null, stash.word || 'Custom Question', defaultPromptId);
+          adjustPopupPosition(popupInstance, null);
+          return;
+        }
+      }
+      if (!Array.isArray(stash.slots) || !stash.slots.length) return;
+      const contentEl = popupInstance.popup.querySelector('#ai-popup-content');
+      if (!contentEl) return;
+      const restoreBtn = document.createElement('button');
+      restoreBtn.type = 'button';
+      restoreBtn.className = 'ai-popup-button ai-popup-restore-btn';
+      restoreBtn.innerHTML = iconSvg('refresh', 13) + '<span>Open last conversation</span>';
+      restoreBtn.title = 'Reopen the conversation that was closed';
+      restoreBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        restoreBtn.disabled = true;
+        removePopupInstance(popupInstance);
+        reopenLastConversationPopup();
+      });
+      contentEl.appendChild(restoreBtn);
+    });
 
     adjustPopupPosition(popupInstance, null);
 
     setTimeout(() => {
+      if (!activePopups.includes(popupInstance)) return;
       const input = popupInstance.popup.querySelector('#ai-popup-followup-input');
       if (input) input.focus();
     }, 100);
@@ -3571,6 +3580,7 @@ function appendFollowupChips(instance, body, slot) {
 function dispatchFollowupText(instance, text) {
   const clean = String(text || '').trim();
   if (!clean || !instance || !instance.popup) return;
+  clearSavedFollowupDraft(instance);
   const input = instance.popup.querySelector('#ai-popup-followup-input');
   const send = instance.popup.querySelector('.ai-popup-followup-send');
   if (input) {
@@ -4960,6 +4970,10 @@ function createFollowupInput(instance, word) {
   input.type = 'text';
   input.id = 'ai-popup-followup-input';
   input.placeholder = 'Ask a follow-up question...';
+  input.addEventListener('input', () => {
+    instance.followupDraftEdited = true;
+    if (!input.value.trim()) clearSavedFollowupDraft(instance);
+  });
 
   const sendBtn = document.createElement('button');
   sendBtn.type = 'button';
@@ -5245,8 +5259,26 @@ function stopSpeechSafely() {
 // with the browser, so this is a resume convenience, not persistence.
 const CONVO_STASH_MAX_MESSAGES_PER_SLOT = 40;
 
+function clearSavedFollowupDraft(instance) {
+  // Invalidate a slow hotkey recovery response after typing/submission.
+  instance.followupDraftEdited = true;
+  try {
+    chrome.runtime.sendMessage({ type: 'clearConversationDraft' }, () => { void chrome.runtime.lastError; });
+  } catch (_) { /* Extension may have been reloaded while the popup was open. */ }
+}
+
+function restoreFollowupDraft(instance, draft) {
+  const input = instance.popup.querySelector('#ai-popup-followup-input');
+  if (!input) return;
+  input.value = typeof draft === 'string' ? draft : '';
+  if (input.value) {
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+  }
+}
+
 // Snapshot of a closing popup's threads, or null when there is nothing worth
-// resuming (no model ever answered). Volatile state (thinking/streaming
+// resuming (no answers or unfinished draft). Volatile state (thinking/streaming
 // placeholders) is dropped; each model keeps its last N turns only.
 function buildConversationStash(instance) {
   const slots = instance.compareSlots || [];
@@ -5273,8 +5305,8 @@ function buildConversationStash(instance) {
       messages: msgs
     });
   });
-  if (stashed.length === 0) return null;
   const followupInput = instance.popup && instance.popup.querySelector('#ai-popup-followup-input');
+  if (stashed.length === 0 && !(followupInput && followupInput.value.trim())) return null;
   return {
     savedAt: Date.now(),
     word: instance.compareWord || null,
@@ -5303,12 +5335,11 @@ function stashConversationFromPopup(instance) {
   }
 }
 
-// Rebuilds a popup from a stashed conversation. Only models that still exist
-// (and actually answered back then) come back; returns true when at least one
-// did. Restored threads open scrolled to the top and behave like any compare
-// conversation — follow-ups append, Save/PDF work per card.
+// Rebuilds completed threads for models that still exist, or just the draft
+// when no answered thread remains. Draft-only recovery also works before a
+// model is configured. Restored threads behave like any compare conversation.
 function restoreConversationFromStash(instance, stash, models) {
-  if (!stash || !Array.isArray(stash.slots) || !models || models.length === 0) return false;
+  if (!stash || !Array.isArray(stash.slots) || !Array.isArray(models)) return false;
   const byId = new Map(models.map(m => [m.id, m]));
   const slots = [];
   const restoredModelIds = new Set();
@@ -5333,7 +5364,17 @@ function restoreConversationFromStash(instance, stash, models) {
       bodyPinned: false
     });
   });
-  if (slots.length === 0) return false;
+  if (slots.length === 0) {
+    if (typeof stash.followupDraft !== 'string' || !stash.followupDraft.trim()) return false;
+    instance.models = models;
+    instance.isLoading = false;
+    if (!instance.popup.querySelector('#ai-popup-followup-container')) createFollowupInput(instance, 'Custom Question');
+    const content = instance.popup.querySelector('#ai-popup-content');
+    if (content) content.textContent = 'Continue your unfinished question below.';
+    updateCompareFollowupState(instance, false);
+    restoreFollowupDraft(instance, stash.followupDraft);
+    return true;
+  }
 
   // Add back remaining configured models (up to COMPARE_MODEL_CAP) as idle slots
   // so the compare navigation slider (< • • • 1/N >) and multi-model cards are preserved.
@@ -5366,12 +5407,9 @@ function restoreConversationFromStash(instance, stash, models) {
   if (!instance.popup.querySelector('#ai-popup-followup-container')) {
     createFollowupInput(instance, instance.compareWord && instance.compareWord !== 'Custom Question' ? instance.compareWord : 'Custom Question');
   }
-  const followupInput = instance.popup.querySelector('#ai-popup-followup-input');
-  if (followupInput) {
-    followupInput.value = typeof stash.followupDraft === 'string' ? stash.followupDraft : '';
-  }
   renderCompareView(instance);
   updateCompareFollowupState(instance, false);
+  restoreFollowupDraft(instance, stash.followupDraft);
   return true;
 }
 

@@ -648,12 +648,13 @@ function buildLookupCacheKey(word, modelId, promptTemplate, cleanContext) {
 // accidental dismissals, not persistence. On legacy Chrome without
 // storage.session both handlers degrade to no-ops.
 const CONVO_STASH_KEY = 'lastConversationStash';
+let convoStashQueue = Promise.resolve();
 
 function convoStashArea() {
   return (chrome.storage && chrome.storage.session) ? chrome.storage.session : null;
 }
 
-function getConvoStash() {
+function readConvoStash() {
   const area = convoStashArea();
   if (!area) return Promise.resolve(null);
   return new Promise((resolve) => {
@@ -664,7 +665,7 @@ function getConvoStash() {
   });
 }
 
-function setConvoStash(payload) {
+function writeConvoStash(payload) {
   const area = convoStashArea();
   if (!area) return Promise.resolve(false);
   return new Promise((resolve) => {
@@ -673,6 +674,25 @@ function setConvoStash(payload) {
       resolve(!failed);
     });
   });
+}
+
+// Serialize writes and draft clearing; an immediate reopen must see both.
+function getConvoStash() {
+  return convoStashQueue.then(() => readConvoStash());
+}
+
+function setConvoStash(payload) {
+  convoStashQueue = convoStashQueue.then(() => writeConvoStash(payload));
+  return convoStashQueue;
+}
+
+function clearConvoDraft() {
+  convoStashQueue = convoStashQueue.then(async () => {
+    const stash = await readConvoStash();
+    if (!stash) return true;
+    return writeConvoStash({ ...stash, followupDraft: '' });
+  });
+  return convoStashQueue;
 }
 
 // --- Direct pronunciation & IPA (Issue #37) ---
@@ -1853,6 +1873,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       sendResponse({ payload: payload });
     });
     return true; // async
+  }
+
+  if (request.type === 'clearConversationDraft') {
+    clearConvoDraft().then(ok => sendResponse({ ok }));
+    return true;
   }
 
   // --- Issue #25: refresh the due-cards toolbar badge on request ---
