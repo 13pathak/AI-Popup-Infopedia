@@ -18,6 +18,9 @@ chrome.storage.sync.get({ uiTheme: 'dark' }, (data) => {
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && (changes.history || changes.wordLists)) {
+    activePopups.forEach(refreshSavedHistory);
+  }
   if (area === 'sync' && changes.uiTheme) {
     currentUiTheme = changes.uiTheme.newValue || 'dark';
     updateActivePopupsTheme();
@@ -1323,6 +1326,14 @@ const popupStyles = `
     background: rgba(var(--popup-accent-rgb), 0.22);
     border-color: rgba(var(--popup-accent-rgb), 0.55);
   }
+  .ai-saved-history { clear: both; margin-top: 10px; font-size: 12px; color: var(--popup-text-muted); }
+  .ai-saved-history summary { cursor: pointer; color: var(--popup-text-muted); }
+  .ai-saved-entry { margin-top: 8px; padding: 8px; border: 1px solid var(--popup-border); border-radius: 8px; }
+  .ai-saved-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .ai-saved-actions button { font: inherit; color: var(--popup-text); background: rgba(var(--popup-accent-rgb), .1); border: 1px solid var(--popup-border); border-radius: 6px; padding: 5px 8px; cursor: pointer; }
+  .ai-saved-actions button:disabled { opacity: .5; cursor: default; }
+  .ai-saved-history summary:focus-visible, .ai-saved-actions button:focus-visible { outline: 2px solid rgba(var(--popup-accent-rgb), 1); outline-offset: 2px; }
+  .ai-saved-preview { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow-y: auto; margin-top: 8px; color: var(--popup-text); }
   .ai-turn-save-btn.is-saved {
     background: rgba(16, 185, 129, 0.15);
     border-color: #10b981;
@@ -3651,6 +3662,8 @@ function renderCompareView(instance) {
   const contentWrapper = popup.querySelector('#ai-popup-content');
   if (!contentWrapper || !instance.compareSlots) return;
   if (instance.compareDragActive) return; // the slider owns the pixels mid-drag
+  instance.savedHistoryRenderers = [];
+  if (!instance.savedHistoryData && !instance.savedHistoryLoading) refreshSavedHistory(instance);
 
   if (!contentWrapper.classList.contains('ai-compare-mode')) {
     contentWrapper.classList.add('ai-compare-mode');
@@ -3851,21 +3864,7 @@ function buildCompareCard(instance, card, slot) {
   }
 }
 
-// Saves a specific conversation turn to history under the currently selected list.
-function saveTurnToHistory(instance, slot, msg, saveBtn) {
-  if (!activePopups.includes(instance)) return;
-  if (msg.isSaved) {
-    showPopupToast(instance, 'Already saved to list');
-    return;
-  }
-
-  const listSelector = instance.listSelector;
-  const listId = listSelector ? listSelector.value : null;
-  if (!listId) {
-    showPopupToast(instance, 'Please select or create a list first', 'error');
-    return;
-  }
-
+function savedWordForTurn(instance, slot, msg) {
   // Determine the word / query title for this specific turn:
   const msgIndex = slot.messages.indexOf(msg);
   let precedingUserMsg = null;
@@ -3891,6 +3890,126 @@ function saveTurnToHistory(instance, slot, msg, saveBtn) {
   } else {
     wordToSave = baseWord ? `${baseWord}: ${currentQuery || 'Follow-up'}` : (currentQuery || 'Follow-up');
   }
+  return wordToSave;
+}
+
+function normalizeSavedWord(word) {
+  return typeof word === 'string' ? word.normalize('NFKC').trim().replace(/\s+/g, ' ').toLowerCase() : '';
+}
+
+function savedRelativeTime(timestamp, now = Date.now()) {
+  const saved = Date.parse(timestamp);
+  if (!Number.isFinite(saved)) return 'date unknown';
+  const seconds = Math.max(0, Math.floor((now - saved) / 1000));
+  if (seconds < 60) return 'just now';
+  for (const [unit, size] of [['year', 31536000], ['month', 2592000], ['day', 86400], ['hour', 3600], ['minute', 60]]) {
+    const count = Math.floor(seconds / size);
+    if (count) return `${count} ${unit}${count === 1 ? '' : 's'} ago`;
+  }
+}
+
+function refreshSavedHistory(instance) {
+  if (!activePopups.includes(instance)) return;
+  const generation = (instance.savedHistoryGeneration || 0) + 1;
+  instance.savedHistoryGeneration = generation;
+  instance.savedHistoryLoading = true;
+  chrome.storage.local.get({ history: [], wordLists: [] }, data => {
+    if (!activePopups.includes(instance) || generation !== instance.savedHistoryGeneration) return;
+    instance.savedHistoryLoading = false;
+    if (chrome.runtime.lastError) return;
+    instance.savedHistoryData = data;
+    (instance.savedHistoryRenderers || []).forEach(render => render());
+  });
+}
+
+function savedMatchesForTurn(instance, slot, msg) {
+  const data = instance.savedHistoryData || {};
+  const word = normalizeSavedWord(savedWordForTurn(instance, slot, msg));
+  return (Array.isArray(data.history) ? data.history : []).filter(item => item && word && normalizeSavedWord(item.word) === word);
+}
+
+function appendSavedHistory(instance, turn, slot, msg) {
+  const host = document.createElement('div');
+  host.className = 'ai-saved-history';
+  turn.appendChild(host);
+  const render = () => {
+    host.replaceChildren();
+    const matches = savedMatchesForTurn(instance, slot, msg);
+    if (!matches.length) return;
+    const lists = instance.savedHistoryData.wordLists || [];
+    const label = item => `Saved in ${(lists.find(list => list.id === item.listId) || {}).name || 'Unlisted'} · ${savedRelativeTime(item.timestamp)}`;
+    const details = document.createElement('details');
+    details.open = !!msg.savedHistoryOpen;
+    details.addEventListener('toggle', () => { msg.savedHistoryOpen = details.open; });
+    const summary = document.createElement('summary');
+    summary.textContent = label(matches[0]) + (matches.length > 1 ? ` · ${matches.length} meanings` : '');
+    details.appendChild(summary);
+    matches.forEach(item => {
+      const entry = document.createElement('div');
+      entry.className = 'ai-saved-entry';
+      const caption = document.createElement('div');
+      caption.textContent = label(item);
+      entry.appendChild(caption);
+      const actions = document.createElement('div');
+      actions.className = 'ai-saved-actions';
+      const preview = document.createElement('div');
+      preview.className = 'ai-saved-preview';
+      const key = item.id || JSON.stringify([item.timestamp, item.word, item.listId, item.definition]);
+      preview.hidden = msg.savedPreviewKey !== key;
+      // Stored text is untrusted. Never interpret definitions or notes as HTML.
+      preview.textContent = `${item.definition || '(No saved definition)'}\n\nNotes: ${item.notes || item.note || 'None'}\n\nSentence: ${(item.context && item.context.sentence) || 'Not captured'}`;
+      const button = (text, handler) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.textContent = text;
+        btn.addEventListener('click', event => { event.stopPropagation(); handler(btn); });
+        actions.appendChild(btn);
+        return btn;
+      };
+      const view = button('View previous', () => {
+        preview.hidden = !preview.hidden;
+        msg.savedPreviewKey = preview.hidden ? null : key;
+        view.setAttribute('aria-expanded', String(!preview.hidden));
+      });
+      view.setAttribute('aria-expanded', String(!preview.hidden));
+      const update = button('Update', () => saveTurnToHistory(instance, slot, msg, update, { previousItem: item }));
+      update.disabled = !!msg.isSaved || !!msg.historyWritePending;
+      const another = button('Save another meaning', () => saveTurnToHistory(instance, slot, msg, another, { allowDuplicate: true }));
+      another.disabled = !!msg.isSaved || !!msg.historyWritePending;
+      another.title = 'Save a separate entry in the list selected in the toolbar';
+      entry.append(actions, preview);
+      details.appendChild(entry);
+    });
+    const hint = document.createElement('div');
+    hint.textContent = 'Update keeps the original list. For another meaning, choose its list in the toolbar.';
+    details.appendChild(hint);
+    host.appendChild(details);
+  };
+  (instance.savedHistoryRenderers ||= []).push(render);
+  render();
+}
+
+// Saves a specific conversation turn, disclosing existing meanings before
+// allowing a duplicate. The worker repeats that check inside its write queue.
+function saveTurnToHistory(instance, slot, msg, saveBtn, options = {}) {
+  if (!activePopups.includes(instance) || msg.historyWritePending) return;
+  if (msg.isSaved) {
+    showPopupToast(instance, 'Already saved to list');
+    return;
+  }
+  if (!options.previousItem && !options.allowDuplicate && savedMatchesForTurn(instance, slot, msg).length) {
+    msg.savedHistoryOpen = true;
+    (instance.savedHistoryRenderers || []).forEach(render => render());
+    showPopupToast(instance, 'Already saved — view, update, or save another meaning');
+    return;
+  }
+  const listSelector = instance.listSelector;
+  const listId = options.previousItem ? options.previousItem.listId : (listSelector && listSelector.value);
+  if (!options.previousItem && (!listId || listId === '__create_new__')) {
+    showPopupToast(instance, 'Please select or create a list first', 'error');
+    return;
+  }
+  const wordToSave = savedWordForTurn(instance, slot, msg);
 
   const { sourceUrl, sourceTitle } = collectSourceMetadata();
   const modelName = slot.answerModelName || slot.modelName || 'AI';
@@ -3898,9 +4017,14 @@ function saveTurnToHistory(instance, slot, msg, saveBtn) {
   const citations = msg.citations || [];
 
   if (saveBtn) saveBtn.disabled = true;
+  msg.historyWritePending = true;
 
   chrome.runtime.sendMessage({
-    type: 'saveToHistory',
+    type: options.previousItem ? 'updateSavedMeaning' : 'saveToHistory',
+    previousItem: options.previousItem,
+    recognizeExisting: true,
+    allowDuplicate: !!options.allowDuplicate,
+    context: instance.implicitContext || null,
     word: wordToSave,
     definition: msg.content,
     listId: listId,
@@ -3910,13 +4034,20 @@ function saveTurnToHistory(instance, slot, msg, saveBtn) {
     sourceTitle: sourceTitle,
     citations: citations
   }, (saveResponse) => {
+    msg.historyWritePending = false;
     if (!activePopups.includes(instance)) return;
-    if (chrome.runtime.lastError || (saveResponse && saveResponse.status === 'error')) {
+    if (chrome.runtime.lastError || !saveResponse || saveResponse.status === 'error') {
       if (saveBtn) saveBtn.disabled = false;
-      showPopupToast(instance, 'Failed to save', 'error');
+      showPopupToast(instance, (saveResponse && saveResponse.error) || 'Failed to save', 'error');
+      refreshSavedHistory(instance);
+    } else if (saveResponse.status === 'duplicate') {
+      if (saveBtn) saveBtn.disabled = false;
+      msg.savedHistoryOpen = true;
+      refreshSavedHistory(instance);
+      showPopupToast(instance, 'Already saved — view, update, or save another meaning');
     } else {
       msg.isSaved = true;
-      if (saveBtn) {
+      if (saveBtn && saveBtn.classList.contains('ai-turn-save-btn')) {
         saveBtn.disabled = false;
         saveBtn.classList.add('is-saved');
         saveBtn.title = 'Saved to list';
@@ -3924,7 +4055,9 @@ function saveTurnToHistory(instance, slot, msg, saveBtn) {
       }
       const valEl = listSelector && listSelector.querySelector('.custom-select-value');
       const listName = valEl ? valEl.textContent : 'list';
-      showPopupToast(instance, `Saved to ${listName}`);
+      showPopupToast(instance, options.previousItem ? 'Saved meaning updated' : `Saved to ${listName}`);
+      renderCompareView(instance);
+      refreshSavedHistory(instance);
     }
   });
 }
@@ -3983,12 +4116,14 @@ function appendCompareConversation(instance, body, slot) {
         saveBtn.type = 'button';
         saveBtn.className = 'ai-turn-save-btn' + (msg.isSaved ? ' is-saved' : '');
         saveBtn.title = msg.isSaved ? 'Saved to list' : 'Save this output to list';
+        saveBtn.disabled = !!msg.historyWritePending;
         saveBtn.innerHTML = iconSvg(msg.isSaved ? 'bookmarkCheck' : 'bookmarkPlus', 15);
         saveBtn.addEventListener('click', (e) => {
           e.stopPropagation();
           saveTurnToHistory(instance, slot, msg, saveBtn);
         });
         turn.prepend(saveBtn);
+        appendSavedHistory(instance, turn, slot, msg);
       }
     }
     body.appendChild(turn);

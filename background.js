@@ -1699,14 +1699,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // --- Case 2: Save an item to history ---
   if (request.type === "saveToHistory") {
     // We pass sendResponse as a callback to run *after* saving
-    saveToHistory(request.word, request.definition, request.listId, request.modelName, request.promptName, request.sourceUrl, request.sourceTitle, request.citations, (err) => {
+    saveToHistory(request.word, request.definition, request.listId, request.modelName, request.promptName, request.sourceUrl, request.sourceTitle, request.citations, (err, result) => {
       if (err) {
         sendResponse({ status: "error", error: err.message });
       } else {
-        sendResponse({ status: "saved" });
+        sendResponse(result || { status: "saved" });
       }
-    });
+    }, request.context, true, request.recognizeExisting && !request.allowDuplicate);
     // Return true to tell Chrome this is an async operation
+    return true;
+  }
+
+  if (request.type === 'updateSavedMeaning') {
+    updateSavedMeaning(request, sendResponse);
     return true;
   }
 
@@ -2033,7 +2038,7 @@ function generateHistoryItemId() {
 }
 
 // --- UPDATED to accept source URL, title, optional context, and updateLastUsed flag ---
-function saveToHistory(word, definition, listId, modelName, promptName, sourceUrl, sourceTitle, citations, callback, context = null, updateLastUsed = true) {
+function saveToHistory(word, definition, listId, modelName, promptName, sourceUrl, sourceTitle, citations, callback, context = null, updateLastUsed = true, recognizeExisting = false) {
   historySavePromise = historySavePromise.then(() => {
     return new Promise((resolve) => {
       chrome.storage.local.get(['history'], (result) => {
@@ -2047,6 +2052,14 @@ function saveToHistory(word, definition, listId, modelName, promptName, sourceUr
         }
 
         let history = result.history || [];
+
+        // Check inside the shared write queue, so simultaneous saves from
+        // separate pages cannot silently create duplicate meanings.
+        if (recognizeExisting && history.some(item => normalizeSavedWord(item.word) === normalizeSavedWord(word))) {
+          if (callback) callback(null, { status: 'duplicate' });
+          resolve();
+          return;
+        }
 
         // Create new history item
         const newItem = {
@@ -2089,6 +2102,46 @@ function saveToHistory(word, definition, listId, modelName, promptName, sourceUr
       });
     });
   });
+}
+
+function normalizeSavedWord(word) {
+  return typeof word === 'string' ? word.normalize('NFKC').trim().replace(/\s+/g, ' ').toLowerCase() : '';
+}
+
+// Use the same queue as saves. Replace only explanation metadata, preserving
+// the original identity, list, capture date, notes, favorites and FSRS state.
+function updateSavedMeaning(request, sendResponse) {
+  historySavePromise = historySavePromise.then(() => new Promise(resolve => {
+    const finish = (response) => { sendResponse(response); resolve(); };
+    chrome.storage.local.get(['history'], result => {
+      if (chrome.runtime.lastError) return finish({ status: 'error', error: 'Could not read saved history.' });
+      const history = Array.isArray(result.history) ? result.history : [];
+      const previous = request.previousItem;
+      if (!previous || typeof request.definition !== 'string' || !request.definition.trim()) {
+        return finish({ status: 'error', error: 'No completed explanation to update.' });
+      }
+      const matches = history.filter(item => previous.id ? item.id === previous.id :
+        !item.id && item.timestamp === previous.timestamp && item.word === previous.word && item.listId === previous.listId);
+      if (matches.length !== 1 || JSON.stringify(matches[0]) !== JSON.stringify(previous)) {
+        return finish({ status: 'error', error: 'This saved entry changed or was deleted. Review it and try again.' });
+      }
+      const item = matches[0];
+      Object.assign(item, {
+        definition: request.definition,
+        context: request.context || null,
+        sourceUrl: request.sourceUrl || '',
+        sourceTitle: request.sourceTitle || '',
+        modelName: request.modelName,
+        promptName: request.promptName,
+        citations: Array.isArray(request.citations) ? request.citations.slice(0, 5) : [],
+        updatedAt: new Date().toISOString()
+      });
+      if (!item.id) item.id = generateHistoryItemId();
+      chrome.storage.local.set({ history }, () => {
+        finish(chrome.runtime.lastError ? { status: 'error', error: 'Could not update saved history.' } : { status: 'saved' });
+      });
+    });
+  }));
 }
 
 // --- Due-cards toolbar badge & review streak (Issue #25) ---

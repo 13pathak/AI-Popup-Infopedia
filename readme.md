@@ -45,6 +45,7 @@ When the primary model grounds its response with live web search results, the Ha
 - **Embedded PDF Annotation Recovery:** Opening an annotated PDF with missing or empty local annotation storage restores embedded highlights, underlines, strikethroughs, colors, and attached comments into the viewer and Comments sidebar. Recovered marks support normal editing, deletion, undo/redo, and saving. Existing local edits take precedence, and intentional deletion of all marks is remembered for that embedded annotation set. Saving preserves unsupported or unreadable annotation types; it stops if recovery failed. Password-protected PDFs can recover annotations after unlocking, but PDF saving retains the existing encryption limitation.
 - **Custom Prompts:** Create multiple prompts for different use cases (e.g., "Explain like I'm 5", "Translate to Hindi").
 - **Source Tracking:** Automatically saves the URL and page title where each word was looked up.
+- **Saved Word Recognition:** Repeat lookups show the saved list and relative age beneath the answer. Expand the badge to view the previous definition, notes, and captured sentence; update that meaning while keeping its list and review progress; or save another meaning in the toolbar's selected list. Matches ignore case, extra whitespace, and Unicode presentation differences, and work across pages and browser sessions.
 
 ### 📚 History & Lists
 - **Organized Lists:** Create custom lists to categorize your saved words.

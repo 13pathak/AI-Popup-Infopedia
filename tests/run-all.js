@@ -130,6 +130,11 @@ async function run() {
     throw new Error('Follow-up suggestions unit tests failed.');
   }
 
+  console.log('Testing saved-meaning recognition and actions...');
+  const meaningsProc = spawn(process.execPath, [path.join(__dirname, 'test-saved-meanings.js')], { stdio: 'inherit' });
+  const meaningsCode = await new Promise(res => meaningsProc.on('exit', code => res(code ?? 0)));
+  if (meaningsCode !== 0) throw new Error('Saved-meaning recognition tests failed.');
+
   console.log('Testing embedded PDF annotation recovery and safe round-trips...');
   const recoveryProc = spawn(process.execPath, [path.join(__dirname, 'test-pdf-annotation-recovery.js')], {
     stdio: 'inherit'
@@ -194,6 +199,11 @@ async function run() {
 
     const viewstateCode = await new Promise(res => viewstateProc.on('exit', code => res(code ?? 0)));
     if (viewstateCode !== 0) exitCode = viewstateCode;
+
+    console.log('Testing saved-meaning controls in the popup...');
+    const meaningsBrowserProc = spawn(process.execPath, [path.join(__dirname, 'e2e-saved-meanings.js')], { stdio: 'inherit' });
+    const meaningsBrowserCode = await new Promise(res => meaningsBrowserProc.on('exit', code => res(code ?? 0)));
+    if (meaningsBrowserCode !== 0) exitCode = meaningsBrowserCode;
   } catch (err) {
     console.error('Test runner failed:', err.message);
     exitCode = 1;

@@ -20,6 +20,8 @@ The runner automatically:
 
 ## Files
 
+* **`test-saved-meanings.js`**: Issue #39 regression tests for normalized cross-session recognition, relative dates, safe inline previews, updating a specific meaning while retaining notes/list/review state, explicit additional meanings, concurrent saves, stale/deleted and legacy records, and storage failures. Runs the real worker message handlers and popup disclosure/save functions with storage and DOM stubs. Run independently with `node tests/test-saved-meanings.js`.
+* **`e2e-saved-meanings.js`**: Exercises the complete content script's shadow-DOM popup in an isolated browser tab: opening the saved badge, safe previous-definition preview, disclosure persistence across renders, action layout in both themes, and live list renames/deletions.
 * **`test-pdf-annotation-recovery.js`**: Generates annotated PDFs in memory and exercises the actual recovery and Save functions with bundled PDF.js/pdf-lib. Covers empty/missing storage, intentional deletion markers, local-state precedence, concurrent edits, rotated/multiline geometry, Unicode notes, authors, clickable overlays, editing and undo/redo, repeated save/reopen, and preservation of unsupported or malformed annotations. Run independently with `node tests/test-pdf-annotation-recovery.js` (no browser required).
 * **`run-all.js`**: Single-command test runner (auto-spawns browser, server, and runs tests).
 * **`e2e-undo.js`**: CDP-driven end-to-end test verifying highlight creation, deletions, recoloring, markup conversions, note coalescing, bookmarks, and undo/redo stacks.
