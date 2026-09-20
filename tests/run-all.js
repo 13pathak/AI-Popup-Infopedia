@@ -130,6 +130,11 @@ async function run() {
     throw new Error('Follow-up suggestions unit tests failed.');
   }
 
+  console.log('Testing follow-up draft recovery...');
+  const draftProc = spawn(process.execPath, [path.join(__dirname, 'test-followup-draft.js')], { stdio: 'inherit' });
+  const draftCode = await new Promise(res => draftProc.on('exit', code => res(code ?? 0)));
+  if (draftCode !== 0) throw new Error('Follow-up draft recovery tests failed.');
+
   console.log('Testing saved-meaning recognition and actions...');
   const meaningsProc = spawn(process.execPath, [path.join(__dirname, 'test-saved-meanings.js')], { stdio: 'inherit' });
   const meaningsCode = await new Promise(res => meaningsProc.on('exit', code => res(code ?? 0)));

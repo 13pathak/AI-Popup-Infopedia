@@ -36,6 +36,7 @@ When the primary model grounds its response with live web search results, the Ha
 ### ⚡ Core Features
 - **Instant Definitions:** Select 1-6 words on any webpage to get a concise, AI-powered explanation in a clean popup.
 - **Conversational Hotkey:** Press `Ctrl+Shift+Y` (customizable) to instantly open an empty conversational AI popup and ask any question, or trigger the AI on your current text selection.
+- **Conversation Recovery:** Reopen your last dismissed conversation during the same browser session, including any unfinished follow-up question. The draft returns to the input box without being sent.
 - **Multiple AI Models:** Configure and switch between multiple AI backends (Ollama, Gemini API, OpenAI, etc.).
 - **Speech-to-Text Dictation:** Use API-based Speech-to-Text to quickly dictate follow-up questions instead of typing.
 - **Direct Pronunciation & IPA Badge:** An inline speaker right next to the looked-up word reads just the word or short phrase itself (up to 3 words, e.g. "Silicon Valley", not the whole definition), and a standard IPA transcription (e.g. ɪˈfem.ər.əl) is fetched automatically for term lookups — a dictionary affordance for language learners and test prep.

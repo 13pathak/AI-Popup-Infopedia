@@ -5274,11 +5274,15 @@ function buildConversationStash(instance) {
     });
   });
   if (stashed.length === 0) return null;
+  const followupInput = instance.popup && instance.popup.querySelector('#ai-popup-followup-input');
   return {
     savedAt: Date.now(),
     word: instance.compareWord || null,
     firstMessages: Array.isArray(instance.compareFirstMessages) ? instance.compareFirstMessages : null,
     index: instance.compareIndex || 0,
+    // Read the live input at dismissal, including whitespace and dictated
+    // text. Submitted questions already clear it in dispatchFollowupText.
+    followupDraft: followupInput ? followupInput.value : '',
     slots: stashed
   };
 }
@@ -5361,6 +5365,10 @@ function restoreConversationFromStash(instance, stash, models) {
 
   if (!instance.popup.querySelector('#ai-popup-followup-container')) {
     createFollowupInput(instance, instance.compareWord && instance.compareWord !== 'Custom Question' ? instance.compareWord : 'Custom Question');
+  }
+  const followupInput = instance.popup.querySelector('#ai-popup-followup-input');
+  if (followupInput) {
+    followupInput.value = typeof stash.followupDraft === 'string' ? stash.followupDraft : '';
   }
   renderCompareView(instance);
   updateCompareFollowupState(instance, false);
