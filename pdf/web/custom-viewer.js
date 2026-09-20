@@ -1,4 +1,5 @@
 import * as pdfjsLib from '../build/pdf.mjs';
+import { readEmbeddedMarkups, readUnlockedMarkups, pruneEmbeddedMarkups, textUnderMarkup } from './pdf-annotations.mjs';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = '../build/pdf.worker.mjs';
 
@@ -245,6 +246,12 @@ const sidebarTitle = document.getElementById('sidebar-title');
 // Store highlights in memory: { id: 1, pageNum: 1, rects: [], color: '#FFFF98', text: '...' }
 let highlights = [];
 let highlightCounter = 0;
+let embeddedMarkups = new Map();
+let annotationRecoveryReady = false;
+let annotationRevision = 0;
+let storedAnnotationSource = null;
+let storedHighlightsExplicitlyEmpty = false;
+let annotationSource = null;
 let currentSelection = null; // Store temp selection
 let activeHighlightId = null;
 // Sidebar-click flash for a highlight whose page may not be rendered yet
@@ -311,6 +318,7 @@ function hasChromeStorage() {
 const storageFileUrl = String(fileUrl).replace(/#.*$/, '');
 const SYNC_KEYS = {
     highlights: 'pdf_highlights_' + storageFileUrl,
+    annotationSource: 'pdf_annotation_source_' + storageFileUrl,
     bookmarks: 'pdf_bookmarks_' + storageFileUrl,
     lastPage: 'pdf_lastpage_' + storageFileUrl
 };
@@ -339,7 +347,10 @@ async function loadStorageData() {
         // 'pdf_dark_mode' key, which is no longer read).
         const darkModeKey = 'pdf_dark_mode_' + storageFileUrl;
 
-        chrome.storage.local.get([highlightsKey, bookmarksKey, lastPageKey, darkModeKey, 'pdf_author_name'], (result) => {
+        chrome.storage.local.get([highlightsKey, SYNC_KEYS.annotationSource, bookmarksKey, lastPageKey, darkModeKey, 'pdf_author_name'], (result) => {
+            result = result || {};
+            storedAnnotationSource = result[SYNC_KEYS.annotationSource] || null;
+            storedHighlightsExplicitlyEmpty = Array.isArray(result[highlightsKey]) && result[highlightsKey].length === 0;
             if (result && result.pdf_author_name && typeof result.pdf_author_name === 'string') {
                 cachedPdfAuthorName = result.pdf_author_name.trim() || 'You';
             }
@@ -920,6 +931,7 @@ function attachRichEditor(el, { getInitial, onSave, onInput } = {}) {
 }
 
 function saveHighlights(reRenderSidebar = true) {
+    annotationRevision++;
     // Render before (and regardless of) the storage write: the arrays are
     // already mutated at every call site, and the chrome.storage-less test
     // context used to skip this refresh entirely, leaving the sidebar DOM
@@ -928,7 +940,12 @@ function saveHighlights(reRenderSidebar = true) {
     if (!hasChromeStorage()) return;
     const storageKey = SYNC_KEYS.highlights;
     const entry = rememberOwnWrite(storageKey, highlights);
-    chrome.storage.local.set({ [storageKey]: highlights }, () => settlePendingWrite(entry));
+    const data = { [storageKey]: highlights };
+    // The marker travels atomically with edits, including deleting the last
+    // mark. Missing/legacy [] still recovers; an intentional [] for these
+    // exact embedded annotations remains empty on subsequent opens.
+    if (annotationSource) data[SYNC_KEYS.annotationSource] = annotationSource;
+    chrome.storage.local.set(data, () => settlePendingWrite(entry));
     // A session's first save also (re)records this document's identity
     // for URL-variant detection — see offerVariantAnnotationMerge.
     recordDocumentIdentity();
@@ -1432,6 +1449,9 @@ function sanitizeStoredHighlights(list) {
         if (!Number.isFinite(hl.createdAt) || hl.createdAt <= 0) {
             delete hl.createdAt;
         }
+        for (const key of ['author', 'pdfCreationDate']) {
+            if (typeof hl[key] !== 'string') delete hl[key];
+        }
         // Strip corrupt corner quads so the export falls back to the
         // validated legacy geometry instead of emitting NaN/null
         // coordinates. The record itself stays usable — corners are an
@@ -1604,6 +1624,7 @@ function adoptRemoteViewerTheme(key, value) {
 }
 
 function adoptRemoteHighlights(remote) {
+    annotationRevision++;
     // External wholesale replacement invalidates undo history: entries
     // hold id-based references into arrays this tab no longer owns.
     resetAnnotationHistory();
@@ -2266,6 +2287,64 @@ function readLocalFileViaXhr(url, signal) {
     });
 }
 
+async function recoverEmbeddedAnnotations() {
+    const revision = annotationRevision;
+    try {
+        const bytes = await pdfDoc.getData();
+        let recovered;
+        try {
+            const source = await PDFLib.PDFDocument.load(bytes, { updateMetadata: false, parseSpeed: Infinity });
+            recovered = readEmbeddedMarkups(source, PDFLib);
+        } catch (error) {
+            if (!/is encrypted/i.test(String(error?.message))) throw error;
+            recovered = await readUnlockedMarkups(pdfDoc);
+        }
+        embeddedMarkups = recovered.managed;
+        // Include both the document identity and the embedded payload. A saved
+        // PDF can retain its /ID while its annotations have changed.
+        const signature = JSON.stringify([pdfDoc.fingerprints, recovered.records]);
+        const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(signature));
+        annotationSource = Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('');
+        const intentionallyEmpty = storedHighlightsExplicitlyEmpty && storedAnnotationSource === annotationSource;
+        if (!highlights.length && !intentionallyEmpty && revision === annotationRevision) {
+            // Fetch text only on pages with recovered marks, once per page.
+            // An image-only page or failed font extraction still has editable
+            // geometry and comments; those must never depend on text success.
+            for (const pageNumber of new Set(recovered.records.filter(h => !h.text).map(h => h.pageNumber))) {
+                try {
+                    const page = await pdfDoc.getPage(pageNumber);
+                    const content = await page.getTextContent();
+                    recovered.records.filter(h => h.pageNumber === pageNumber && !h.text)
+                        .forEach(h => { h.text = textUnderMarkup(h, content); });
+                } catch (error) {
+                    console.warn('Could not extract text for recovered annotations', error);
+                }
+            }
+            // Another tab may have edited/deleted its records during the scan.
+            // Its storage event wins over this initial recovery snapshot.
+            if (revision === annotationRevision && !highlights.length && recovered.records.length) {
+                highlights = sanitizeStoredHighlights(recovered.records);
+                for (const hl of highlights) {
+                    hl.id = ++highlightCounter;
+                    const date = pdfjsLib.PDFDateString.toDateObject(hl.pdfCreationDate);
+                    if (date && date.getTime() > 0) hl.createdAt = date.getTime();
+                }
+                saveHighlights();
+            }
+        }
+        annotationRecoveryReady = true;
+        if (recovered.unreadable) {
+            console.warn(`${recovered.unreadable} unreadable PDF annotation(s) will be preserved in saved files.`);
+        }
+    } catch (error) {
+        // Keep the document readable, but never let an incomplete import reach
+        // the destructive replacement stage in Save.
+        console.error('Could not recover embedded PDF annotations', error);
+        viewerAlert('Annotation recovery failed',
+            'The PDF is open, but its embedded annotations could not be read safely. PDF saving is unavailable in this session to protect them. You can still use Export or Print for annotations shown here.');
+    }
+}
+
 async function loadPDF() {
     // Distinguishes "user closed the password prompt" from real failures
     // for the catch below: destroy() rejects with an internal PDF.js error
@@ -2324,6 +2403,10 @@ async function loadPDF() {
             }
         };
         pdfDoc = await loadingTask.promise;
+        // Settle ingestion before pages become interactive or Save can replace
+        // embedded markup. Recovered records use the normal overlay/sidebar,
+        // editing, printing, storage synchronization and undo/redo paths.
+        await recoverEmbeddedAnnotations();
         document.querySelector('.pdf-password-prompt')?.remove();
         pageCountSpan.textContent = pdfDoc.numPages;
         // Identity registration deferred from loadStorageData: the
@@ -4720,55 +4803,29 @@ document.addEventListener('keydown', (e) => {
     }
 });
 
-// One export at a time: every click used to launch a full
-// fetch→parse→serialize pipeline in parallel (duplicate downloads), and
-// a stalled server hung the fetch indefinitely with no feedback and no
-// way to retry cleanly.
+// One export at a time; bound PDF.js byte retrieval as well.
 const SAVE_FETCH_TIMEOUT_MS = 60000;
 let savePdfInProgress = false;
 
 document.getElementById('save_pdf').addEventListener('click', async () => {
     if (savePdfInProgress) return;
+    if (!annotationRecoveryReady) {
+        viewerAlert('PDF saving unavailable', 'Wait for annotation recovery to finish. If recovery failed, reopen the PDF before saving to protect its embedded annotations.');
+        return;
+    }
     const saveBtn = document.getElementById('save_pdf');
-    // Bound the transfer wait so a stalled connection or a hung local
-    // file read can't hang the export forever; 60s stays generous for
-    // large files on slow links. Both transports take this signal: fetch
-    // natively, the file:// XHR via its AbortSignal bridge.
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), SAVE_FETCH_TIMEOUT_MS);
+    let timeoutId;
     savePdfInProgress = true;
     saveBtn.disabled = true;
     try {
-        // Retrieve the PDF bytes. Prefer in-memory data already parsed by PDF.js
-        // via pdfDoc.getData() for instant retrieval without network latency.
-        // Fall back to local file XHR or fetch if pdfDoc is not yet ready.
-        let existingPdfBytes;
-        if (pdfDoc && typeof pdfDoc.getData === 'function') {
-            try {
-                existingPdfBytes = await pdfDoc.getData();
-            } catch (getDataErr) {
-                console.warn('pdfDoc.getData() failed, falling back to fetch/read', getDataErr);
-            }
-        }
-        if (!existingPdfBytes) {
-            if (/^file:/i.test(fileUrl)) {
-                existingPdfBytes = await readLocalFileViaXhr(fileUrl, controller.signal);
-            } else {
-                const res = await fetch(fileUrl, { credentials: 'include', signal: controller.signal });
-                if (!res.ok) {
-                    throw new Error(`HTTP ${res.status}: ${res.statusText || 'Failed to fetch PDF file'}`);
-                }
-                existingPdfBytes = await res.arrayBuffer();
-            }
-        }
-
-        // Highlight coordinates were captured against the viewer's copy;
-        // the fresh bytes below may have changed since it was opened.
-        // Snapshot the viewer's page count before the parse await so the
-        // drift comparison below pairs one coherent viewer-side reading
-        // with the freshly loaded file — robust even if module-level
-        // pdfDoc ever gains a second assignment site.
-        const viewerPageCount = pdfDoc ? pdfDoc.numPages : null;
+        // Replacement indices and geometry belong to this exact document.
+        // Re-fetching a changed URL could remove unrelated annotations.
+        const existingPdfBytes = await Promise.race([
+            pdfDoc.getData(),
+            new Promise((_, reject) => {
+                timeoutId = setTimeout(() => reject(new DOMException('PDF retrieval timed out', 'AbortError')), SAVE_FETCH_TIMEOUT_MS);
+            })
+        ]);
         // Distinct name on purpose: this is pdf-lib's document, not the
         // pdf.js one above, and it shadows nothing.
         // parseSpeed: Infinity eliminates yielding to setTimeout(0) on every 100 objects,
@@ -4777,70 +4834,13 @@ document.getElementById('save_pdf').addEventListener('click', async () => {
             parseSpeed: Infinity,
             updateMetadata: false
         });
-        // Page-count drift proves the remote file changed. Same-count
-        // content changes can't be detected cheaply and degrade to
-        // alignment risk, flagged after the download below.
         const pageCount = pdfLibDoc.getPageCount();
-        const staleDocument = viewerPageCount !== null && pageCount !== viewerPageCount;
         let skippedStale = 0;
 
-        // Prune previous markup annotations from all pages before appending
-        // current highlights. This prevents duplicate annotations from stacking
-        // and darkening when overwriting the same file repeatedly, and ensures
-        // deleted highlights do not persist as zombies. Non-markup annotations
-        // (such as Links and Form Widgets) are strictly preserved.
-        const MARKUP_SUBTYPES = new Set(['/Highlight', '/Underline', '/StrikeOut', '/Squiggly']);
-        let prunedCount = 0;
-        for (let i = 0; i < pageCount; i++) {
-            const page = pdfLibDoc.getPage(i);
-            const annots = page.node.Annots();
-            if (annots && typeof annots.size === 'function') {
-                const prunedRefs = new Set();
-                const totalAnnots = annots.size();
-
-                // First pass: identify markup annotations and any linked popup references
-                for (let j = 0; j < totalAnnots; j++) {
-                    const item = annots.get(j);
-                    const dict = pdfLibDoc.context.lookup(item);
-                    if (dict instanceof PDFLib.PDFDict) {
-                        const subtype = dict.get(PDFLib.PDFName.of('Subtype'));
-                        if (subtype && MARKUP_SUBTYPES.has(subtype.asString())) {
-                            prunedRefs.add(item);
-                            const popup = dict.get(PDFLib.PDFName.of('Popup'));
-                            if (popup) prunedRefs.add(popup);
-                        }
-                    }
-                }
-
-                // Second pass: catch popup annotations whose Parent is one of the pruned annotations
-                for (let j = 0; j < totalAnnots; j++) {
-                    const item = annots.get(j);
-                    if (prunedRefs.has(item)) continue;
-                    const dict = pdfLibDoc.context.lookup(item);
-                    if (dict instanceof PDFLib.PDFDict) {
-                        const subtype = dict.get(PDFLib.PDFName.of('Subtype'));
-                        if (subtype && subtype.asString() === '/Popup') {
-                            const parent = dict.get(PDFLib.PDFName.of('Parent'));
-                            if (parent && prunedRefs.has(parent)) {
-                                prunedRefs.add(item);
-                            }
-                        }
-                    }
-                }
-
-                if (prunedRefs.size > 0) {
-                    prunedCount += prunedRefs.size;
-                    const keptAnnots = pdfLibDoc.context.obj([]);
-                    for (let j = 0; j < totalAnnots; j++) {
-                        const item = annots.get(j);
-                        if (!prunedRefs.has(item)) {
-                            keptAnnots.push(item);
-                        }
-                    }
-                    page.node.set(PDFLib.PDFName.of('Annots'), keptAnnots);
-                }
-            }
-        }
+        // Replace only markup successfully understood during recovery. This
+        // also removes deleted marks, while preserving unsupported/broken
+        // annotations and unrelated popups from other PDF editors.
+        const prunedCount = pruneEmbeddedMarkups(pdfLibDoc, embeddedMarkups, PDFLib);
 
         // Fast path: If there are no highlights to bake into the PDF AND no
         // previous markup annotations were pruned, download the in-memory bytes
@@ -4935,15 +4935,24 @@ document.getElementById('save_pdf').addEventListener('click', async () => {
             };
 
             if (hl.note) {
-                // PDF-lib supports text contents via PDFString
+                // UTF-16 PDF strings preserve non-Latin notes and emoji.
                 const plainNote = hl.noteFmt === 'html' ? noteHtmlToPlainText(hl.note) : hl.note;
-                annotObj.Contents = PDFLib.PDFString.of(plainNote);
+                annotObj.Contents = PDFLib.PDFHexString.fromText(plainNote);
             }
 
-            if (authorName) {
+            if (hl.author || authorName) {
                 // /T (annotation author) must be a string; a plain string
                 // here would become a PDFName via context.obj().
-                annotObj.T = PDFLib.PDFString.of(authorName);
+                annotObj.T = PDFLib.PDFHexString.fromText(hl.author || authorName);
+            }
+            // Standard Contents remains plain comment text. This optional
+            // private field preserves the exact selected quote on round-trip;
+            // other PDF readers can ignore it safely.
+            if (typeof hl.text === 'string' && hl.text) annotObj.InfopediaText = PDFLib.PDFHexString.fromText(hl.text);
+            if (hl.pdfCreationDate) {
+                annotObj.CreationDate = PDFLib.PDFString.of(hl.pdfCreationDate);
+            } else if (Number.isFinite(hl.createdAt)) {
+                annotObj.CreationDate = PDFLib.PDFString.fromDate(new Date(hl.createdAt));
             }
 
             const annot = pdfLibDoc.context.obj(annotObj);
@@ -4983,8 +4992,6 @@ document.getElementById('save_pdf').addEventListener('click', async () => {
                 'Export incomplete',
                 `The file appears to have changed since you opened it — ${skippedStale} annotation(s) referenced pages missing from the current file and were left out of this export.`
             );
-        } else if (staleDocument) {
-            viewerAlert('Document changed', 'The file now has a different page count than the document you annotated. The export succeeded, but placed marks may not align with the new content.');
         }
         
     } catch (e) {
@@ -5931,7 +5938,7 @@ function renderSidebar() {
         
         const authorNameEl = document.createElement('span');
         authorNameEl.className = 'sidebar-item-author';
-        authorNameEl.textContent = cachedPdfAuthorName || 'You';
+        authorNameEl.textContent = hl.author || cachedPdfAuthorName || 'You';
         
         const subtitleEl = document.createElement('span');
         subtitleEl.className = 'sidebar-item-subtitle';

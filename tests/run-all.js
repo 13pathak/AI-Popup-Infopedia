@@ -130,6 +130,13 @@ async function run() {
     throw new Error('Follow-up suggestions unit tests failed.');
   }
 
+  console.log('Testing embedded PDF annotation recovery and safe round-trips...');
+  const recoveryProc = spawn(process.execPath, [path.join(__dirname, 'test-pdf-annotation-recovery.js')], {
+    stdio: 'inherit'
+  });
+  const recoveryCode = await new Promise(res => recoveryProc.on('exit', code => res(code ?? 0)));
+  if (recoveryCode !== 0) throw new Error('PDF annotation recovery tests failed.');
+
   // 7. Start HTTP server
   console.log(`[7/11] Starting local HTTP server on port ${PORT}...`);
   const server = createServer();

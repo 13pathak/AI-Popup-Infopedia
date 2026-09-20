@@ -20,6 +20,7 @@ The runner automatically:
 
 ## Files
 
+* **`test-pdf-annotation-recovery.js`**: Generates annotated PDFs in memory and exercises the actual recovery and Save functions with bundled PDF.js/pdf-lib. Covers empty/missing storage, intentional deletion markers, local-state precedence, concurrent edits, rotated/multiline geometry, Unicode notes, authors, clickable overlays, editing and undo/redo, repeated save/reopen, and preservation of unsupported or malformed annotations. Run independently with `node tests/test-pdf-annotation-recovery.js` (no browser required).
 * **`run-all.js`**: Single-command test runner (auto-spawns browser, server, and runs tests).
 * **`e2e-undo.js`**: CDP-driven end-to-end test verifying highlight creation, deletions, recoloring, markup conversions, note coalescing, bookmarks, and undo/redo stacks.
 * **`e2e-deeplink.js`**: CDP-driven end-to-end test for `#page=N` deep links (issue #17): page-number fragments, clamping, invalid values, named destinations (bare, `nameddest=`, percent-encoded), unchanged no-fragment load behavior, and same-document hash edits while the viewer is open (address-bar style changes, clamping, history Back, no-op on unusable fragments).
