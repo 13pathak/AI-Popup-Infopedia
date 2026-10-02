@@ -5674,7 +5674,7 @@ async function renderLinkAnnotations(page, pageDiv, viewport) {
                             dest = await pdfDoc.getDestination(dest);
                         }
                         
-                        if (dest && dest[0]) {
+                        if (dest && dest[0] != null) {
                             // dest[0] is normally a page Ref ({num, gen}),
                             // but some producers emit explicit destinations
                             // whose first entry is already a zero-based
@@ -6545,7 +6545,7 @@ function renderOutline(outline) {
                         if (typeof dest === 'string') {
                             dest = await pdfDoc.getDestination(dest);
                         }
-                        if (dest && dest[0]) {
+                        if (dest && dest[0] != null) {
                             // Same dest[0] duality as the link-annotation
                             // path above: Ref or already-resolved page index.
                             const pageIndex = Number.isInteger(dest[0]) && dest[0] >= 0

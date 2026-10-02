@@ -127,5 +127,107 @@ function harness({ hash = '', resumePage = 1, ratio = null, destination, pageInd
         assert.equal(h.container.scrollTop, scroll);
         assert.equal(h.run('initialResumeSettled'), true);
     }
-    console.log('Initial navigation: delayed destinations, hash races, resume timers and normal loading passed.');
+
+    // Explicit destinations with zero-based page index 0 (Page 1) must navigate
+    // to page 1 for both link annotations and outline items.
+    {
+        const jumps = [];
+        const testDoc = {
+            numPages: 10,
+            async getDestination(name) {
+                return name === 'FirstNamed' ? [0, { name: 'Fit' }] : null;
+            },
+            async getPageIndex(ref) {
+                if (ref && ref.num === 1) return 0;
+                throw new Error('Unknown ref');
+            }
+        };
+        const makeElement = (tag = 'div') => {
+            const handlers = new Map();
+            const kids = [];
+            const el = {
+                tagName: tag.toUpperCase(),
+                className: '',
+                style: {},
+                dataset: {},
+                children: kids,
+                classList: { add() {}, remove() {}, toggle() {} },
+                appendChild(c) { kids.push(c); return c; },
+                querySelectorAll() { return []; },
+                addEventListener(type, fn) {
+                    if (!handlers.has(type)) handlers.set(type, []);
+                    handlers.get(type).push(fn);
+                },
+                async click(event = { stopPropagation() {} }) {
+                    for (const fn of handlers.get('click') || []) await fn(event);
+                }
+            };
+            return el;
+        };
+        const contentOutlineEl = makeElement('div');
+        const context = vm.createContext({
+            pdfDoc: testDoc,
+            document: { createElement: makeElement },
+            contentOutline: contentOutlineEl,
+            scrollToPage: page => jumps.push(page),
+            isSafeExternalUrl: () => false,
+            console: { error(...args) { console.error('Unexpected error in test:', ...args); } }
+        });
+        for (const name of ['renderLinkAnnotations', 'renderOutline']) {
+            const start = source.search(new RegExp(`(?:async )?function ${name}\\(`));
+            assert.ok(start >= 0);
+            vm.runInContext(source.slice(start, source.indexOf('\n}', start) + 2), context);
+        }
+
+        // 1. Link annotations
+        for (const [dest, expectedPage, desc] of [
+            [[0, { name: 'Fit' }], 1, 'explicit 0-based page index 0 links to page 1'],
+            ['FirstNamed', 1, 'named destination resolving to index 0 links to page 1'],
+            [[{ num: 1, gen: 0 }], 1, 'Ref resolving to index 0 links to page 1'],
+            [[2, { name: 'XYZ' }], 3, 'explicit index 2 links to page 3']
+        ]) {
+            jumps.length = 0;
+            const pageDiv = makeElement('div');
+            const viewport = { convertToViewportPoint: (x, y) => [x, y] };
+            pageDiv._viewport = viewport;
+            const page = {
+                getAnnotations: async () => [{ subtype: 'Link', rect: [0, 0, 50, 20], dest }]
+            };
+            await context.renderLinkAnnotations(page, pageDiv, viewport);
+            const layer = pageDiv.children.find(c => c.className === 'annotationLayer');
+            assert.ok(layer, 'annotation layer created');
+            const linkEl = layer.children[0];
+            assert.ok(linkEl, 'link element created');
+            await linkEl.click();
+            assert.deepEqual(jumps, [expectedPage], desc);
+        }
+
+        // Invalid link destination does not navigate
+        jumps.length = 0;
+        const pageDiv = makeElement('div');
+        const viewport = { convertToViewportPoint: (x, y) => [x, y] };
+        pageDiv._viewport = viewport;
+        await context.renderLinkAnnotations({
+            getAnnotations: async () => [{ subtype: 'Link', rect: [0, 0, 50, 20], dest: [] }]
+        }, pageDiv, viewport);
+        await pageDiv.children[0].children[0].click();
+        assert.deepEqual(jumps, [], 'empty dest array does not trigger jump');
+
+        // 2. Outline items
+        for (const [dest, expectedPage, desc] of [
+            [[0, { name: 'Fit' }], 1, 'explicit 0-based page index 0 in outline navigates to page 1'],
+            ['FirstNamed', 1, 'named destination resolving to index 0 in outline navigates to page 1'],
+            [[{ num: 1, gen: 0 }], 1, 'Ref resolving to index 0 in outline navigates to page 1'],
+            [[4, { name: 'Fit' }], 5, 'explicit index 4 in outline navigates to page 5']
+        ]) {
+            jumps.length = 0;
+            context.renderOutline([{ title: 'Item', dest }]);
+            const itemDiv = contentOutlineEl.children.at(-1);
+            const titleRow = itemDiv.children.find(c => c.className === 'outline-item-title');
+            await titleRow.click();
+            assert.deepEqual(jumps, [expectedPage], desc);
+        }
+    }
+
+    console.log('Initial navigation: delayed destinations, hash races, resume timers, link/outline page 1 destinations and normal loading passed.');
 })().catch(error => { console.error(error); process.exitCode = 1; });
