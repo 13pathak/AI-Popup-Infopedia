@@ -106,7 +106,37 @@ const close = (actual, expected, label) => assert.ok(Math.abs(actual - expected)
         close(chunks[0].matrix[5], 124, 'first chunk advances to C');
         close(chunks[1].matrix[5], 136, 'second chunk starts at D');
         chunks.forEach(rect => close(rect.dirWidth, 12, 'each chunk highlights one character'));
-        console.log('Search geometry: partial/full matches, rotated runs, page rotations, zoom and transform immutability passed.');
+
+        // Lowercasing characters that expand (e.g. 'İ' -> 'i\u0307') must map
+        // match boundaries back to the source text instead of shifting highlights.
+        content[0].items = [
+            { str: 'İABCDE', width: 60, transform: [10, 0, 0, 10, 50, 100], hasEOL: false }
+        ];
+        await context.performSearch('DE');
+        const deMatch = run('searchResults[0].rects');
+        assert.equal(deMatch.length, 1);
+        close(deMatch[0].pdfX, 90, 'DE match starts at D (offset 4 chars * 10)');
+        close(deMatch[0].pdfWidth, 20, 'DE match spans 2 chars (both D and E)');
+
+        await context.performSearch('İ');
+        const dottedMatch = run('searchResults[0].rects');
+        assert.equal(dottedMatch.length, 1);
+        close(dottedMatch[0].pdfX, 50, 'İ match starts at 0');
+        close(dottedMatch[0].pdfWidth, 10, 'İ match spans 1 char');
+
+        await context.performSearch('i');
+        const asciiIMatch = run('searchResults[0].rects');
+        assert.equal(asciiIMatch.length, 1);
+        close(asciiIMatch[0].pdfX, 50, 'i match starts at 0');
+        close(asciiIMatch[0].pdfWidth, 10, 'i match spans 1 char');
+
+        await context.performSearch('BC');
+        const bcMatch = run('searchResults[0].rects');
+        assert.equal(bcMatch.length, 1);
+        close(bcMatch[0].pdfX, 70, 'BC match starts at B (offset 2 chars * 10)');
+        close(bcMatch[0].pdfWidth, 20, 'BC match spans 2 chars (B and C)');
+
+        console.log('Search geometry: partial/full matches, rotated runs, Unicode lowercasing expansions, page rotations, zoom and transform immutability passed.');
     } finally {
         await doc.destroy();
     }
