@@ -5216,13 +5216,44 @@ async function performSearch(query) {
         const pageText = built.text;
         const textItems = built.items;
         
-        const lowerPageText = pageText.toLowerCase();
+        let lowerPageText = pageText.toLowerCase();
+        let lowerToOrigMap = null;
+        if (lowerPageText.length !== pageText.length) {
+            // Lowercasing expanded characters (e.g. 'İ' -> 'i\u0307'). Build
+            // a mapping from lowerPageText code-unit offsets to pageText
+            // offsets so highlights align with the original text geometry.
+            const map = [];
+            let lower = '';
+            for (let c = 0; c < pageText.length; ) {
+                const code = pageText.charCodeAt(c);
+                const charLen = (code >= 0xD800 && code <= 0xDBFF && c + 1 < pageText.length) ? 2 : 1;
+                const char = pageText.slice(c, c + charLen);
+                const lowerChar = char.toLowerCase();
+                for (let k = 0; k < lowerChar.length; k++) {
+                    map.push(c);
+                }
+                lower += lowerChar;
+                c += charLen;
+            }
+            map.push(pageText.length);
+            lowerPageText = lower;
+            lowerToOrigMap = map;
+        }
         
         let startIndex = 0;
         let index;
         while ((index = lowerPageText.indexOf(lowerQuery, startIndex)) > -1) {
-            const matchStart = index;
-            const matchEnd = index + lowerQuery.length;
+            let matchStart = index;
+            let matchEnd = index + lowerQuery.length;
+            if (lowerToOrigMap) {
+                matchStart = lowerToOrigMap[index];
+                matchEnd = lowerToOrigMap[index + lowerQuery.length];
+                if (matchEnd <= matchStart) {
+                    const code = pageText.charCodeAt(matchStart);
+                    const charLen = (code >= 0xD800 && code <= 0xDBFF && matchStart + 1 < pageText.length) ? 2 : 1;
+                    matchEnd = matchStart + charLen;
+                }
+            }
             
             const matchItems = textItems.filter(item => 
                 (matchStart < item.endIndex) && (matchEnd > item.startIndex)
@@ -5336,6 +5367,14 @@ let deferredScrollOnlyIfOutside = false;
 let deferredScrollFrames = 0;
 let deferredScrollRaf = 0;
 
+function cancelDeferredScroll() {
+    // A newer jump may find its layout immediately; the older frame must
+    // not move the viewer back after that navigation has already finished.
+    if (deferredScrollRaf) cancelAnimationFrame(deferredScrollRaf);
+    deferredScrollRaf = 0;
+    deferredScrollPage = null;
+}
+
 function requestDeferredScroll(pageNumber, onlyIfOutside) {
     deferredScrollPage = pageNumber;
     deferredScrollOnlyIfOutside = onlyIfOutside;
@@ -5373,6 +5412,7 @@ function requestDeferredScroll(pageNumber, onlyIfOutside) {
 
 function scrollToActiveMatch() {
     if (activeMatchIndex === -1) return;
+    cancelDeferredScroll();
     const match = searchResults[activeMatchIndex];
     
     const pageDiv = document.querySelector(`.page[data-page-number="${match.pageNumber}"]`);
@@ -5775,6 +5815,7 @@ function scrollToPage(pageNumber) {
     // Reachable with no loaded document (e.g. stored bookmark clicked
     // after the file failed to load) — nothing to scroll to.
     if (!pdfDoc) return;
+    cancelDeferredScroll();
     const pageDiv = document.querySelector(`.page[data-page-number="${pageNumber}"]`);
     const container = document.getElementById('viewerContainer');
     if (pageDiv) {
@@ -6440,6 +6481,7 @@ function updateHighlightIndicatorsOnPage(hl) {
 
 function scrollToHighlight(hl) {
     if (!hl || !hl.rects || hl.rects.length === 0) return;
+    cancelDeferredScroll();
 
     // Arm the flash first: on a virtualized (unrendered) page the overlay
     // divs below don't exist yet, and they're only created by drawHighlight

@@ -167,6 +167,11 @@ async function run() {
   const initialNavigationCode = await new Promise(res => initialNavigationProc.on('exit', code => res(code ?? 0)));
   if (initialNavigationCode !== 0) throw new Error('Initial navigation tests failed.');
 
+  console.log('Testing deferred navigation races...');
+  const deferredNavigationProc = spawn(process.execPath, [path.join(__dirname, 'test-deferred-navigation.js')], { stdio: 'inherit' });
+  const deferredNavigationCode = await new Promise(res => deferredNavigationProc.on('exit', code => res(code ?? 0)));
+  if (deferredNavigationCode !== 0) throw new Error('Deferred navigation tests failed.');
+
   // 7. Start HTTP server
   console.log(`[7/11] Starting local HTTP server on port ${PORT}...`);
   const server = createServer();
