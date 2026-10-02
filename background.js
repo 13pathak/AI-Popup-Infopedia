@@ -2533,7 +2533,9 @@ function triggerBackup(type = "Auto", customBackupInclude = null) {
           // pdf_doc_identities / pdf_variant_decisions ride along so a
           // restored backup keeps URL-variant merge detection working
           // (issue #21); the restore path merges any pdf_* key back.
-          if (key === 'pdf_author_name' || key.startsWith('pdf_highlights_') || key.startsWith('pdf_bookmarks_') || key.startsWith('pdf_lastpage_') || key === 'pdf_doc_identities' || key === 'pdf_variant_decisions') {
+          // Keep annotation-source markers with highlights: an empty list
+          // plus its marker means embedded marks were intentionally deleted.
+          if (key === 'pdf_author_name' || key.startsWith('pdf_highlights_') || key.startsWith('pdf_annotation_source_') || key.startsWith('pdf_bookmarks_') || key.startsWith('pdf_lastpage_') || key === 'pdf_doc_identities' || key === 'pdf_variant_decisions') {
             pdfAnnotations[key] = localData[key];
           }
         }

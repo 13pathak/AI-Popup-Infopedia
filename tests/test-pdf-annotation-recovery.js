@@ -7,10 +7,53 @@ const vm = require('node:vm');
 const path = require('node:path');
 const PDFLib = require('../pdf-lib.min.js');
 const viewerSource = fs.readFileSync(path.join(__dirname, '../pdf/web/custom-viewer.js'), 'utf8');
-function fn(name) {
-    const start = viewerSource.search(new RegExp(`(?:async )?function ${name}\\(`));
+function fn(name, source = viewerSource) {
+    const start = source.search(new RegExp(`(?:async )?function ${name}\\(`));
     assert.ok(start >= 0, name);
-    return viewerSource.slice(start, viewerSource.indexOf('\n}', start) + 2);
+    return source.slice(start, source.indexOf('\n}', start) + 2);
+}
+
+// Run the production backup encoder and restore handler with storage,
+// download and file-input surfaces stubbed, then reopen the original PDF.
+function backupAndRestore(localData, type, includePdf = true, customInclude = null) {
+    const background = fs.readFileSync(path.join(__dirname, '../background.js'), 'utf8');
+    const options = fs.readFileSync(path.join(__dirname, '../options.js'), 'utf8');
+    const area = data => ({
+        get(keys, callback) {
+            callback(keys === null ? structuredClone(data) :
+                Object.fromEntries(keys.filter(key => key in data).map(key => [key, structuredClone(data[key])])));
+        },
+        set(values, callback) { Object.assign(data, structuredClone(values)); callback?.(); },
+        remove(keys) { keys.forEach(key => delete data[key]); }
+    });
+    let downloaded;
+    const context = vm.createContext({
+        chrome: {
+            runtime: {},
+            storage: { local: area(structuredClone(localData)), sync: area({ backupInclude: { pdf: includePdf } }) },
+            downloads: { download({ url }, callback) { downloaded = url; callback(1); } }
+        },
+        TextEncoder, btoa, console: { log() {}, error() {} },
+        normalizeHistoryListIds() {}, setTimeout() {},
+        updateRestoreStatus(message, status) { assert.equal(status, 'success', message); }
+    });
+    const defaultsStart = background.indexOf('const DEFAULT_BACKUP_INCLUDE =');
+    vm.runInContext(background.slice(defaultsStart, background.indexOf('\n};', defaultsStart) + 3), context);
+    vm.runInContext(fn('base64EncodeUtf8', background), context);
+    vm.runInContext(fn('triggerBackup', background), context);
+    context.triggerBackup(type, customInclude);
+    assert.ok(downloaded, 'backup produced a download');
+    const json = Buffer.from(downloaded.split(',')[1], 'base64').toString('utf8');
+    const restored = {};
+    context.chrome.storage.local = area(restored);
+    context.chrome.storage.sync = area({});
+    context.document = { getElementById: () => ({ files: [json] }) };
+    context.FileReader = class {
+        readAsText(content) { this.onload({ target: { result: content } }); }
+    };
+    vm.runInContext(fn('restoreBackup', options), context);
+    context.restoreBackup();
+    return { backup: JSON.parse(json), restored };
 }
 
 (async () => {
@@ -239,6 +282,40 @@ function fn(name) {
     assert.equal(edited.records[0].markupType, 'Highlight');
 
     fresh.run('highlights = []; saveHighlights()');
+    const documentUrl = 'https://example.com/notes.pdf';
+    const highlightsKey = 'pdf_highlights_' + documentUrl;
+    const sourceKey = 'pdf_annotation_source_' + documentUrl;
+    const backupStorage = {
+        [highlightsKey]: fresh.storage.highlights,
+        [sourceKey]: fresh.storage.annotationSource,
+        'pdf_annotation_source_file:///C:/other.pdf': 'other-document-marker',
+        'pdf_highlights_file:///C:/other.pdf': [],
+        unrelated: 'not part of PDF state'
+    };
+    for (const type of ['Manual', 'Auto']) {
+        const { backup, restored } = backupAndRestore(backupStorage, type);
+        assert.equal(backup.pdfAnnotations[sourceKey], fresh.storage.annotationSource, `${type} backup keeps deletion marker`);
+        assert.deepEqual(backup.pdfAnnotations[highlightsKey], [], 'empty annotation list is retained');
+        assert.equal(backup.pdfAnnotations.unrelated, undefined);
+        assert.equal(restored[sourceKey], fresh.storage.annotationSource, 'restore writes deletion marker unchanged');
+        assert.equal(restored['pdf_annotation_source_file:///C:/other.pdf'], 'other-document-marker');
+        const reopenedBackup = await harness(bytes, {
+            highlights: restored[highlightsKey], annotationSource: restored[sourceKey]
+        });
+        await reopenedBackup.recover();
+        assert.equal(reopenedBackup.run('highlights.length'), 0, `${type} backup/restore must not resurrect three deleted marks`);
+    }
+    for (const [type, includePdf, customInclude] of [['Auto', false, null], ['Manual', true, { pdf: false }]]) {
+        const { backup, restored } = backupAndRestore(backupStorage, type, includePdf, customInclude);
+        assert.equal(backup.pdfAnnotations, undefined, 'excluding PDFs also excludes deletion markers');
+        assert.equal(restored[sourceKey], undefined);
+    }
+    const legacyStorage = { ...backupStorage };
+    delete legacyStorage[sourceKey];
+    const legacy = backupAndRestore(legacyStorage, 'Manual').restored;
+    const reopenedLegacy = await harness(bytes, { highlights: legacy[highlightsKey], annotationSource: legacy[sourceKey] });
+    await reopenedLegacy.recover();
+    assert.equal(reopenedLegacy.run('highlights.length'), 3, 'marker-less legacy backups still recover embedded annotations');
     const intentional = await harness(bytes, fresh.storage);
     await intentional.recover();
     await assertStampOnly(intentional);
