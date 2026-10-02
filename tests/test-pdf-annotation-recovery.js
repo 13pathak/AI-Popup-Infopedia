@@ -26,7 +26,7 @@ function fn(name) {
         if (i) page.setRotation(PDFLib.degrees(i * 90));
         page.drawText('recover this text', { x: 40, y: 105, size: 10 });
         const markup = pdf.context.obj({
-            Type: 'Annot', Subtype: ['Highlight', 'Underline', 'StrikeOut'][i],
+            Type: 'Annot', Subtype: ['Highlight', 'Underline', 'StrikeOut'][i], F: 4,
             Rect: [40, 50, 200, 120], QuadPoints: i ? rotatedQuad : [...quad, 40, 90, 100, 90, 40, 80, 100, 80],
             C: i === 0 ? [1, 0.5, 0] : i === 1 ? [0.25] : [1, 0, 0, 0],
             Contents: PDFHexString.fromText('नोट 中文 🙂\nsecond line <b>plain</b>'),
@@ -38,6 +38,14 @@ function fn(name) {
         markup.set(n('Popup'), popup);
         const annots = pdf.context.obj([ref, popup]);
         if (i === 0) {
+            // A real printable stamp appearance, outside the editable types.
+            const appearance = pdf.context.register(pdf.context.flateStream('1 0 0 rg 0 0 40 20 re f', {
+                Type: 'XObject', Subtype: 'Form', BBox: [0, 0, 40, 20], Resources: {}
+            }));
+            annots.push(pdf.context.register(pdf.context.obj({
+                Type: 'Annot', Subtype: 'Stamp', Rect: [220, 300, 260, 320], F: 4,
+                AP: { N: appearance }, Contents: PDFString.of('Keep stamp')
+            })));
             for (const subtype of ['Link', 'Text', 'FreeText', 'Squiggly']) {
                 annots.push(pdf.context.register(pdf.context.obj({ Type: 'Annot', Subtype: subtype,
                     Rect: [0, 0, 20, 20], QuadPoints: quad, Contents: PDFHexString.fromText('Keep ' + subtype) })));
@@ -92,9 +100,15 @@ function fn(name) {
             viewerIconSvg() { return ''; }, sanitizeRichNote: s => s,
             noteHtmlToPlainText: s => s.replace(/<[^>]*>/g, '')
         });
+        if (options.unlockedFallback) {
+            context.PDFLib = { ...PDFLib, PDFDocument: {
+                load: async () => { throw new Error('Input document is encrypted'); }
+            } };
+        }
         vm.runInContext(`
             let highlights = ${JSON.stringify(initial.highlights || [])}, highlightCounter = 0;
             let annotationRevision = 0, annotationRecoveryReady = false, embeddedMarkups = new Map();
+            let annotationRenderDoc = null;
             let annotationSource = null, storedAnnotationSource = ${JSON.stringify(initial.annotationSource || null)};
             let storedHighlightsExplicitlyEmpty = ${Array.isArray(initial.highlights) && initial.highlights.length === 0};
             let activeHighlightId = null, pendingFlashHighlightId = null, pendingFlashHighlightUntil = 0;
@@ -104,7 +118,7 @@ function fn(name) {
             const ANNOTATION_UNDO_LIMIT = 100, annotationUndoStack = [], annotationRedoStack = [];
         `, context);
         for (const name of ['hasChromeStorage', 'isValidStoredRect', 'hasValidCornerQuad', 'maxStoredId',
-            'sanitizeStoredHighlights', 'recoverEmbeddedAnnotations', 'saveHighlights', 'hexToRgb',
+            'sanitizeStoredHighlights', 'getAnnotationRenderPage', 'recoverEmbeddedAnnotations', 'saveHighlights', 'hexToRgb',
             'drawHighlight', 'mergeHighlightRectangles', 'cloneAnnotationRecord', 'registerUndoEntry',
             'runAnnotationUndo', 'runAnnotationRedo', 'updateUndoRedoButtons', 'pushHighlightDeletedUndo',
             'deleteHighlightForUndo', 'restoreHighlightForUndo', 'removeHighlightOverlaysById',
@@ -113,7 +127,11 @@ function fn(name) {
         vm.runInContext(viewerSource.slice(start, viewerSource.indexOf('\n});', start) + 4), context);
         return { context, storage, alerts, draws, pdfDoc,
             run: code => vm.runInContext(code, context),
-            recover: () => vm.runInContext('recoverEmbeddedAnnotations()', context),
+            async recover() {
+                await vm.runInContext('recoverEmbeddedAnnotations()', context);
+                const renderDoc = vm.runInContext('annotationRenderDoc', context);
+                if (renderDoc) documents.push(renderDoc);
+            },
             async save() { savedBlob = undefined; await handlers.click(); return savedBlob && new Uint8Array(await savedBlob.arrayBuffer()); }
         };
     }
@@ -134,6 +152,33 @@ function fn(name) {
     assert.equal(fresh.run('highlights[0].noteFmt'), undefined, 'PDF comments are plain text');
     assert.equal(fresh.run('highlights[0].author'), 'Zoë 作者');
     assert.equal(fresh.run('highlights[0].createdAt'), Date.parse('2026-01-02T03:04:05Z'));
+
+    // Feed the actual screen/print render options into PDF.js's operator-list
+    // pipeline: this tests native appearance generation without a fake canvas.
+    async function nativeAppearanceIds(h, pageNumber, print = false) {
+        const page = await h.pdfDoc.getPage(pageNumber);
+        const renderPage = await h.context.getAnnotationRenderPage(page);
+        const source = fn(print ? 'printPDF' : 'renderPageContent');
+        const options = source.match(/renderPage\.render\((\{[\s\S]*?\})\)/)[1];
+        const params = vm.runInNewContext(`(${options})`, {
+            pdfjsLib, ctx: null, transform: null, viewport: page.getViewport({ scale: 1 })
+        });
+        const ops = await renderPage.getOperatorList(params);
+        return { annotations: await renderPage.getAnnotations(),
+            ids: ops.fnArray.flatMap((op, i) => op === pdfjsLib.OPS.beginAnnotation ? [ops.argsArray[i][0]] : []) };
+    }
+    async function assertStampOnly(h) {
+        for (const print of [false, true]) {
+            const { annotations, ids } = await nativeAppearanceIds(h, 1, print);
+            const stamp = annotations.find(a => a.subtype === 'Stamp');
+            assert.ok(stamp && ids.includes(stamp.id), `stamp appearance survives ${print ? 'print' : 'display'}`);
+            assert.ok(!annotations.some(a => a.subtype === 'Highlight' && a.quadPoints),
+                'recovered native highlight is removed, so edits/deletions cannot reveal a duplicate');
+        }
+    }
+    await assertStampOnly(fresh);
+    assert.ok((await (await fresh.pdfDoc.getPage(1)).getAnnotations()).some(a => a.subtype === 'Highlight' && a.quadPoints),
+        'original source document remains intact for Save');
     for (let pageNumber = 1; pageNumber <= 3; pageNumber++) {
         fresh.context.viewport = (await fresh.pdfDoc.getPage(pageNumber)).getViewport({ scale: 1.5 });
         fresh.run(`drawHighlight(highlights[${pageNumber - 1}], document.createElement('div'), viewport)`);
@@ -151,12 +196,13 @@ function fn(name) {
     const savedMarks = helpers.readEmbeddedMarkups(savedPdf, PDFLib);
     assert.equal(savedMarks.records.length, 3, 'no duplicate marks');
     assert.equal(savedMarks.unreadable, 1, 'broken original preserved');
-    assert.equal(savedPdf.getPage(0).node.Annots().size(), 7, 'unsupported types and broken popup preserved');
+    assert.equal(savedPdf.getPage(0).node.Annots().size(), 8, 'stamp, unsupported types and broken popup preserved');
     assert.equal(savedMarks.records[0].note, imported.records[0].note, 'Unicode note round-trip');
     assert.deepEqual(savedMarks.records[1].rects, imported.records[1].rects, 'raw rotated quad round-trip');
 
     const reopened = await harness(firstSave);
     await reopened.recover();
+    await assertStampOnly(reopened);
     assert.equal(reopened.run('highlights.length'), 3, 'reopen with wiped storage');
     assert.equal(reopened.run('highlights[0].text'), fresh.run('highlights[0].text'), 'exact quote round-trip');
     const secondSave = await reopened.save();
@@ -182,6 +228,7 @@ function fn(name) {
     fresh.run('highlights = []; saveHighlights()');
     const intentional = await harness(bytes, fresh.storage);
     await intentional.recover();
+    await assertStampOnly(intentional);
     assert.equal(intentional.run('highlights.length'), 0, 'intentional deletion is not resurrected');
     const deleted = helpers.readEmbeddedMarkups(await PDFDocument.load(await intentional.save()), PDFLib);
     assert.equal(deleted.records.length, 0, 'deleted marks removed on Save');
@@ -212,6 +259,27 @@ function fn(name) {
     await failed.recover();
     assert.equal(failed.run('annotationRecoveryReady'), false);
     assert.equal(await failed.save(), undefined, 'failed recovery cannot prune/download');
+    for (const print of [false, true]) {
+        const { annotations, ids } = await nativeAppearanceIds(failed, 1, print);
+        for (const subtype of ['Stamp', 'Highlight']) {
+            assert.ok(annotations.some(a => a.subtype === subtype && ids.includes(a.id)),
+                `failed recovery retains native ${subtype} appearances`);
+        }
+    }
+
+    // Exercise the encrypted-input branch with a real unlocked PDF.js proxy;
+    // only pdf-lib's inability to open encrypted bytes is simulated.
+    const encrypted = await harness(bytes, {}, { unlockedFallback: true });
+    await encrypted.recover();
+    assert.equal(encrypted.run('annotationRecoveryReady'), true);
+    assert.equal(encrypted.run('highlights.length'), 3);
+    assert.equal(encrypted.run('annotationRenderDoc'), null);
+    for (const print of [false, true]) {
+        const { annotations, ids } = await nativeAppearanceIds(encrypted, 1, print);
+        assert.ok(annotations.some(a => a.subtype === 'Stamp' && ids.includes(a.id)));
+        assert.ok(!annotations.some(a => a.subtype === 'Highlight' && ids.includes(a.id)),
+            'unlocked recovered marks are suppressed by their exact PDF.js IDs');
+    }
 
     const noText = await harness();
     const getPage = noText.context.pdfDoc.getPage.bind(noText.context.pdfDoc);
@@ -232,6 +300,13 @@ function fn(name) {
     const rectOnly = helpers.readEmbeddedMarkups(rectOnlyPdf, PDFLib);
     assert.equal(rectOnly.records.length, 1);
     assert.equal(rectOnly.records[0].rects[0].pdfWidth, 20);
+    const direct = await harness(await rectOnlyPdf.save());
+    await direct.recover();
+    assert.equal(direct.run('highlights.length'), 1);
+    for (const print of [false, true]) {
+        assert.equal((await nativeAppearanceIds(direct, 1, print)).ids.length, 0,
+            'direct annotation dictionary is rendered only by our overlay');
+    }
     assert.equal(helpers.pruneEmbeddedMarkups(rectOnlyPdf, rectOnly.managed, PDFLib), 1);
 
     await Promise.all(documents.map(doc => doc.destroy()));

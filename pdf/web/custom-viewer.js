@@ -225,6 +225,9 @@ function viewerPromptDialog(title, message, initialValue, placeholder) {
 }
 
 let pdfDoc = null;
+// Rasterize a copy with only successfully recovered markup removed. Keep the
+// original document for identity, links, text and lossless Save input.
+let annotationRenderDoc = null;
 let scale = 1.25; // Adjusted scale as default zoom
 // Every scale writer (zoom buttons, fit modes, pinch) clamps to this
 // shared range; unbounded zoom pushes canvas backing stores past
@@ -2117,11 +2120,12 @@ async function renderPageContent(pageDiv) {
         canvas.style.height = viewport.height + "px";
 
         const transform = outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : null;
-        const renderTask = page.render({
+        const renderPage = await getAnnotationRenderPage(page);
+        const renderTask = renderPage.render({
             canvasContext: ctx,
             transform,
             viewport,
-            annotationMode: (pdfjsLib.AnnotationMode ? pdfjsLib.AnnotationMode.DISABLE : 0)
+            annotationMode: pdfjsLib.AnnotationMode.ENABLE_STORAGE
         }).promise;
         const textContent = await page.getTextContent();
 
@@ -2287,14 +2291,27 @@ function readLocalFileViaXhr(url, signal) {
     });
 }
 
+async function getAnnotationRenderPage(page) {
+    return annotationRenderDoc ? annotationRenderDoc.getPage(page.pageNumber) : page;
+}
+
 async function recoverEmbeddedAnnotations() {
     const revision = annotationRevision;
+    let renderDoc = null;
     try {
         const bytes = await pdfDoc.getData();
         let recovered;
         try {
             const source = await PDFLib.PDFDocument.load(bytes, { updateMetadata: false, parseSpeed: Infinity });
             recovered = readEmbeddedMarkups(source, PDFLib);
+            // Removing by the exact recovered dictionary indices also handles
+            // direct dictionaries, whose PDF.js annotation IDs are generated.
+            // Unsupported and unreadable appearances remain native on canvas.
+            if (pruneEmbeddedMarkups(source, recovered.managed, PDFLib)) {
+                renderDoc = await pdfjsLib.getDocument({
+                    data: await source.save({ updateFieldAppearances: false }), isEvalSupported: false
+                }).promise;
+            }
         } catch (error) {
             if (!/is encrypted/i.test(String(error?.message))) throw error;
             recovered = await readUnlockedMarkups(pdfDoc);
@@ -2332,11 +2349,18 @@ async function recoverEmbeddedAnnotations() {
                 saveHighlights();
             }
         }
+        // Encrypted documents cannot be rewritten by pdf-lib. PDF.js supplies
+        // exact IDs for the marks recovered through its unlocked document.
+        for (const id of recovered.nativeIds || []) {
+            pdfDoc.annotationStorage.setValue(id, { noView: true, noPrint: true });
+        }
+        annotationRenderDoc = renderDoc;
         annotationRecoveryReady = true;
         if (recovered.unreadable) {
             console.warn(`${recovered.unreadable} unreadable PDF annotation(s) will be preserved in saved files.`);
         }
     } catch (error) {
+        if (renderDoc) await renderDoc.destroy();
         // Keep the document readable, but never let an incomplete import reach
         // the destructive replacement stage in Save.
         console.error('Could not recover embedded PDF annotations', error);
@@ -2954,10 +2978,12 @@ async function printPDF() {
             canvas.width = Math.floor(viewport.width);
             canvas.height = Math.floor(viewport.height);
 
-            await page.render({
+            const renderPage = await getAnnotationRenderPage(page);
+            await renderPage.render({
                 canvasContext: ctx,
                 viewport,
-                annotationMode: (pdfjsLib.AnnotationMode ? pdfjsLib.AnnotationMode.DISABLE : 0)
+                intent: 'print',
+                annotationMode: pdfjsLib.AnnotationMode.ENABLE_STORAGE
             }).promise;
 
             // Composite this page's annotations onto the printed raster.
@@ -5676,6 +5702,7 @@ function scrollToPage(pageNumber) {
 
 // ==================== Sidebar & Outline Feature ====================
 function switchTab(tabName) {
+    document.getElementById('sidebar-annotation-filters').hidden = tabName !== 'comments';
     if (sidebar.classList.contains('hidden')) {
         sidebar.classList.remove('hidden');
         window.dispatchEvent(new Event('resize'));
@@ -5754,6 +5781,81 @@ function formatCommentAge(ts, now = Date.now()) {
 // offset computed against different content.
 let commentsCurrentPageOnly = false;
 let commentsFilterLastPage = null;
+const commentsSelectedColors = new Set();
+let commentsSearchQuery = '';
+let commentsFilterLastQuery = '';
+let commentsColorSignature = '';
+
+function annotationFilterColor(color) {
+    const rgb = hexToRgb(color); // Match the PDF renderer, including legacy hex formats/defaults.
+    return '#' + [rgb.r, rgb.g, rgb.b].map(value => Math.round(value * 255).toString(16).padStart(2, '0')).join('');
+}
+
+function normalizeAnnotationSearch(text) {
+    return String(text || '').normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+function annotationMatchesFilters(hl, page, query = normalizeAnnotationSearch(commentsSearchQuery)) {
+    if (page !== null && hl.pageNumber !== page) return false;
+    if (commentsSelectedColors.size && !commentsSelectedColors.has(annotationFilterColor(hl.color))) return false;
+    if (!query) return true;
+    if (normalizeAnnotationSearch(hl.text).includes(query)) return true;
+    const note = hl.noteFmt === 'html' ? noteHtmlToPlainText(sanitizeRichNote(hl.note || '')) : hl.note;
+    return normalizeAnnotationSearch(note).includes(query);
+}
+
+function renderAnnotationFilters(isCommentsActive) {
+    const controls = document.getElementById('sidebar-annotation-filters');
+    if (!controls) return;
+    controls.hidden = !isCommentsActive;
+    if (!isCommentsActive) return;
+    const colors = new Set(highlights.map(hl => annotationFilterColor(hl.color)));
+    // Keep a selected color available for toggling off after its last mark
+    // is deleted/recolored. Undo can bring those matches back.
+    commentsSelectedColors.forEach(color => colors.add(color));
+    const ordered = [...colors].sort();
+    const colorHost = document.getElementById('sidebar-annotation-colors');
+    const signature = ordered.join(',');
+    if (signature !== commentsColorSignature) {
+        commentsColorSignature = signature;
+        colorHost.replaceChildren();
+        const names = { '#ffff98': 'Yellow', '#53ffbc': 'Green', '#80ebff': 'Blue', '#ffcbe6': 'Pink', '#ff4f5f': 'Red' };
+        ordered.forEach(color => {
+            const chip = document.createElement('button');
+            chip.type = 'button';
+            chip.className = 'sidebar-color-chip';
+            chip.dataset.color = color;
+            chip.style.setProperty('--annotation-color', color);
+            chip.title = names[color] || color.toUpperCase();
+            chip.setAttribute('aria-label', `Filter by ${chip.title}`);
+            chip.addEventListener('click', () => {
+                if (commentsSelectedColors.has(color)) commentsSelectedColors.delete(color);
+                else commentsSelectedColors.add(color);
+                renderSidebar();
+            });
+            colorHost.appendChild(chip);
+        });
+    }
+    colorHost.querySelectorAll('button').forEach(chip => {
+        chip.setAttribute('aria-pressed', String(commentsSelectedColors.has(chip.dataset.color)));
+    });
+    document.getElementById('sidebar-annotation-clear').disabled =
+        !commentsCurrentPageOnly && !commentsSelectedColors.size && !commentsSearchQuery;
+}
+
+// Keep the input node alive during renders, so live filtering preserves
+// focus, caret position and IME composition.
+document.getElementById('sidebar-annotation-search').addEventListener('input', event => {
+    commentsSearchQuery = event.target.value;
+    renderSidebar();
+});
+document.getElementById('sidebar-annotation-clear').addEventListener('click', () => {
+    commentsCurrentPageOnly = false;
+    commentsSelectedColors.clear();
+    commentsSearchQuery = '';
+    document.getElementById('sidebar-annotation-search').value = '';
+    renderSidebar();
+});
 
 // Keeps the current-page filter in step with the viewed page; hooked into
 // updatePageNumber's page-changed branch. A near-zero no-op unless the
@@ -5795,9 +5897,11 @@ function renderSidebar() {
     
     const headerActions = document.getElementById('sidebar-header-actions');
     const isCommentsActive = tabComments && tabComments.classList.contains('active');
+    renderAnnotationFilters(isCommentsActive);
 
     if (highlights.length === 0) {
         if (headerActions && isCommentsActive) headerActions.innerHTML = '';
+        if (sidebarTitle && isCommentsActive) sidebarTitle.textContent = 'Comments (0)';
         sidebarContent.innerHTML = sidebarEmptyHtml('messageSquare', 'No comments or highlights yet.', 'Select text in the document to highlight it, then add a comment.');
         return;
     }
@@ -5816,12 +5920,12 @@ function renderSidebar() {
     // touch it — the filter must name the page THIS tab is showing (see
     // the adoption branch in the storage.onChanged listener).
     const filterPage = commentsCurrentPageOnly ? autoSavedLastPage : null;
-    const visibleHighlights = filterPage === null
-        ? sortedHighlights
-        : sortedHighlights.filter(hl => hl.pageNumber === filterPage);
+    const searchQuery = normalizeAnnotationSearch(commentsSearchQuery);
+    const visibleHighlights = sortedHighlights.filter(hl => annotationMatchesFilters(hl, filterPage, searchQuery));
+    const filtersActive = filterPage !== null || commentsSelectedColors.size > 0 || !!searchQuery;
 
     if (sidebarTitle && isCommentsActive) {
-        sidebarTitle.textContent = filterPage === null
+        sidebarTitle.textContent = !filtersActive
             ? `Comments (${sortedHighlights.length})`
             : `Comments (${visibleHighlights.length} of ${sortedHighlights.length})`;
     }
@@ -5852,14 +5956,17 @@ function renderSidebar() {
     // New content class under the filter (chip toggled, or the viewer
     // moved to a different page) restarts the list at the top; plain
     // mutations (note edits, deletes) keep their scroll position.
-    const filterSwitched = filterPage !== commentsFilterLastPage;
+    const filterQuery = JSON.stringify([[...commentsSelectedColors].sort(), searchQuery]);
+    const filterSwitched = filterPage !== commentsFilterLastPage || filterQuery !== commentsFilterLastQuery;
     commentsFilterLastPage = filterPage;
+    commentsFilterLastQuery = filterQuery;
 
-    if (filterPage !== null && visibleHighlights.length === 0) {
+    if (visibleHighlights.length === 0) {
         const wrap = document.createElement('div');
         wrap.innerHTML = sidebarEmptyHtml('messageSquare',
-            `No comments on Page ${filterPage}.`,
-            'Scroll the document or switch the filter off to see every comment.');
+            filterPage !== null && !commentsSelectedColors.size && !searchQuery
+                ? `No comments on Page ${filterPage}.` : 'No matching comments.',
+            'Change or clear the filters to see more comments.');
         sidebarContent.appendChild(wrap.firstElementChild);
         sidebarContent.scrollTop = 0;
         return;
@@ -5869,7 +5976,7 @@ function renderSidebar() {
     // list needs no grouping of its own.
     const countsPerPage = new Map();
     if (filterPage === null) {
-        for (const hl of sortedHighlights) {
+        for (const hl of visibleHighlights) {
             countsPerPage.set(hl.pageNumber, (countsPerPage.get(hl.pageNumber) || 0) + 1);
         }
     }
@@ -6047,7 +6154,14 @@ function renderSidebar() {
         // listener, registered just above) closes it, so each writing
         // burst in the sidebar is one undo step.
         noteInput.addEventListener('focus', () => beginNoteUndoSession(hl));
-        noteInput.addEventListener('blur', () => endNoteUndoSessionIfFor(hl.id));
+        noteInput.addEventListener('blur', () => {
+            endNoteUndoSessionIfFor(hl.id);
+            if (normalizeAnnotationSearch(commentsSearchQuery)) {
+                setTimeout(() => {
+                    if (!document.activeElement?.closest('.sidebar-item-note-input')) renderSidebar();
+                }, 0);
+            }
+        });
 
         item.appendChild(noteInput);
 
@@ -6107,7 +6221,7 @@ function focusSidebarComment(hlId) {
         // the user's focus: switch the filter to that page and keep
         // commentsCurrentPageOnly active.
         const targetHl = highlights.find(h => h.id === hlId);
-        if (targetHl && targetHl.pageNumber) {
+        if (targetHl && targetHl.pageNumber && annotationMatchesFilters(targetHl, null)) {
             autoSavedLastPage = targetHl.pageNumber;
             const pageNumInput = document.getElementById('page_num');
             if (pageNumInput) pageNumInput.value = targetHl.pageNumber;
@@ -6508,4 +6622,3 @@ window.addEventListener('wheel', (e) => {
 // Prevent macOS / WebKit gesture pinch zooming the entire document
 window.addEventListener('gesturestart', (e) => e.preventDefault(), { passive: false });
 window.addEventListener('gesturechange', (e) => e.preventDefault(), { passive: false });
-

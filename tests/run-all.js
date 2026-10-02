@@ -181,6 +181,11 @@ async function run() {
     await pollEndpoint(`http://127.0.0.1:${CDP_PORT}/json`, 15000);
     console.log(`  CDP ready on port ${CDP_PORT}`);
 
+    console.log('Testing annotation color and text filters...');
+    const filtersProc = spawn(process.execPath, [path.join(__dirname, 'e2e-annotation-filters.js')], { stdio: 'inherit' });
+    const filtersCode = await new Promise(res => filtersProc.on('exit', code => res(code ?? 0)));
+    if (filtersCode !== 0) throw new Error('Annotation filter tests failed.');
+
     // 9. Run E2E tests
     console.log('[9/11] Executing E2E undo/redo test harness...');
     const testProc = spawn(process.execPath, [path.join(__dirname, 'e2e-undo.js')], {

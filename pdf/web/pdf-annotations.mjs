@@ -105,6 +105,7 @@ export function readEmbeddedMarkups(pdf, PDFLib) {
 // while pdf-lib cannot export them. Retain that reading/editing workflow.
 export async function readUnlockedMarkups(pdf) {
     const records = [];
+    const nativeIds = [];
     let unreadable = 0;
     for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
         const page = await pdf.getPage(pageNumber);
@@ -113,6 +114,7 @@ export async function readUnlockedMarkups(pdf) {
             const points = annot.quadPoints?.flatMap(quad => quad.flatMap(p => [p.x, p.y]));
             const rects = rectsFromQuadPoints(points);
             if (!rects.length) { unreadable++; continue; }
+            nativeIds.push(annot.id);
             records.push({
                 id: records.length + 1, pageNumber, rects, markupType: annot.subtype,
                 color: colorHex(annot.color ? Array.from(annot.color, c => c / 255) : null),
@@ -121,7 +123,7 @@ export async function readUnlockedMarkups(pdf) {
             });
         }
     }
-    return { records, managed: new Map(), unreadable };
+    return { records, managed: new Map(), unreadable, nativeIds };
 }
 
 // Only prune dictionaries that ingestion could represent, plus their popups.

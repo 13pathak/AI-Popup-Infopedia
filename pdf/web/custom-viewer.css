@@ -1004,6 +1004,66 @@ button, input, textarea, select {
     outline-offset: 1px;
 }
 
+#sidebar-annotation-filters {
+    flex-shrink: 0;
+    padding: 8px 14px 10px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+}
+
+#sidebar-annotation-filters[hidden] { display: none; }
+#sidebar-annotation-colors { display: flex; flex-wrap: wrap; gap: 7px; }
+.sidebar-color-chip {
+    width: 26px;
+    height: 26px;
+    border: 2px solid var(--border-control);
+    border-radius: 50%;
+    background: var(--annotation-color);
+    cursor: pointer;
+    padding: 0;
+    margin-bottom: 8px;
+}
+.sidebar-color-chip[aria-pressed="true"] {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+.sidebar-color-chip[aria-pressed="true"]::after {
+    content: '✓';
+    color: #111;
+    background: #fff;
+    border-radius: 50%;
+    font-size: 12px;
+    font-weight: bold;
+}
+.sidebar-annotation-search-row { display: flex; align-items: center; gap: 6px; }
+#sidebar-annotation-search {
+    flex: 1;
+    min-width: 0;
+    width: 100%;
+    border: 1px solid var(--border-control);
+    border-radius: 6px;
+    padding: 6px 8px;
+    font: inherit;
+    font-size: 12px;
+    background: var(--surface-alt);
+    color: var(--text);
+}
+#sidebar-annotation-clear {
+    flex-shrink: 0;
+    border: 1px solid var(--border-control);
+    border-radius: 6px;
+    padding: 6px;
+    font: inherit;
+    font-size: 11px;
+    background: var(--surface-raised);
+    color: var(--text);
+    cursor: pointer;
+}
+#sidebar-annotation-clear:disabled { opacity: .5; cursor: default; }
+.sidebar-color-chip:focus-visible,
+#sidebar-annotation-search:focus-visible,
+#sidebar-annotation-clear:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
 /* Sticky "Page N" group header between comment cards. Edge-to-edge margins
    and padding prevent cards from bleeding through the sides or top while scrolling. */
 .sidebar-page-divider {
