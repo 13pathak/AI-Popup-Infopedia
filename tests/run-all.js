@@ -152,6 +152,16 @@ async function run() {
   const noteSyncCode = await new Promise(res => noteSyncProc.on('exit', code => res(code ?? 0)));
   if (noteSyncCode !== 0) throw new Error('Cross-tab note synchronization tests failed.');
 
+  console.log('Testing deferred page unloading during fast scrolling...');
+  const unloadingProc = spawn(process.execPath, [path.join(__dirname, 'test-page-unloading.js')], { stdio: 'inherit' });
+  const unloadingCode = await new Promise(res => unloadingProc.on('exit', code => res(code ?? 0)));
+  if (unloadingCode !== 0) throw new Error('Page unloading tests failed.');
+
+  console.log('Testing rotated-text search geometry...');
+  const searchGeometryProc = spawn(process.execPath, [path.join(__dirname, 'test-search-geometry.js')], { stdio: 'inherit' });
+  const searchGeometryCode = await new Promise(res => searchGeometryProc.on('exit', code => res(code ?? 0)));
+  if (searchGeometryCode !== 0) throw new Error('Search geometry tests failed.');
+
   // 7. Start HTTP server
   console.log(`[7/11] Starting local HTTP server on port ${PORT}...`);
   const server = createServer();

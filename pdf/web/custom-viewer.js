@@ -5243,17 +5243,25 @@ async function performSearch(query) {
                     // correct when the run is rotated/skewed and |d| alone
                     // collapses to 0.
                     const height = Math.hypot(t[2], t[3]);
+                    const offset = (s - item.startIndex) * unitW;
                     const rect = {
-                        pdfX: t[4] + (s - item.startIndex) * unitW,
+                        pdfX: t[4] + offset,
                         pdfY: t[5] + height,
                         pdfWidth: spanChars * unitW,
                         pdfHeight: height
                     };
-                    if (t[1] !== 0 || t[2] !== 0) {
+                    if (t[1] !== 0 || t[2] !== 0 || t[0] < 0 || t[3] < 0) {
                         // Non-upright runs carry their full matrix so the
                         // draw step can place a rotated quad; upright text
                         // keeps the axis-aligned fast path untouched.
+                        const advanceLength = Math.hypot(t[0], t[1]);
+                        if (!advanceLength) continue;
                         rect.matrix = t.slice();
+                        // The draw step uses the matrix origin, not pdfX.
+                        // Move it to the matching substring along the run's
+                        // advance vector, without changing cached text data.
+                        rect.matrix[4] += offset * t[0] / advanceLength;
+                        rect.matrix[5] += offset * t[1] / advanceLength;
                         rect.dirWidth = rect.pdfWidth;
                         rect.dirHeight = height;
                     }
