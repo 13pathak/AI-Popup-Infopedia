@@ -79,7 +79,7 @@ function fn(name) {
         const alerts = [], draws = [], handlers = {};
         let savedBlob;
         const element = () => ({ dataset: {}, style: {}, disabled: false,
-            classList: { add() {}, remove() {} }, appendChild(child) { draws.push(child); },
+            classList: { add() {}, remove() {}, contains() { return true; } }, appendChild(child) { draws.push(child); },
             addEventListener(type, handler) { handlers[type] = handler; }, click() {} });
         const button = element();
         const context = vm.createContext({
@@ -113,6 +113,7 @@ function fn(name) {
             let storedHighlightsExplicitlyEmpty = ${Array.isArray(initial.highlights) && initial.highlights.length === 0};
             let activeHighlightId = null, pendingFlashHighlightId = null, pendingFlashHighlightUntil = 0;
             let savePdfInProgress = false;
+            const richEditorCommits = new WeakMap();
             const SAVE_FETCH_TIMEOUT_MS = 1000;
             const SYNC_KEYS = { highlights: 'highlights', annotationSource: 'annotationSource' };
             const ANNOTATION_UNDO_LIMIT = 100, annotationUndoStack = [], annotationRedoStack = [];
@@ -125,6 +126,10 @@ function fn(name) {
             'detachHighlightPopupsById', 'applyHighlightEditForUndo']) vm.runInContext(fn(name), context);
         const start = viewerSource.indexOf("document.getElementById('save_pdf').addEventListener");
         vm.runInContext(viewerSource.slice(start, viewerSource.indexOf('\n});', start) + 4), context);
+        let shortcutHandler;
+        context.window = { addEventListener(type, handler) { shortcutHandler = handler; } };
+        const shortcutStart = viewerSource.indexOf("window.addEventListener('keydown'", viewerSource.indexOf('// Route Ctrl+S'));
+        vm.runInContext(viewerSource.slice(shortcutStart, viewerSource.indexOf('}, true);', shortcutStart) + 9), context);
         return { context, storage, alerts, draws, pdfDoc,
             run: code => vm.runInContext(code, context),
             async recover() {
@@ -132,7 +137,15 @@ function fn(name) {
                 const renderDoc = vm.runInContext('annotationRenderDoc', context);
                 if (renderDoc) documents.push(renderDoc);
             },
-            async save() { savedBlob = undefined; await handlers.click(); return savedBlob && new Uint8Array(await savedBlob.arrayBuffer()); }
+            async save() { savedBlob = undefined; await handlers.click(); return savedBlob && new Uint8Array(await savedBlob.arrayBuffer()); },
+            async shortcutSave(modifier) {
+                savedBlob = undefined;
+                let saving;
+                button.click = () => { saving = handlers.click(); };
+                shortcutHandler({ [modifier]: true, key: 's', code: 'KeyS', preventDefault() {}, stopImmediatePropagation() {} });
+                await saving;
+                return savedBlob && new Uint8Array(await savedBlob.arrayBuffer());
+            }
         };
     }
 
@@ -280,6 +293,55 @@ function fn(name) {
         assert.ok(!annotations.some(a => a.subtype === 'Highlight' && ids.includes(a.id)),
             'unlocked recovered marks are suppressed by their exact PDF.js IDs');
     }
+
+    // Focused sidebar notes use the real editor, sidebar save callback,
+    // shortcut listener and PDF Save handler. Only the DOM surface is mocked.
+    const sidebar = await harness();
+    await sidebar.recover();
+    const editorEvents = new Map();
+    const noteInput = {
+        innerHTML: 'Original sidebar note',
+        get textContent() { return this.innerHTML.replace(/<[^>]*>/g, ''); },
+        classList: { toggle() {} },
+        addEventListener(type, listener) {
+            if (!editorEvents.has(type)) editorEvents.set(type, []);
+            editorEvents.get(type).push(listener);
+        },
+        closest() { return this; }
+    };
+    Object.assign(sidebar.context, {
+        noteInput, escapeHtml: s => s,
+        updateHighlightIndicatorsOnPage() {}, syncFloatingNoteEditorForUndo() {}
+    });
+    sidebar.context.document.activeElement = noteInput;
+    sidebar.run("let noteUndoSession = null; const hl = highlights[0]; hl.note = 'Original sidebar note'; hl.noteFmt = 'html';");
+    for (const name of ['attachRichEditor', 'getRichNoteContent', 'beginNoteUndoSession',
+        'commitNoteUndoEntry', 'applyNoteForUndo']) sidebar.run(fn(name));
+    const editorStart = viewerSource.indexOf('attachRichEditor(noteInput, {');
+    sidebar.run(viewerSource.slice(editorStart, viewerSource.indexOf('\n        });', editorStart) + 12));
+    editorEvents.get('focus').forEach(listener => listener());
+    sidebar.run('beginNoteUndoSession(hl)');
+    async function checkSidebarSave(html, modifier) {
+        noteInput.innerHTML = html;
+        editorEvents.get('input').forEach(listener => listener());
+        const output = modifier ? await sidebar.shortcutSave(modifier) : await sidebar.save();
+        assert.ok(output, 'Save exports a PDF with the sidebar still focused');
+        const records = helpers.readEmbeddedMarkups(await PDFDocument.load(output), PDFLib).records;
+        assert.equal(records[0].note, html.replace(/<[^>]*>/g, ''), 'export uses current editor text');
+        assert.equal(sidebar.storage.highlights[0].note, html || null, 'current rich text is persisted');
+        assert.equal(sidebar.context.document.activeElement, noteInput, 'Save does not change focus');
+    }
+    await checkSidebarSave('Fresh <b>bold</b> 中文 🙂', 'ctrlKey');
+    await checkSidebarSave('Continued <u>edit</u>', 'metaKey');
+    await checkSidebarSave('Button edit');
+    await checkSidebarSave('', 'ctrlKey');
+    await checkSidebarSave('', 'ctrlKey');
+    editorEvents.get('blur').forEach(listener => listener());
+    assert.equal(sidebar.run('annotationUndoStack.length'), 1, 'Save and blur keep one undo step per session');
+    sidebar.run('runAnnotationUndo()');
+    assert.equal(sidebar.run('highlights[0].note'), 'Original sidebar note');
+    sidebar.run('runAnnotationRedo()');
+    assert.ok(!sidebar.run('highlights[0].note'), 'redo restores cleared note');
 
     const noText = await harness();
     const getPage = noText.context.pdfDoc.getPage.bind(noText.context.pdfDoc);

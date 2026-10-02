@@ -832,6 +832,10 @@ function tryAutoListOnBackspace(el) {
     return deleteCharsBackward(del);
 }
 
+// Save can commit a focused editor without moving its caret or ending the
+// current note undo session. Weak keys let removed sidebar cards be collected.
+const richEditorCommits = new WeakMap();
+
 function attachRichEditor(el, { getInitial, onSave, onInput } = {}) {
     if (!el) return;
 
@@ -921,16 +925,19 @@ function attachRichEditor(el, { getInitial, onSave, onInput } = {}) {
         }
     });
 
-    el.addEventListener('blur', () => {
+    const commit = () => {
         updateEmptyState();
         if (typeof onSave === 'function') {
             const currentClean = getRichNoteContent(el);
             const initialClean = initialContent ? sanitizeRichNote(initialContent) : null;
             if (currentClean !== initialClean) {
                 onSave(currentClean);
+                initialContent = currentClean || '';
             }
         }
-    });
+    };
+    richEditorCommits.set(el, commit);
+    el.addEventListener('blur', commit);
 }
 
 function saveHighlights(reRenderSidebar = true) {
@@ -4844,6 +4851,10 @@ document.getElementById('save_pdf').addEventListener('click', async () => {
     savePdfInProgress = true;
     saveBtn.disabled = true;
     try {
+        // A shortcut/programmatic click does not blur the sidebar editor.
+        // Commit its current rich text before taking the export snapshot.
+        const sidebarEditor = document.activeElement?.closest('.sidebar-item-note-input');
+        richEditorCommits.get(sidebarEditor)?.();
         // Replacement indices and geometry belong to this exact document.
         // Re-fetching a changed URL could remove unrelated annotations.
         const existingPdfBytes = await Promise.race([

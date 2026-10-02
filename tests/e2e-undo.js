@@ -367,6 +367,84 @@ async function main() {
     s = await evalPage(stateExpr);
     assert(s.cards === cardsAfterCreate, 'redo restored all of them', s);
 
+    // ---- Test 8: Save while the sidebar editor still has focus ----
+    // Capture the real downloaded PDF bytes; inspecting just the editor DOM
+    // would miss stale annotation data in the export.
+    await evalPage(`(() => {
+        document.getElementById('icon-tab-comments').click();
+        const createUrl = URL.createObjectURL.bind(URL);
+        URL.createObjectURL = blob => {
+            if (blob.type === 'application/pdf') {
+                window.savedPdfBytes = blob.arrayBuffer().then(buffer => Array.from(new Uint8Array(buffer)));
+            }
+            return createUrl(blob);
+        };
+        const anchorClick = HTMLAnchorElement.prototype.click;
+        HTMLAnchorElement.prototype.click = function() {
+            if (!this.download.endsWith('.pdf')) anchorClick.call(this);
+        };
+        window.savedNoteEditor = [...document.querySelectorAll('#sidebar-content-comments .sidebar-item-note-input')]
+            .find(el => el.textContent.includes('second burst'));
+        window.savedNoteId = savedNoteEditor.closest('.sidebar-item').dataset.hlId;
+        window.noteBeforeSaveTest = savedNoteEditor.textContent;
+        window.saveTestBlurCount = 0;
+        savedNoteEditor.addEventListener('blur', () => window.saveTestBlurCount++);
+        savedNoteEditor.focus();
+    })()`);
+
+    async function editSidebarAndSave(html, shortcut = 'ctrl') {
+        await evalPage(`(() => {
+            const range = document.createRange();
+            range.selectNodeContents(savedNoteEditor);
+            const sel = window.getSelection();
+            sel.removeAllRanges(); sel.addRange(range);
+            if (${JSON.stringify(html)} === '') document.execCommand('delete');
+            else document.execCommand('insertHTML', false, ${JSON.stringify(html)});
+            window.savedPdfBytes = null;
+            window.saveTestCaret = { node: sel.anchorNode, offset: sel.anchorOffset };
+        })()`);
+        if (shortcut === 'button') await evalPage(`document.getElementById('save_pdf').click()`);
+        else await key('KeyS', 's', shortcut === 'meta' ? 4 : CTRL);
+        const bytes = await evalPage(`new Promise((resolve, reject) => {
+            const start = Date.now();
+            const check = () => {
+                if (window.savedPdfBytes) resolve(window.savedPdfBytes);
+                else if (Date.now() - start > 10000) reject(new Error('PDF export did not finish'));
+                else setTimeout(check, 50);
+            };
+            check();
+        })`, true);
+        const PDFLib = require('../pdf-lib.min.js');
+        const doc = await PDFLib.PDFDocument.load(Uint8Array.from(bytes));
+        const { readEmbeddedMarkups } = await import('../pdf/web/pdf-annotations.mjs');
+        const notes = readEmbeddedMarkups(doc, PDFLib).records.map(h => h.note);
+        assert(await evalPage(`document.activeElement === savedNoteEditor && saveTestBlurCount === 0`),
+            `${shortcut} Save commits without blurring the sidebar`);
+        assert(await evalPage(`window.getSelection().anchorNode === saveTestCaret.node && window.getSelection().anchorOffset === saveTestCaret.offset`),
+            `${shortcut} Save preserves the caret`);
+        return notes;
+    }
+
+    let exportedNotes = await editSidebarAndSave('Fresh <b>bold</b> &amp; 中文 🙂<br>second line');
+    assert(exportedNotes.some(note => note.includes('Fresh bold & 中文 🙂') && note.includes('second line')),
+        'Ctrl+S exports current rich sidebar text and Unicode', exportedNotes);
+    exportedNotes = await editSidebarAndSave('Continued edit', 'meta');
+    assert(exportedNotes.includes('Continued edit'), 'Cmd+S exports continued edits without blur', exportedNotes);
+    exportedNotes = await editSidebarAndSave('Button edit', 'button');
+    assert(exportedNotes.includes('Button edit'), 'programmatic Save also commits the focused editor', exportedNotes);
+    exportedNotes = await editSidebarAndSave('');
+    assert(exportedNotes.every(note => !note), 'Ctrl+S exports note deletion without stale content', exportedNotes);
+    // Another save and then blur must not split one editing session into
+    // several undo entries or overwrite the cleared note with stale text.
+    await editSidebarAndSave('');
+    await evalPage(`savedNoteEditor.blur()`);
+    await key('KeyZ', 'z', CTRL);
+    assert(await evalPage(`document.querySelector('#sidebar-content-comments .sidebar-item[data-hl-id="' + savedNoteId + '"] .sidebar-item-note-input').textContent === noteBeforeSaveTest`),
+        'one undo restores the note from before the entire Save/edit session');
+    await key('KeyY', 'y', CTRL);
+    assert(await evalPage(`document.querySelector('#sidebar-content-comments .sidebar-item[data-hl-id="' + savedNoteId + '"] .sidebar-item-note-input').textContent === ''`),
+        'redo restores the cleared note');
+
     s = await evalPage(stateExpr);
     console.log('final state:', JSON.stringify(s));
     console.log(process.exitCode ? 'E2E FAILED' : 'E2E PASSED');
