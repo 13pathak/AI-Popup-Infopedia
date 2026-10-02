@@ -162,6 +162,11 @@ async function run() {
   const searchGeometryCode = await new Promise(res => searchGeometryProc.on('exit', code => res(code ?? 0)));
   if (searchGeometryCode !== 0) throw new Error('Search geometry tests failed.');
 
+  console.log('Testing initial navigation races...');
+  const initialNavigationProc = spawn(process.execPath, [path.join(__dirname, 'test-initial-navigation.js')], { stdio: 'inherit' });
+  const initialNavigationCode = await new Promise(res => initialNavigationProc.on('exit', code => res(code ?? 0)));
+  if (initialNavigationCode !== 0) throw new Error('Initial navigation tests failed.');
+
   // 7. Start HTTP server
   console.log(`[7/11] Starting local HTTP server on port ${PORT}...`);
   const server = createServer();

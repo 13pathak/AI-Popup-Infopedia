@@ -2489,6 +2489,9 @@ async function loadPDF() {
         // resume entirely, regressing every stored position to page 1 on
         // reopen (the pre-#16 race).
         const savedResumePage = autoSavedLastPage;
+        // Capture before asynchronous layout/destination work so a newer
+        // hashchange owns navigation even while the initial target resolves.
+        const initialNavigationGeneration = deepLinkGeneration;
         await renderAllPages();
 
         pdfDoc.getOutline().then(outline => {
@@ -2500,15 +2503,17 @@ async function loadPDF() {
         // outranks the saved reading position; scrollToPage falls back to
         // the deferred-scroll machinery when the target's layout has not
         // caught up yet, exactly like the auto-resume path below.
-        const deepLinkPage = await resolveDeepLinkPage();
-        if (deepLinkPage !== null) {
+        const deepLinkPage = initialNavigationGeneration === deepLinkGeneration
+            ? await resolveDeepLinkPage() : null;
+        if (initialNavigationGeneration !== deepLinkGeneration) {
+            initialResumeSettled = true;
+        } else if (deepLinkPage !== null) {
             // The generation token cancels this delayed jump if a
             // hashchange lands before it fires: the change names a newer
             // target and must not be clobbered by the stale one (the
             // hashchange listener performs the fresh navigation instead).
-            const gen = deepLinkGeneration;
             setTimeout(() => {
-                if (gen === deepLinkGeneration) scrollToPage(deepLinkPage);
+                if (initialNavigationGeneration === deepLinkGeneration) scrollToPage(deepLinkPage);
                 initialResumeSettled = true;
             }, 300); // small delay to ensure rendering has caught up
         } else if (savedViewState && savedViewState.scrollRatio !== null) {
@@ -2517,11 +2522,10 @@ async function loadPDF() {
             // (page-top resume below remains the legacy fallback when no
             // ratio was stored). Same generation guard as the deep link:
             // a hashchange inside the delay names a newer target.
-            const gen = deepLinkGeneration;
             const savedRatio = savedViewState.scrollRatio;
             setTimeout(() => {
                 const scrollContainer = document.getElementById('viewerContainer');
-                if (gen === deepLinkGeneration && scrollContainer && scrollContainer.scrollHeight > 0) {
+                if (initialNavigationGeneration === deepLinkGeneration && scrollContainer && scrollContainer.scrollHeight > 0) {
                     scrollContainer.scrollTop = savedRatio * scrollContainer.scrollHeight;
                     updatePageNumber();
                 }
@@ -2529,7 +2533,7 @@ async function loadPDF() {
             }, 300); // small delay to ensure rendering has caught up
         } else if (savedResumePage > 1 && savedResumePage <= pdfDoc.numPages) {
             setTimeout(() => {
-                scrollToPage(savedResumePage);
+                if (initialNavigationGeneration === deepLinkGeneration) scrollToPage(savedResumePage);
                 initialResumeSettled = true;
             }, 300); // small delay to ensure rendering has caught up
         } else {
