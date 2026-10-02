@@ -1188,8 +1188,8 @@ function pushHighlightEditUndo(hlId, before, after) {
 }
 
 // --- Note-edit sessions ---
-// Notes commit continuously (the floating editor autosaves every
-// ~300 ms of pause; sidebar cards save on blur), so recording each
+// Floating notes record history on input and autosave after ~300 ms of
+// pause; sidebar cards commit on save/blur. Recording each
 // commit would shatter one writing burst into a dozen undo steps.
 // Opening an editor for a highlight opens a session carrying the
 // pre-session note; every commit inside the session updates the top
@@ -1220,12 +1220,14 @@ function commitNoteUndoEntry(hl) {
     const session = noteUndoSession;
     if (!session || session.hlId !== hl.id) return;
     const after = { note: hl.note || null, noteFmt: hl.noteFmt || null };
-    if (after.note === session.note) return; // net no-op (typed, then removed it all)
     const top = annotationUndoStack[annotationUndoStack.length - 1];
     if (top && top.kind === 'note' && top.token === session.token) {
+        // Include a return to the initial text, or Redo could resurrect an
+        // intermediate edit that the user has already removed.
         top.after = after; // same burst: keep the original before-state
         return;
     }
+    if (after.note === session.note && after.noteFmt === session.noteFmt) return; // net no-op
     const entry = {
         kind: 'note',
         token: session.token,
@@ -1245,7 +1247,10 @@ function applyNoteForUndo(hlId, state) {
         delete hl.noteFmt;
     } else {
         hl.note = state.note;
-        hl.noteFmt = state.noteFmt || 'html';
+        // Missing format means plain text (including imported PDF comments).
+        // Defaulting it to HTML interprets literal tags and loses them on Save.
+        if (state.noteFmt) hl.noteFmt = state.noteFmt;
+        else delete hl.noteFmt;
     }
     saveHighlights();
     updateHighlightIndicatorsOnPage(hl);
@@ -1634,6 +1639,7 @@ function adoptRemoteViewerTheme(key, value) {
 }
 
 function adoptRemoteHighlights(remote) {
+    const previousNoteTarget = getNotePopupTargetHighlight();
     annotationRevision++;
     // External wholesale replacement invalidates undo history: entries
     // hold id-based references into arrays this tab no longer owns.
@@ -1642,6 +1648,7 @@ function adoptRemoteHighlights(remote) {
     // Keep id allocation above everything now known, or this tab's next
     // created highlight could collide with one from the other tab.
     highlightCounter = highlights.reduce((max, h) => Math.max(max, (h && h.id) || 0), highlightCounter);
+    syncFloatingNoteEditorAfterRemoteUpdate(previousNoteTarget);
     // Popups anchored to a highlight the other tab deleted would dangle.
     if (activeHighlightId !== null && !highlights.some(h => h.id === activeHighlightId)) {
         hidePopups();
@@ -2086,6 +2093,7 @@ async function setupPage(num) {
 }
 
 async function renderPageContent(pageDiv) {
+    if (pageDiv._inRenderBuffer === false) return;
     if (pageDiv.dataset.loaded === "true" || pageDiv.dataset.loaded === "rendering") return;
     // Rescale transition: a zoom marked this page while its previous
     // render was still on screen. Draw the fresh frame on top of the
@@ -2158,6 +2166,14 @@ async function renderPageContent(pageDiv) {
 
             await Promise.all([renderTask, textLayer.render()]);
 
+            // The observer may have requested unloading while this draw was
+            // in flight. Recheck before swapping canvases or retrying a zoom.
+            if (pageDiv._inRenderBuffer === false) {
+                pageDiv.dataset.loaded = 'true';
+                unloadPageContent(pageDiv);
+                return;
+            }
+
             // A zoom landing mid-draw swapped _viewport again: carry this
             // finished frame forward as the next transition backdrop
             // instead of dropping into a blank page.
@@ -2195,6 +2211,12 @@ async function renderPageContent(pageDiv) {
 
         await Promise.all([renderTask, textLayer.render()]);
 
+        if (pageDiv._inRenderBuffer === false) {
+            pageDiv.dataset.loaded = 'true';
+            unloadPageContent(pageDiv);
+            return;
+        }
+
         // A zoom/fit during the awaits above swapped pageDiv._viewport and
         // resized the div, but everything so far used the stale viewport,
         // so redo the render at the current scale here.
@@ -2218,20 +2240,26 @@ async function renderPageContent(pageDiv) {
 }
 
 function unloadPageContent(pageDiv) {
-    if (pageDiv.dataset.loaded !== "true") return;
+    // Do not resize a canvas PDF.js is still painting. Completion checks the
+    // latest observer state and unloads it once both render tasks settle.
+    if (pageDiv.dataset.loaded === "rendering") return;
 
-    const canvas = pageDiv.querySelector('canvas');
-    if (canvas) {
+    // A zoom transition can retain more than one canvas, even while loaded
+    // is false and the page is waiting for a fresh observer notification.
+    pageDiv.querySelectorAll('canvas').forEach(canvas => {
         canvas.width = 0;
         canvas.height = 0;
-    }
+    });
 
     pageDiv.innerHTML = '';
+    delete pageDiv.dataset.rescale;
+    pageDiv.classList.remove('zoom-transition');
     pageDiv.dataset.loaded = "false";
 }
 
 const pageObserver = new IntersectionObserver((entries) => {
     entries.forEach(entry => {
+        entry.target._inRenderBuffer = entry.isIntersecting;
         if (entry.isIntersecting) {
             renderPageContent(entry.target);
         } else {
@@ -3755,6 +3783,36 @@ function getNotePopupTargetHighlight() {
     return highlights.find(h => h.id === targetId) || null;
 }
 
+function syncFloatingNoteEditorAfterRemoteUpdate(previousTarget) {
+    const notePopup = document.getElementById('note-editor-popup');
+    if (!notePopup || notePopup.classList.contains('hidden')) return;
+
+    // Adoption replaces local state. Neither a queued autosave nor closing
+    // the popup may write its superseded DOM contents back over that state.
+    if (noteAutoSaveTimeout) clearTimeout(noteAutoSaveTimeout);
+    if (noteStatusFadeTimeout) clearTimeout(noteStatusFadeTimeout);
+    noteAutoSaveTimeout = noteStatusFadeTimeout = null;
+    isNoteDirty = false;
+    const statusEl = document.getElementById('note-save-status');
+    if (statusEl) {
+        statusEl.textContent = '';
+        statusEl.classList.remove('visible');
+    }
+
+    const hl = getNotePopupTargetHighlight();
+    if (!hl) {
+        hidePopups();
+        return;
+    }
+    // Avoid resetting the caret for changes to unrelated annotations.
+    if (!previousTarget || previousTarget.note !== hl.note || previousTarget.noteFmt !== hl.noteFmt) {
+        setRichNoteContent(document.getElementById('note-textarea'), hl);
+    }
+    // History was reset by adoption; subsequent typing must undo to the
+    // remote note, not to the contents from when this popup first opened.
+    beginNoteUndoSession(hl);
+}
+
 function handleFloatingNoteInput() {
     const hl = getNotePopupTargetHighlight();
     if (!hl) return;
@@ -3766,10 +3824,17 @@ function handleFloatingNoteInput() {
     const hadNote = !!hl.note;
     const hasNote = !!cleanContent;
 
+    // Toolbar Undo/Redo ends the old session but can leave this popup open.
+    // Capture the restored baseline before the first subsequent mutation.
+    if (!noteUndoSession || noteUndoSession.hlId !== hl.id) beginNoteUndoSession(hl);
+
     // 1. Instant in-memory sync (0 ms lag) strictly to bound highlight
     hl.note = cleanContent;
     hl.noteFmt = cleanContent ? 'html' : undefined;
     isNoteDirty = true;
+    // History follows the edit immediately; only persistence is debounced.
+    // Otherwise an enabled Redo can overwrite typing during that delay.
+    commitNoteUndoEntry(hl);
 
     // If indicator presence toggled (empty <-> non-empty), update page indicator badge
     if (hadNote !== hasNote) {
@@ -5556,7 +5621,7 @@ async function renderLinkAnnotations(page, pageDiv, viewport) {
         // positioned for the old scale — on top of it would duplicate the
         // link boxes and their click handlers. Same staleness bail the
         // render path itself applies after its awaits.
-        if (pageDiv._viewport !== viewport) return;
+        if (pageDiv._viewport !== viewport || pageDiv._inRenderBuffer === false) return;
 
         // A retry after an error re-renders at the *same* viewport while an
         // earlier call may still be in flight; only one layer may exist.

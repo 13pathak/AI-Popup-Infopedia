@@ -420,6 +420,49 @@ function backupAndRestore(localData, type, includePdf = true, customInclude = nu
     sidebar.run('runAnnotationRedo()');
     assert.ok(!sidebar.run('highlights[0].note'), 'redo restores cleared note');
 
+    // Imported comments have no HTML marker. Undo must restore that absence,
+    // or literal tags are interpreted by the editor and stripped on export.
+    for (const editedNote of ['<b>Edited note</b>', imported.records[0].note]) {
+        const noteUndo = await harness();
+        await noteUndo.recover();
+        Object.assign(noteUndo.context, {
+            updateHighlightIndicatorsOnPage() {}, syncFloatingNoteEditorForUndo() {},
+            editor: { innerHTML: '', textContent: 'nonempty', classList: { add() {}, toggle() {} } },
+            editedNote
+        });
+        noteUndo.run('let noteUndoSession = null;');
+        for (const name of ['beginNoteUndoSession', 'endNoteUndoSession', 'commitNoteUndoEntry',
+            'applyNoteForUndo', 'setRichNoteContent', 'escapeHtml']) noteUndo.run(fn(name));
+        noteUndo.run('beginNoteUndoSession(highlights[0]); commitNoteUndoEntry(highlights[0]);');
+        assert.equal(noteUndo.run('annotationUndoStack.length'), 0, 'unchanged plain note creates no undo entry');
+        noteUndo.run("highlights[0].note = editedNote; highlights[0].noteFmt = 'html'; commitNoteUndoEntry(highlights[0]);");
+        assert.equal(noteUndo.run('annotationUndoStack.length'), 1, 'text or format changes are undoable');
+        noteUndo.run('runAnnotationUndo(); setRichNoteContent(editor, highlights[0]);');
+        assert.equal(noteUndo.run('highlights[0].note'), imported.records[0].note);
+        assert.equal(noteUndo.run("Object.hasOwn(highlights[0], 'noteFmt')"), false, 'undo restores the absent HTML marker');
+        assert.equal(noteUndo.storage.highlights[0].noteFmt, undefined, 'storage retains plain text semantics');
+        assert.ok(noteUndo.context.editor.innerHTML.includes('&lt;b&gt;plain&lt;/b&gt;'), 'editor shows literal tags after undo');
+        const undoBytes = await noteUndo.save();
+        const undoRecords = helpers.readEmbeddedMarkups(await PDFDocument.load(undoBytes), PDFLib).records;
+        assert.equal(undoRecords[0].note, imported.records[0].note, 'PDF export preserves literal tags after undo');
+        const undoReopened = await harness(undoBytes);
+        await undoReopened.recover();
+        assert.equal(undoReopened.run('highlights[0].note'), imported.records[0].note, 'saved comment round-trips unchanged');
+
+        noteUndo.run('runAnnotationRedo(); setRichNoteContent(editor, highlights[0]);');
+        assert.equal(noteUndo.run('highlights[0].noteFmt'), 'html', 'redo restores rich text format');
+        assert.equal(noteUndo.context.editor.innerHTML, editedNote, 'redo renders the edited rich text');
+        noteUndo.run('runAnnotationUndo();');
+        assert.equal(noteUndo.run('highlights[0].noteFmt'), undefined, 'repeated undo keeps plain format');
+
+        noteUndo.run('beginNoteUndoSession(highlights[0]); highlights[0].note = null; delete highlights[0].noteFmt; commitNoteUndoEntry(highlights[0]); runAnnotationUndo();');
+        assert.equal(noteUndo.run('highlights[0].note'), imported.records[0].note, 'undoing deletion restores the plain comment');
+        assert.equal(noteUndo.run('highlights[0].noteFmt'), undefined);
+        noteUndo.run('runAnnotationRedo();');
+        assert.equal(noteUndo.run("Object.hasOwn(highlights[0], 'note') || Object.hasOwn(highlights[0], 'noteFmt')"), false,
+            'redoing deletion clears both note and format');
+    }
+
     const noText = await harness();
     const getPage = noText.context.pdfDoc.getPage.bind(noText.context.pdfDoc);
     noText.context.pdfDoc.getPage = async pageNumber => {

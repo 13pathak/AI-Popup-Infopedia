@@ -147,6 +147,11 @@ async function run() {
   const recoveryCode = await new Promise(res => recoveryProc.on('exit', code => res(code ?? 0)));
   if (recoveryCode !== 0) throw new Error('PDF annotation recovery tests failed.');
 
+  console.log('Testing cross-tab floating note synchronization...');
+  const noteSyncProc = spawn(process.execPath, [path.join(__dirname, 'test-note-sync.js')], { stdio: 'inherit' });
+  const noteSyncCode = await new Promise(res => noteSyncProc.on('exit', code => res(code ?? 0)));
+  if (noteSyncCode !== 0) throw new Error('Cross-tab note synchronization tests failed.');
+
   // 7. Start HTTP server
   console.log(`[7/11] Starting local HTTP server on port ${PORT}...`);
   const server = createServer();
