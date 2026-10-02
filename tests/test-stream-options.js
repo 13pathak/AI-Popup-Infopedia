@@ -78,7 +78,7 @@ const chromeStub = {
         onRemoved: events.tabsOnRemoved
     },
     webNavigation: { onBeforeNavigate: events.webNavigationOnBeforeNavigate },
-    webRequest: { onHeadersReceived: events.webRequestOnHeadersReceived },
+    webRequest: { onBeforeRequest: { addListener() {} }, onHeadersReceived: events.webRequestOnHeadersReceived },
     alarms: {
         create: () => {},
         get: (name, cb) => { if (typeof cb === 'function') cb(); },

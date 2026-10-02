@@ -44,6 +44,7 @@ function storageArea() {
 
 const events = {
     webNavigationOnBeforeNavigate: eventSurface(),
+    webRequestOnBeforeRequest: eventSurface(),
     webRequestOnHeadersReceived: eventSurface(),
     tabsOnRemoved: eventSurface(),
     storageOnChanged: eventSurface(),
@@ -85,7 +86,7 @@ const chromeStub = {
         onRemoved: events.tabsOnRemoved
     },
     webNavigation: { onBeforeNavigate: events.webNavigationOnBeforeNavigate },
-    webRequest: { onHeadersReceived: events.webRequestOnHeadersReceived },
+    webRequest: { onBeforeRequest: events.webRequestOnBeforeRequest, onHeadersReceived: events.webRequestOnHeadersReceived },
     alarms: {
         create: () => {},
         get: (name, cb) => { if (typeof cb === 'function') cb(); },
@@ -125,14 +126,24 @@ async function settle() {
 }
 const updatesFor = (tabId) => tabsUpdates.filter(u => u.tabId === tabId);
 
+function navigateGet(details) {
+    events.webNavigationOnBeforeNavigate._fire(details);
+    events.webRequestOnBeforeRequest._fire({
+        ...details, type: 'main_frame', method: 'GET', url: details.url.split('#')[0]
+    });
+}
+
 async function main() {
     const fileOf = (url) => 'chrome-extension://' + EXT_ID + '/pdf/web/custom-viewer.html?file=' + encodeURIComponent(url);
 
-    // ---- webNavigation path: URL carries the fragment ----
+    // ---- GET request path: navigation supplies the fragment ----
     events.webNavigationOnBeforeNavigate._fire({ frameId: 0, tabId: 1, url: 'https://example.com/paper.pdf#page=2' });
     await settle();
+    assert(updatesFor(1).length === 0, 'URL shape alone cannot redirect before the HTTP method is known');
+    navigateGet({ frameId: 0, tabId: 1, url: 'https://example.com/paper.pdf#page=2' });
+    await settle();
     let ups = updatesFor(1);
-    assert(ups.length === 1, 'onBeforeNavigate fragment URL redirects exactly once', ups);
+    assert(ups.length === 1, 'GET PDF request redirects exactly once', ups);
     assert(ups[0] && ups[0].url === fileOf('https://example.com/paper.pdf') + '#page=2',
         '?file= is fragment-free and the hash rides the viewer URL (webNavigation)', ups[0] && ups[0].url);
     assert(ups[0] && !ups[0].url.includes('%23'), 'no %-encoded fragment inside the ?file= value', ups[0] && ups[0].url);
@@ -140,7 +151,7 @@ async function main() {
     // The PDF response still arrives for the in-flight navigation: the
     // header listener must be deduped despite the hash/fragment asymmetry.
     events.webRequestOnHeadersReceived._fire({
-        type: 'main_frame', tabId: 1, url: 'https://example.com/paper.pdf',
+        type: 'main_frame', method: 'GET', tabId: 1, url: 'https://example.com/paper.pdf',
         responseHeaders: [{ name: 'Content-Type', value: 'application/pdf' }]
     });
     await settle();
@@ -149,11 +160,11 @@ async function main() {
     // ---- webRequest path: fragment recovered from onBeforeNavigate memory ----
     // No .pdf extension, so the navigation listener only records the
     // fragment; the PDF nature surfaces via Content-Type alone.
-    events.webNavigationOnBeforeNavigate._fire({ frameId: 0, tabId: 2, url: 'https://example.com/view?id=3#page=5' });
+    navigateGet({ frameId: 0, tabId: 2, url: 'https://example.com/view?id=3#page=5' });
     await settle();
     assert(updatesFor(2).length === 0, 'non-Pdf navigation is not redirected by URL shape', updatesFor(2));
     events.webRequestOnHeadersReceived._fire({
-        type: 'main_frame', tabId: 2, url: 'https://example.com/view?id=3',
+        type: 'main_frame', method: 'GET', tabId: 2, url: 'https://example.com/view?id=3',
         responseHeaders: [{ name: 'Content-Type', value: 'application/pdf' }]
     });
     await settle();
@@ -164,7 +175,7 @@ async function main() {
     assert(ups[0] && !ups[0].url.includes('%23'), 'no %-encoded fragment inside ?file= (webRequest path)', ups[0] && ups[0].url);
 
     // ---- No fragment anywhere: viewer URL unchanged in shape ----
-    events.webNavigationOnBeforeNavigate._fire({ frameId: 0, tabId: 3, url: 'https://example.com/plain.pdf' });
+    navigateGet({ frameId: 0, tabId: 3, url: 'https://example.com/plain.pdf' });
     await settle();
     ups = updatesFor(3);
     assert(ups.length === 1 && ups[0].url === fileOf('https://example.com/plain.pdf'),
@@ -175,9 +186,9 @@ async function main() {
     // within 10s. The marks share the fragment-stripped URL, so naive
     // modulo-fragment matching suppressed the second redirect; the mark's
     // navHash (the navigation's fragment) must tell them apart.
-    events.webNavigationOnBeforeNavigate._fire({ frameId: 0, tabId: 4, url: 'https://example.com/doc.pdf#page=2' });
+    navigateGet({ frameId: 0, tabId: 4, url: 'https://example.com/doc.pdf#page=2' });
     await settle();
-    events.webNavigationOnBeforeNavigate._fire({ frameId: 0, tabId: 4, url: 'https://example.com/doc.pdf#page=40' });
+    navigateGet({ frameId: 0, tabId: 4, url: 'https://example.com/doc.pdf#page=40' });
     await settle();
     ups = updatesFor(4);
     assert(ups.length === 2, 'same document with a different fragment redirects again inside the TTL', ups);
@@ -187,18 +198,18 @@ async function main() {
     // An identical full URL within the TTL stays suppressed (the
     // historical tradeoff of the dedupe window) — asserted against the
     // current mark, i.e. before any other navigation re-marks the tab.
-    events.webNavigationOnBeforeNavigate._fire({ frameId: 0, tabId: 4, url: 'https://example.com/doc.pdf#page=40' });
+    navigateGet({ frameId: 0, tabId: 4, url: 'https://example.com/doc.pdf#page=40' });
     await settle();
     assert(updatesFor(4).length === 2, 'identical URL within the TTL stays deduped', updatesFor(4).length);
 
     // Bare re-navigation of a previously-fragmented URL is also new.
-    events.webNavigationOnBeforeNavigate._fire({ frameId: 0, tabId: 4, url: 'https://example.com/doc.pdf' });
+    navigateGet({ frameId: 0, tabId: 4, url: 'https://example.com/doc.pdf' });
     await settle();
     ups = updatesFor(4);
     assert(ups.length === 3 && ups[2].url === fileOf('https://example.com/doc.pdf'),
         'bare re-navigation of the same document redirects again', ups);
 
-    events.webNavigationOnBeforeNavigate._fire({ frameId: 0, tabId: 4, url: 'https://example.com/doc.pdf' });
+    navigateGet({ frameId: 0, tabId: 4, url: 'https://example.com/doc.pdf' });
     await settle();
     assert(updatesFor(4).length === 3, 'identical bare URL within the TTL stays deduped', updatesFor(4).length);
 
@@ -206,17 +217,17 @@ async function main() {
     // Marks made from the header listener store the remembered fragment,
     // so a later navigation whose remembered fragment differs redirects
     // even though both webRequest URLs are byte-identical.
-    events.webNavigationOnBeforeNavigate._fire({ frameId: 0, tabId: 5, url: 'https://example.com/view?id=3#page=5' });
+    navigateGet({ frameId: 0, tabId: 5, url: 'https://example.com/view?id=3#page=5' });
     await settle();
     events.webRequestOnHeadersReceived._fire({
-        type: 'main_frame', tabId: 5, url: 'https://example.com/view?id=3',
+        type: 'main_frame', method: 'GET', tabId: 5, url: 'https://example.com/view?id=3',
         responseHeaders: [{ name: 'Content-Type', value: 'application/pdf' }]
     });
     await settle();
-    events.webNavigationOnBeforeNavigate._fire({ frameId: 0, tabId: 5, url: 'https://example.com/view?id=3#page=9' });
+    navigateGet({ frameId: 0, tabId: 5, url: 'https://example.com/view?id=3#page=9' });
     await settle();
     events.webRequestOnHeadersReceived._fire({
-        type: 'main_frame', tabId: 5, url: 'https://example.com/view?id=3',
+        type: 'main_frame', method: 'GET', tabId: 5, url: 'https://example.com/view?id=3',
         responseHeaders: [{ name: 'Content-Type', value: 'application/pdf' }]
     });
     await settle();
@@ -224,6 +235,75 @@ async function main() {
     assert(ups.length === 2, 'same Content-Type document with a different remembered fragment redirects again', ups);
     assert(ups[1] && ups[1].url === fileOf('https://example.com/view?id=3') + '#page=9',
         'Content-Type re-navigation carries the new fragment', ups[1] && ups[1].url);
+
+    // ---- POST reports must keep their original response/body ----
+    // Include the early .pdf/arXiv paths as well as both MIME-based paths.
+    let nextTab = 20;
+    for (const [url, contentType, method] of [
+        ['https://example.com/report.pdf', 'application/pdf', 'POST'],
+        ['https://example.com/generate', 'application/pdf', 'POST'],
+        ['https://example.com/download', 'application/octet-stream', 'POST'],
+        ['https://example.com/report.pdf', 'application/octet-stream', 'POST'],
+        ['https://arxiv.org/pdf/1234.5678', 'application/pdf', 'POST'],
+        ['https://example.com/report.pdf', 'application/pdf', 'PUT'],
+        ['https://example.com/report.pdf', 'application/pdf', undefined]
+    ]) {
+        const tabId = nextTab++;
+        events.webNavigationOnBeforeNavigate._fire({ frameId: 0, tabId, url: url + '#page=2' });
+        await settle();
+        events.webRequestOnBeforeRequest._fire({ type: 'main_frame', tabId, url, method });
+        await settle();
+        events.webRequestOnHeadersReceived._fire({
+            type: 'main_frame', tabId, url, method,
+            responseHeaders: [
+                { name: 'Content-Type', value: contentType },
+                { name: 'Content-Disposition', value: 'inline; filename="report.pdf"' }
+            ]
+        });
+        await settle();
+        assert(updatesFor(tabId).length === 0, `${method || 'unknown method'} ${url} remains native (${contentType})`, updatesFor(tabId));
+        // A skipped POST must not leave a bypass mark that swallows a later GET.
+        navigateGet({ frameId: 0, tabId, url });
+        events.webRequestOnHeadersReceived._fire({
+            type: 'main_frame', tabId, url, method: 'GET',
+            responseHeaders: [{ name: 'Content-Type', value: 'application/pdf' }]
+        });
+        await settle();
+        assert(updatesFor(tabId).length === 1, 'a subsequent GET in the same tab still opens the custom viewer', updatesFor(tabId));
+    }
+
+    // Redirect hops must use the current method: 307/308 keep POST; a
+    // 303 landing page fetched with GET can use the custom viewer.
+    const redirectTab = nextTab++;
+    events.webRequestOnBeforeRequest._fire({ type: 'main_frame', tabId: redirectTab, url: 'https://example.com/generate', method: 'POST' });
+    events.webRequestOnBeforeRequest._fire({ type: 'main_frame', tabId: redirectTab, url: 'https://example.com/redirected.pdf', method: 'POST' });
+    events.webRequestOnHeadersReceived._fire({ type: 'main_frame', tabId: redirectTab, url: 'https://example.com/redirected.pdf', method: 'POST',
+        responseHeaders: [{ name: 'Content-Type', value: 'application/pdf' }] });
+    await settle();
+    assert(updatesFor(redirectTab).length === 0, 'redirects that preserve POST are not intercepted');
+    events.webRequestOnBeforeRequest._fire({ type: 'main_frame', tabId: redirectTab, url: 'https://example.com/result.pdf', method: 'GET' });
+    await settle();
+    assert(updatesFor(redirectTab).length === 1, 'redirects that switch to GET can open the viewer');
+
+    const binaryTab = nextTab++;
+    navigateGet({ frameId: 0, tabId: binaryTab, url: 'https://example.com/download#page=3' });
+    events.webRequestOnHeadersReceived._fire({ type: 'main_frame', tabId: binaryTab, url: 'https://example.com/download', method: 'GET',
+        responseHeaders: [{ name: 'Content-Type', value: 'application/octet-stream' }, { name: 'Content-Disposition', value: 'attachment; filename="report.pdf"' }] });
+    await settle();
+    assert(updatesFor(binaryTab)[0]?.url === fileOf('https://example.com/download') + '#page=3', 'GET binary PDF detection retains its deep link');
+
+    const localTab = nextTab++;
+    events.webNavigationOnBeforeNavigate._fire({ frameId: 0, tabId: localTab, url: 'file:///C:/reports/local.pdf#page=4' });
+    await settle();
+    assert(updatesFor(localTab)[0]?.url === fileOf('file:///C:/reports/local.pdf') + '#page=4', 'local PDF files still use navigation interception');
+    for (const type of ['sub_frame', 'xmlhttprequest']) {
+        const tabId = nextTab++;
+        events.webRequestOnBeforeRequest._fire({ type, tabId, url: 'https://example.com/report.pdf', method: 'GET' });
+        events.webRequestOnHeadersReceived._fire({ type, tabId, url: 'https://example.com/report.pdf', method: 'GET',
+            responseHeaders: [{ name: 'Content-Type', value: 'application/pdf' }] });
+        await settle();
+        assert(updatesFor(tabId).length === 0, `${type} PDF requests do not redirect the tab`);
+    }
 
     console.log(process.exitCode ? 'VIEWER-URL TEST FAILED' : 'VIEWER-URL TEST PASSED');
     process.exit(process.exitCode || 0);

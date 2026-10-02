@@ -2688,7 +2688,7 @@ function urlWithoutFragment(url) {
 // strips it before the request), so a #page=N on a URL that only reveals
 // its PDF nature through response headers would be lost, while
 // webNavigation URLs do carry it and onBeforeNavigate fires for every
-// main-frame navigation before its request starts; (2) navigation
+// main-frame navigation; (2) navigation
 // identity for the redirect dedupe — markRedirected snapshots the
 // recorded hash so isAlreadyRedirected can tell a second listener's view
 // of one navigation apart from a new navigation to the same document.
@@ -2876,8 +2876,8 @@ async function handleOpenNativeViewer(request, sender, sendResponse) {
 // still complete as downloads). declarativeNetRequest can't substitute —
 // its rules can't match response Content-Type for redirects and its
 // substitution can't safely encode ?file= query values. The .pdf-extension
-// path never pays this cost: webNavigation.onBeforeNavigate fires before
-// commit, so those navigations are replaced pre-response. The Promise.all
+// path uses webRequest.onBeforeRequest to take over GET requests before
+// the response. The Promise.all
 // below just keeps the takeover window as short as the platform allows.
 
 // The takeover target for an intercepted PDF. ?file= carries the document
@@ -2925,15 +2925,7 @@ async function redirectToPdfViewer(tabId, originalUrl) {
   });
 }
 
-chrome.webNavigation.onBeforeNavigate.addListener((details) => {
-  if (details.frameId !== 0) return;
-  const url = details.url;
-  if (url.includes(chrome.runtime.id) && url.includes('/pdf/web/custom-viewer.html')) return;
-  // Remember this navigation's fragment (absent from webRequest URLs) so
-  // the Content-Type listener can still honor #page=N deep links — see
-  // rememberNavFragment. Every main-frame navigation overwrites the slot
-  // before its own response can arrive, keeping the entry current.
-  rememberNavFragment(details.tabId, url);
+function isPdfNavigationUrl(url) {
   try {
     const urlObj = new URL(url);
     const pathLower = urlObj.pathname.toLowerCase();
@@ -2945,11 +2937,37 @@ chrome.webNavigation.onBeforeNavigate.addListener((details) => {
     const isArxivPdf = (urlObj.hostname === 'arxiv.org' || urlObj.hostname.endsWith('.arxiv.org')) &&
                        (pathLower === '/pdf' || pathLower.startsWith('/pdf/'));
 
-    if (isPdfExt || isArxivPdf) {
-      redirectToPdfViewer(details.tabId, url);
-    }
+    return isPdfExt || isArxivPdf;
   } catch (e) {}
+  return false;
+}
+
+chrome.webNavigation.onBeforeNavigate.addListener((details) => {
+  if (details.frameId !== 0) return;
+  const url = details.url;
+  if (url.includes(chrome.runtime.id) && url.includes('/pdf/web/custom-viewer.html')) return;
+  // webRequest URLs omit fragments, so retain the navigation's deep link
+  // for both request-based interception paths.
+  rememberNavFragment(details.tabId, url);
+  // This event has no HTTP method. Taking over a network URL here can
+  // discard a POST response and reload it through GET (often an HTTP 405).
+  // Local files have no request body and still use this path.
+  if (url.startsWith('file:') && isPdfNavigationUrl(url)) {
+    redirectToPdfViewer(details.tabId, url);
+  }
 });
+
+chrome.webRequest.onBeforeRequest.addListener(
+  (details) => {
+    // The custom viewer loads ?file= with GET; only take over requests
+    // that can use that method. POST reports stay in native PDF handling.
+    if (details.type !== 'main_frame' || details.method !== 'GET') return;
+    if (isPdfNavigationUrl(details.url)) {
+      redirectToPdfViewer(details.tabId, details.url);
+    }
+  },
+  { urls: ['http://*/*', 'https://*/*'], types: ['main_frame'] }
+);
 
 // --- NEW: Intercept any URL that returns a PDF Content-Type ---
 // Legacy servers and CMS download endpoints often serve genuine PDFs with
@@ -2984,7 +3002,7 @@ function headersSuggestPdf(url, responseHeaders) {
 chrome.webRequest.onHeadersReceived.addListener(
   (details) => {
     // ONLY intercept main frame navigations. Ignore xmlhttprequest/fetch from pdf.js
-    if (details.type !== 'main_frame') return;
+    if (details.type !== 'main_frame' || details.method !== 'GET') return;
 
     const url = details.url;
     if (url.includes(chrome.runtime.id) && url.includes('/pdf/web/custom-viewer.html')) return;

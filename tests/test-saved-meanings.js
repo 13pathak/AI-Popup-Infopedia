@@ -39,7 +39,7 @@ function harness() {
     storage: { local: area(store), sync: area({}), session: area({}), onChanged: event() },
     commands: { onCommand: event() }, alarms: { create() {}, onAlarm: event() },
     tabs: { onRemoved: event() }, downloads: { onChanged: event() },
-    webNavigation: { onBeforeNavigate: event() }, webRequest: { onHeadersReceived: event() },
+    webNavigation: { onBeforeNavigate: event() }, webRequest: { onBeforeRequest: event(), onHeadersReceived: event() },
     action: { setBadgeText() {}, setBadgeBackgroundColor() {} }
   };
   const worker = vm.createContext({ chrome, console, setTimeout, clearTimeout, URL, TextDecoder, TextEncoder, AbortController });

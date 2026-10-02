@@ -121,7 +121,7 @@ function makeChromeStub({ local = {}, sync = {}, session = {} } = {}) {
       onChanged: on('downloads.onChanged'),
     },
     webNavigation: { onBeforeNavigate: on('webNavigation.onBeforeNavigate'), onHistoryStateUpdated: on('webNavigation.onHistoryStateUpdated') },
-    webRequest: { onHeadersReceived: on('webRequest.onHeadersReceived') },
+    webRequest: { onBeforeRequest: on('webRequest.onBeforeRequest'), onHeadersReceived: on('webRequest.onHeadersReceived') },
     commands: { onCommand: on('commands.onCommand') },
     contextMenus: { onClicked: on('contextMenus.onClicked'), create: () => {} },
   };
