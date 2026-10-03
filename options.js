@@ -4140,8 +4140,44 @@ function updateRestoreStatus(message, type) {
 }
 
 
+// Prompt changes write one shared array; serialize this page's mutations so
+// rapid toggles, saves, deletes, and reorders always read the latest version.
+const promptMutationQueue = [];
+function mutatePrompts(change, onSaved, onError) {
+  const run = () => {
+    const finish = (error) => {
+      try {
+        if (error) onError(error);
+        else onSaved();
+      } finally {
+        promptMutationQueue.shift();
+        if (promptMutationQueue.length) promptMutationQueue[0]();
+      }
+    };
+    chrome.storage.sync.get({ customPrompts: [], defaultPromptId: null }, (data) => {
+      if (chrome.runtime.lastError) {
+        finish(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      let updates;
+      try { updates = change(data); }
+      catch (error) { finish(error); return; }
+      if (!updates) { finish(); return; }
+      chrome.storage.sync.set(updates, () => {
+        finish(chrome.runtime.lastError ? new Error(chrome.runtime.lastError.message) : null);
+      });
+    });
+  };
+  promptMutationQueue.push(run);
+  if (promptMutationQueue.length === 1) run();
+}
+
 function loadPrompts() {
   chrome.storage.sync.get({ customPrompts: [] }, (data) => {
+    if (chrome.runtime.lastError) {
+      updatePromptStatus(`Could not load prompts: ${chrome.runtime.lastError.message}`, 'error');
+      return;
+    }
     const prompts = data.customPrompts;
     const listContainer = document.getElementById('prompts-list');
     const noPromptsMsg = document.getElementById('no-prompts-message');
@@ -4162,6 +4198,8 @@ function loadPrompts() {
         promptEl.style.display = 'flex';
         promptEl.style.justifyContent = 'space-between';
         promptEl.style.alignItems = 'center';
+        promptEl.style.flexWrap = 'wrap';
+        promptEl.style.gap = '10px';
         promptEl.style.backgroundColor = 'var(--bg-color)'; // Ensure bg for opacity effects
         promptEl.style.transition = 'background-color 0.2s, transform 0.2s';
 
@@ -4191,6 +4229,8 @@ function loadPrompts() {
         infoWrapper.style.display = 'flex';
         infoWrapper.style.alignItems = 'center';
         infoWrapper.style.gap = '10px';
+        infoWrapper.style.flex = '1 1 240px';
+        infoWrapper.style.minWidth = '0';
 
         // Drag Handle
         const dragHandle = document.createElement('span');
@@ -4201,6 +4241,7 @@ function loadPrompts() {
         dragHandle.title = 'Drag to reorder';
 
         const infoDiv = document.createElement('div');
+        infoDiv.style.overflowWrap = 'anywhere';
         infoDiv.innerHTML = `<strong>${escapeHTML(prompt.name)}</strong><br><small style="color: #888;">${escapeHTML(prompt.content.substring(0, 50))}${prompt.content.length > 50 ? '...' : ''}</small>`;
 
         infoWrapper.appendChild(dragHandle);
@@ -4209,6 +4250,20 @@ function loadPrompts() {
         const actionsDiv = document.createElement('div');
         actionsDiv.style.display = 'flex';
         actionsDiv.style.alignItems = 'center';
+
+        const selectionLabel = document.createElement('label');
+        selectionLabel.className = 'checkbox-label';
+        selectionLabel.style.margin = '0 12px 0 0';
+        selectionLabel.title = 'Show this button alongside Ask AI and Clip when you select text';
+        const selectionCheckbox = document.createElement('input');
+        selectionCheckbox.type = 'checkbox';
+        selectionCheckbox.className = 'prompt-selection-popup-toggle';
+        selectionCheckbox.checked = prompt.showInSelectionPopup === true;
+        selectionCheckbox.setAttribute('aria-label', `Show ${prompt.name} as a selection popup button`);
+        selectionCheckbox.addEventListener('change', () => setPromptSelectionPopup(prompt.id, selectionCheckbox));
+        selectionLabel.appendChild(selectionCheckbox);
+        selectionLabel.appendChild(document.createTextNode('Show on selection'));
+        actionsDiv.appendChild(selectionLabel);
 
         const editBtn = document.createElement('button');
         editBtn.innerHTML = '&#9998;';
@@ -4256,7 +4311,7 @@ function loadPrompts() {
 
           // Re-fetch the freshest list from storage so we don't reorder a stale
           // copy if the data changed since this UI was rendered.
-          chrome.storage.sync.get({ customPrompts: [] }, (data) => {
+          mutatePrompts((data) => {
             const freshPrompts = data.customPrompts || [];
             const fromIndex = freshPrompts.findIndex(p => p.id === draggedId);
             const toIndex = freshPrompts.findIndex(p => p.id === targetId);
@@ -4265,11 +4320,11 @@ function loadPrompts() {
             }
             const [movedPrompt] = freshPrompts.splice(fromIndex, 1);
             freshPrompts.splice(toIndex, 0, movedPrompt);
-            chrome.storage.sync.set({ customPrompts: freshPrompts }, () => {
-              loadPrompts();
-              loadDefaultPromptSelect();
-            });
-          });
+            return { customPrompts: freshPrompts };
+          }, () => {
+            loadPrompts();
+            loadDefaultPromptSelect();
+          }, error => updatePromptStatus(`Could not reorder prompts: ${error.message}`, 'error'));
           return false;
         });
 
@@ -4386,34 +4441,45 @@ function savePrompt() {
   const id = document.getElementById('prompt-id').value;
   const name = document.getElementById('prompt-name').value.trim();
   const content = document.getElementById('prompt-content').value.trim();
+  const showInSelectionPopup = document.getElementById('prompt-show-in-selection-popup').checked;
 
   if (!name || !content) {
     alert("Please provide both a name and content for the prompt.");
     return;
   }
 
-  chrome.storage.sync.get({ customPrompts: [] }, (data) => {
+  const saveButton = document.getElementById('save-custom-prompt-btn');
+  saveButton.disabled = true;
+  mutatePrompts((data) => {
     let prompts = data.customPrompts;
 
     if (id) {
       // Edit existing
-      prompts = prompts.map(p => p.id === id ? { ...p, name, content } : p);
+      if (!prompts.some(p => p.id === id)) {
+        throw new Error('This prompt was deleted. Cancel editing to create a new prompt.');
+      }
+      prompts = prompts.map(p => p.id === id ? { ...p, name, content, showInSelectionPopup } : p);
     } else {
       // Add new
       const newPrompt = {
         id: `prompt_${Date.now()}`,
         name,
-        content
+        content,
+        showInSelectionPopup
       };
       prompts.push(newPrompt);
     }
 
-    chrome.storage.sync.set({ customPrompts: prompts }, () => {
-      // Reset form
-      cancelPromptEdit();
-      loadPrompts();
-      loadDefaultPromptSelect();
-    });
+    return { customPrompts: prompts };
+  }, () => {
+    saveButton.disabled = false;
+    cancelPromptEdit();
+    loadPrompts();
+    loadDefaultPromptSelect();
+    updatePromptStatus('Prompt saved.');
+  }, error => {
+    saveButton.disabled = false;
+    updatePromptStatus(`Could not save prompt: ${error.message}`, 'error');
   });
 }
 
@@ -4421,6 +4487,8 @@ function cancelPromptEdit() {
   document.getElementById('prompt-id').value = '';
   document.getElementById('prompt-name').value = '';
   document.getElementById('prompt-content').value = '';
+  document.getElementById('prompt-show-in-selection-popup').checked = false;
+  updatePromptStatus('');
 
   document.getElementById('save-custom-prompt-btn').textContent = 'Save Prompt';
   document.getElementById('cancel-custom-prompt-btn').style.display = 'none';
@@ -4428,11 +4496,17 @@ function cancelPromptEdit() {
 
 function editPrompt(id) {
   chrome.storage.sync.get({ customPrompts: [] }, (data) => {
+    if (chrome.runtime.lastError) {
+      updatePromptStatus(`Could not load prompt: ${chrome.runtime.lastError.message}`, 'error');
+      return;
+    }
     const prompt = data.customPrompts.find(p => p.id === id);
     if (prompt) {
       document.getElementById('prompt-id').value = prompt.id;
       document.getElementById('prompt-name').value = prompt.name;
       document.getElementById('prompt-content').value = prompt.content;
+      document.getElementById('prompt-show-in-selection-popup').checked = prompt.showInSelectionPopup === true;
+      updatePromptStatus('');
 
       document.getElementById('save-custom-prompt-btn').textContent = 'Update Prompt';
       document.getElementById('cancel-custom-prompt-btn').style.display = 'inline-block';
@@ -4443,9 +4517,43 @@ function editPrompt(id) {
   });
 }
 
+function updatePromptStatus(message, type = 'success') {
+  const status = document.getElementById('prompt-status');
+  status.textContent = message;
+  status.style.color = type === 'error' ? 'var(--danger-color)' : 'var(--secondary-color)';
+}
+
+function setPromptSelectionPopup(id, checkbox) {
+  const enabled = checkbox.checked;
+  let previous = !enabled;
+  checkbox.disabled = true;
+  const fail = (message) => {
+    checkbox.checked = previous;
+    checkbox.disabled = false;
+    updatePromptStatus(message, 'error');
+  };
+
+  mutatePrompts((data) => {
+    const prompt = data.customPrompts.find(p => p.id === id);
+    if (!prompt) {
+      throw new Error('This prompt was deleted. Reopen the Prompts tab to refresh the list.');
+    }
+    previous = prompt.showInSelectionPopup === true;
+    const prompts = data.customPrompts.map(p => p.id === id ? { ...p, showInSelectionPopup: enabled } : p);
+    return { customPrompts: prompts };
+  }, () => {
+    checkbox.disabled = false;
+    if (document.getElementById('prompt-id').value === id) {
+      document.getElementById('prompt-show-in-selection-popup').checked = enabled;
+    }
+    loadPrompts();
+    updatePromptStatus(enabled ? 'Selection button enabled.' : 'Selection button disabled.');
+  }, error => fail(`Could not update selection button: ${error.message}`));
+}
+
 function deletePrompt(id) {
   if (confirm("Are you sure you want to delete this prompt?")) {
-    chrome.storage.sync.get({ customPrompts: [], defaultPromptId: null }, (data) => {
+    mutatePrompts((data) => {
       const prompts = data.customPrompts.filter(p => p.id !== id);
       const updates = { customPrompts: prompts };
       // Deleting the default prompt reverts the default to the built-in
@@ -4456,11 +4564,11 @@ function deletePrompt(id) {
       if (data.defaultPromptId === id) {
         updates.defaultPromptId = 'system';
       }
-      chrome.storage.sync.set(updates, () => {
-        loadPrompts();
-        loadDefaultPromptSelect();
-      });
-    });
+      return updates;
+    }, () => {
+      loadPrompts();
+      loadDefaultPromptSelect();
+    }, error => updatePromptStatus(`Could not delete prompt: ${error.message}`, 'error'));
   }
 }
 

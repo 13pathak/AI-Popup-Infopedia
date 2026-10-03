@@ -186,7 +186,8 @@ async function main() {
     await send('Page.enable');
     await send('Runtime.enable');
     await send('Page.addScriptToEvaluateOnNewDocument', { source: STORAGE_STUB });
-    await navigateTo('about:blank');
+    await navigateTo(VIEWER_PATH + '?file=' + encodeURIComponent(DEFAULT_FILE));
+    await evalPage(`try { localStorage.removeItem('viewstate-e2e-store'); } catch (e) {}`);
     const vh = await evalPage('window.innerHeight');
     if (!vh || vh < 200) {
         console.log('FAIL: headless viewport collapsed (innerHeight=' + vh + ') — results would be meaningless');

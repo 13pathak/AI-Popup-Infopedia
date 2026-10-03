@@ -2454,7 +2454,7 @@
     <!-- --- NEW PROMPTS TAB CONTENT --- -->
     <div id="prompts-content" class="tab-content" role="tabpanel" tabindex="0" aria-labelledby="tab-prompts-content">
         <h2>Custom Prompts</h2>
-        <p>Create and manage custom prompts to use in the popup.</p>
+        <p>Create custom prompts and optional buttons that appear alongside Ask AI and Clip when you select text.</p>
 
         <div id="prompt-form-container" class="settings-section">
             <h3 class="section-title">Add New Prompt</h3>
@@ -2469,11 +2469,20 @@
                 <small style="display: block; margin-top: 5px;">Use <strong>{word}</strong> as the placeholder for the
                     selected text.</small>
             </div>
+            <div>
+                <label class="checkbox-label" for="prompt-show-in-selection-popup">
+                    <input type="checkbox" id="prompt-show-in-selection-popup" aria-describedby="prompt-selection-popup-help">
+                    Show as a selection popup button
+                </label>
+                <small id="prompt-selection-popup-help" style="display: block;">The prompt name becomes the button label. For example, name it <strong>Check Grammar</strong> and use
+                    <strong>Check the grammar of {word}. Explain any mistakes and provide a corrected version.</strong></small>
+            </div>
             <div style="margin-top: 10px;">
                 <button id="save-custom-prompt-btn" style="background-color: var(--secondary-color);">Save
                     Prompt</button>
                 <button id="cancel-custom-prompt-btn" style="display: none;">Cancel Edit</button>
             </div>
+            <p id="prompt-status" role="status" aria-live="polite" style="margin-bottom: 0;"></p>
         </div>
 
         <div id="default-prompt-container" class="settings-section">
@@ -2485,6 +2494,7 @@
         </div>
 
 <h3>Saved Prompts</h3>
+        <p>Use the checkboxes below to show or hide selection buttons. Drag prompts to change their order.</p>
         <div id="prompts-list" class="settings-section" style="padding: 10px; min-height: 100px;">
             <div id="no-prompts-message" class="empty-state" style="display: none;">
                 <div class="empty-state-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>

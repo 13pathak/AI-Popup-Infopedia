@@ -9,6 +9,7 @@ const content = read('content.js');
 const background = read('background.js');
 const session = {};
 let submissions = 0;
+const compareRequests = [];
 const input = value => ({ value, disabled: false, focus() { this.focused = true; }, setSelectionRange(start, end) { this.selectionStart = start; this.selectionEnd = end; } });
 const context = vm.createContext({
   chrome: { runtime: {}, storage: { session: {
@@ -19,9 +20,13 @@ const context = vm.createContext({
   createFollowupInput(instance) { instance.input = input(''); },
   renderCompareView() {},
   updateCompareFollowupState(instance) { instance.input.disabled = false; },
-  dispatchFollowupText() { submissions++; }
+  dispatchFollowupText() { submissions++; },
+  issueCompareRequest(instance, generation, slot, word, customPrompt, isFollowup) {
+    compareRequests.push({ modelId: slot.modelId, word, customPrompt, isFollowup });
+  }
 });
 vm.runInContext(content.slice(content.indexOf('const CONVO_STASH_MAX_MESSAGES_PER_SLOT'), content.indexOf('// Opens the stashed conversation:')), context);
+vm.runInContext(content.slice(content.indexOf('function ensureCompareSlotLoaded('), content.indexOf('// Zero-models fallback')), context);
 vm.runInContext(background.slice(background.indexOf('const CONVO_STASH_KEY'), background.indexOf('// --- Direct pronunciation & IPA')), context);
 
 function popup(value, withInput = true) {
@@ -70,6 +75,36 @@ async function run() {
   assert.equal(context.buildConversationStash(popup('   ')).followupDraft, '   ', 'no trimming');
   assert.equal(context.buildConversationStash(popup('', false)).followupDraft, '', 'missing input is safe');
 
+  // Selection buttons choose a task independently of the configured default.
+  // A model first visited after reopening must receive that same task.
+  const compareModels = [...models, { id: 'late-model', name: 'Late Model' }];
+  for (const selectedPrompt of ['Check the grammar of {word}.', '']) {
+    const selected = popup('Follow-up draft');
+    selected.comparePrompt = selectedPrompt;
+    const selectedStash = context.buildConversationStash(selected);
+    assert.equal(selectedStash.comparePrompt, selectedPrompt, 'stash retains the custom task and explicit system choice');
+    await context.setConvoStash(selectedStash);
+    const restoredSelection = popup('', false);
+    assert.equal(context.restoreConversationFromStash(restoredSelection, await context.getConvoStash(), compareModels), true);
+    assert.equal(restoredSelection.comparePrompt, selectedPrompt, 'selected task survives the session-storage round trip');
+    context.ensureCompareSlotLoaded(restoredSelection, 1);
+    assert.deepEqual(compareRequests.at(-1), {
+      modelId: 'late-model', word: 'Cell', customPrompt: selectedPrompt, isFollowup: false
+    }, 'a late compare model runs the task selected before closing');
+  }
+  for (const invalidPrompt of [undefined, null, 42, { content: 'not a string' }]) {
+    const malformed = popup('Draft');
+    malformed.comparePrompt = invalidPrompt;
+    assert.equal(context.buildConversationStash(malformed).comparePrompt, null, 'only actual prompt strings are stashed');
+    const legacyStash = { ...stash, comparePrompt: invalidPrompt };
+    if (invalidPrompt === undefined) delete legacyStash.comparePrompt;
+    const restoredLegacy = popup('', false);
+    assert.equal(context.restoreConversationFromStash(restoredLegacy, legacyStash, compareModels), true);
+    assert.equal(restoredLegacy.comparePrompt, null, 'older and malformed stashes use default prompt resolution');
+    context.ensureCompareSlotLoaded(restoredLegacy, 1);
+    assert.equal(compareRequests.at(-1).customPrompt, null);
+  }
+
   for (const invalid of [undefined, null, 42, { text: 'wrong shape' }]) {
     const target = popup('Existing text');
     assert.equal(context.restoreConversationFromStash(target, { ...stash, followupDraft: invalid }, models), true);
@@ -95,6 +130,6 @@ async function run() {
   await Promise.all([saving, clearing]);
   assert.equal(afterClear.followupDraft, '');
   assert.equal(afterClear.slots[0].messages.length, 2, 'clearing retains conversation recovery');
-  console.log('Follow-up draft preservation and restoration tests passed.');
+  console.log('Follow-up draft and selected prompt preservation and restoration tests passed.');
 }
 run().catch(error => { console.error(error); process.exitCode = 1; });

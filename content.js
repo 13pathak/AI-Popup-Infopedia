@@ -9,11 +9,19 @@ console.log('[AI Popup] content script build 2026-08-27.1');
 
 // --- Theme Cache & Management ---
 let currentUiTheme = 'dark';
+let selectionPopupPrompts = [];
+let selectionPromptsVersion = 0;
 
-chrome.storage.sync.get({ uiTheme: 'dark' }, (data) => {
+const initialSelectionPromptsVersion = selectionPromptsVersion;
+chrome.storage.sync.get({ uiTheme: 'dark', customPrompts: [] }, (data) => {
   if (data && data.uiTheme) {
     currentUiTheme = data.uiTheme;
     updateActivePopupsTheme();
+  }
+  // A newer storage event wins over an in-flight initial read.
+  if (selectionPromptsVersion === initialSelectionPromptsVersion) {
+    selectionPopupPrompts = getSelectionPopupPrompts(data && data.customPrompts);
+    activePopups.forEach(refreshSelectionPromptButtons);
   }
 });
 
@@ -24,6 +32,11 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'sync' && changes.uiTheme) {
     currentUiTheme = changes.uiTheme.newValue || 'dark';
     updateActivePopupsTheme();
+  }
+  if (area === 'sync' && changes.customPrompts) {
+    selectionPromptsVersion++;
+    selectionPopupPrompts = getSelectionPopupPrompts(changes.customPrompts.newValue);
+    activePopups.forEach(refreshSelectionPromptButtons);
   }
 });
 
@@ -410,6 +423,7 @@ const popupStyles = `
     box-shadow: 0 0 0 3px rgba(var(--popup-focus-ring-rgb), 0.35);
   }
   #ai-open-button-popup:focus-visible,
+  .ai-selection-prompt-button:focus-visible,
   #ai-clip-button-popup:focus-visible {
     outline: none;
     box-shadow: 0 0 0 3px rgba(var(--popup-focus-ring-rgb), 0.45);
@@ -1007,12 +1021,20 @@ const popupStyles = `
   #ai-open-button-group {
     position: fixed;
     display: flex;
+    flex-wrap: wrap;
     align-items: stretch;
     gap: 6px;
+    box-sizing: border-box;
+    width: max-content;
+    max-width: calc(100vw - 16px);
+    max-height: calc(100vh - 16px);
+    overflow: auto;
+    padding: 4px;
     pointer-events: auto;
     z-index: 1;
   }
-  #ai-open-button-popup {
+  #ai-open-button-popup,
+  .ai-selection-prompt-button {
     background-color: var(--popup-accent-btn-bg);
     color: var(--popup-accent-btn-text);
     border: 1px solid var(--popup-accent-btn-border);
@@ -1023,6 +1045,9 @@ const popupStyles = `
     font-weight: bold;
     cursor: pointer;
     box-shadow: 0 2px 6px var(--popup-shadow-1);
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
   }
   #ai-clip-button-popup {
     background-color: var(--popup-accent-btn-bg);
@@ -1042,6 +1067,7 @@ const popupStyles = `
     cursor: default;
   }
   #ai-open-button-popup:hover,
+  .ai-selection-prompt-button:hover,
   #ai-clip-button-popup:hover:not(:disabled) {
     background-color: var(--popup-accent-btn-hover);
   }
@@ -2028,7 +2054,7 @@ function readConfiguredModels(callback) {
         }
       }
 
-      const customPrompts = Array.isArray(syncData?.customPrompts) ? syncData.customPrompts : [];
+      const customPrompts = Array.isArray(syncData?.customPrompts) ? syncData.customPrompts.filter(isUsableCustomPrompt) : [];
       const defaultPromptId = syncData?.defaultPromptId || null;
 
       callback({ models, defaultModelId, customPrompts, defaultPromptId });
@@ -2077,7 +2103,7 @@ function initiateEmptyPopupSequence() {
       if (!popupInstance.followupDraftEdited && input && !input.value &&
           typeof stash.followupDraft === 'string' && stash.followupDraft.trim()) {
         if (restoreConversationFromStash(popupInstance, stash, models)) {
-          if (models.length) createSelectors(popupInstance, models, customPrompts, defaultModelId, null, stash.word || 'Custom Question', defaultPromptId);
+          if (models.length) createSelectors(popupInstance, models, customPrompts, defaultModelId, popupInstance.comparePrompt, stash.word || 'Custom Question', defaultPromptId);
           adjustPopupPosition(popupInstance, null);
           return;
         }
@@ -2149,7 +2175,55 @@ function collectSourceMetadata() {
   return { sourceUrl, sourceTitle };
 }
 
-// --- NEW: Function to show intermediate 'Open' button ---
+function isUsableCustomPrompt(prompt) {
+  return prompt && typeof prompt.id === 'string' && prompt.id.trim()
+    && typeof prompt.name === 'string' && prompt.name.trim()
+    && typeof prompt.content === 'string' && prompt.content.trim();
+}
+
+function getSelectionPopupPrompts(prompts) {
+  return Array.isArray(prompts)
+    ? prompts.filter(prompt => isUsableCustomPrompt(prompt) && prompt.showInSelectionPopup === true)
+    : [];
+}
+
+function positionSelectionButtonGroup(instance) {
+  if (!instance.selectionRect) return;
+  const group = instance.popup;
+  const rect = instance.selectionRect;
+  const bounds = group.getBoundingClientRect();
+  const margin = 8;
+  const left = Math.max(margin, Math.min(rect.left, window.innerWidth - bounds.width - margin));
+  const preferredTop = rect.top - bounds.height - margin;
+  const top = preferredTop >= margin ? preferredTop : rect.bottom + margin;
+  group.style.left = `${left}px`;
+  group.style.top = `${Math.max(margin, Math.min(top, window.innerHeight - bounds.height - margin))}px`;
+}
+
+function refreshSelectionPromptButtons(instance) {
+  if (!instance.selectionRect) return;
+  const group = instance.popup;
+  group.querySelectorAll('.ai-selection-prompt-button').forEach(button => button.remove());
+  selectionPopupPrompts.forEach(prompt => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'ai-selection-prompt-button';
+    button.dataset.promptId = prompt.id;
+    button.textContent = prompt.name;
+    button.title = `Run ${prompt.name} on the selected text`;
+    button.addEventListener('click', event => {
+      event.stopPropagation();
+      removePopupInstance(instance);
+      initiatePopupSequence(instance.selectionRect, instance.sourceText, prompt.content, instance.implicitContext);
+    });
+    group.appendChild(button);
+  });
+  positionSelectionButtonGroup(instance);
+}
+
+window.addEventListener('resize', () => activePopups.forEach(positionSelectionButtonGroup));
+
+// Selection actions share the text and context captured before the user clicks.
 function showOpenButtonPopup(rect, selectedText, implicitContext) {
   ensurePopupFontsInjected();
   const popupContainer = document.createElement('div');
@@ -2178,6 +2252,7 @@ function showOpenButtonPopup(rect, selectedText, implicitContext) {
   buttonGroup.style.top = `${topPos}px`;
 
   const openBtn = document.createElement('button');
+  openBtn.type = 'button';
   openBtn.id = 'ai-open-button-popup';
   openBtn.textContent = 'Ask AI';
   openBtn.title = 'Explain the selection with AI';
@@ -2192,8 +2267,10 @@ function showOpenButtonPopup(rect, selectedText, implicitContext) {
   // model. The full text is stored; the history view clamps it for display,
   // and its "Explain" action can turn it into a real definition later.
   const clipBtn = document.createElement('button');
+  clipBtn.type = 'button';
   clipBtn.id = 'ai-clip-button-popup';
   clipBtn.title = 'Clip: save the selection to history (no AI call)';
+  clipBtn.setAttribute('aria-label', 'Clip selection');
   clipBtn.innerHTML = iconSvg('bookmark', 15);
   clipBtn.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -2235,10 +2312,13 @@ function showOpenButtonPopup(rect, selectedText, implicitContext) {
     isInteracting: false,
     isClickInside: false,
     messages: [],
+    selectionRect: rect,
+    implicitContext: implicitContext || null,
     sourceText: selectedText // prevents duplicate triggers
   };
 
   activePopups.push(instance);
+  refreshSelectionPromptButtons(instance);
   return instance;
 }
 
@@ -2283,8 +2363,8 @@ function initiatePopupSequence(rect, selectedText, customPrompt, implicitContext
       if (!activePopups.includes(popupInstance)) return;
       if (curModels.length > 0) {
         popupInstance.models = curModels;
-        createSelectors(popupInstance, curModels, curPrompts, curDefaultModelId, null, selectedText, defaultPromptId);
-        startCompareLookup(popupInstance, selectedText, customPrompt || null);
+        createSelectors(popupInstance, curModels, curPrompts, curDefaultModelId, customPrompt ?? null, selectedText, defaultPromptId);
+        startCompareLookup(popupInstance, selectedText, customPrompt ?? null);
         adjustPopupPosition(popupInstance, rect);
       } else {
         showModelsNotConfiguredError();
@@ -3120,7 +3200,7 @@ function startCompareLookup(instance, word, customPrompt) {
   const gen = ++instance.compareGen;
 
   instance.compareWord = word;
-  instance.comparePrompt = customPrompt || null;
+  instance.comparePrompt = customPrompt ?? null;
   instance.compareFirstMessages = null; // word-lookup conversations start from the prompt
   instance.compareIndex = 0; // every new question starts on the first model's card
   instance.compareSlots = models.map(m => ({
@@ -3332,7 +3412,7 @@ function deliverFollowupToSlot(instance, slot, followup) {
 function issueCompareRequest(instance, gen, slot, word, customPrompt, isFollowup) {
   slot.started = true;
   slot.stopped = false;
-  slot.lastRequest = { word: word, customPrompt: customPrompt || null, isFollowup: !!isFollowup };
+  slot.lastRequest = { word: word, customPrompt: customPrompt ?? null, isFollowup: !!isFollowup };
   slot.status = 'streaming';
   slot.settled = false;
   slot.bodyPinned = false;
@@ -3379,7 +3459,7 @@ function issueCompareRequest(instance, gen, slot, word, customPrompt, isFollowup
   };
   if (isFollowup) {
     payload.messages = slot.messages.filter(m => !m.isThinking && !m.isError && !m.isStreaming);
-  } else if (customPrompt) {
+  } else if (typeof customPrompt === 'string') {
     payload.customPrompt = customPrompt;
   }
 
@@ -4627,27 +4707,34 @@ function createSelectors(instance, models, prompts, currentModelId, currentPromp
   // <select>, which also used content as the option value.
   let promptSelector;
   let lastPromptValue;
-  if (prompts && prompts.length > 0) {
+  const selectorPrompts = Array.isArray(prompts) ? prompts : [];
+  const hasExplicitCustomPrompt = typeof currentPromptContent === 'string' && currentPromptContent.length > 0;
+  if (selectorPrompts.length > 0 || hasExplicitCustomPrompt) {
     const promptItems = [{
       id: '',
       name: defaultPromptId === 'system' ? 'System Default (Default)' : 'System Default'
     }];
-    prompts.forEach(prompt => {
+    selectorPrompts.forEach(prompt => {
       promptItems.push({
         id: prompt.content,
         name: prompt.id === defaultPromptId ? `${prompt.name} (Default)` : prompt.name
       });
     });
+    // A task captured by a selection button or a restored conversation still
+    // applies when its saved prompt has since been edited or deleted.
+    if (hasExplicitCustomPrompt && !selectorPrompts.some(p => p.content === currentPromptContent)) {
+      promptItems.push({ id: currentPromptContent, name: 'Custom Prompt' });
+    }
 
-    // Same initial-selection rules as the old <select>: explicit '' wins,
-    // then a content match, then the configured default, then System Default.
+    // Explicit prompt content (including '' for System Default) wins;
+    // otherwise use the configured default, then System Default.
     let initialPromptValue;
-    if (currentPromptContent) {
-      initialPromptValue = prompts.some(p => p.content === currentPromptContent) ? currentPromptContent : '';
+    if (hasExplicitCustomPrompt) {
+      initialPromptValue = currentPromptContent;
     } else if (currentPromptContent === '') {
       initialPromptValue = '';
     } else {
-      const def = defaultPromptId === 'system' ? null : prompts.find(p => p.id === defaultPromptId);
+      const def = defaultPromptId === 'system' ? null : selectorPrompts.find(p => p.id === defaultPromptId);
       initialPromptValue = def ? def.content : '';
     }
     lastPromptValue = initialPromptValue;
@@ -5310,6 +5397,9 @@ function buildConversationStash(instance) {
   return {
     savedAt: Date.now(),
     word: instance.compareWord || null,
+    // Preserve the chosen task for models first visited after reopening.
+    // Empty string explicitly selects the system prompt; null uses the default.
+    comparePrompt: typeof instance.comparePrompt === 'string' ? instance.comparePrompt : null,
     firstMessages: Array.isArray(instance.compareFirstMessages) ? instance.compareFirstMessages : null,
     index: instance.compareIndex || 0,
     // Read the live input at dismissal, including whitespace and dictated
@@ -5340,6 +5430,7 @@ function stashConversationFromPopup(instance) {
 // model is configured. Restored threads behave like any compare conversation.
 function restoreConversationFromStash(instance, stash, models) {
   if (!stash || !Array.isArray(stash.slots) || !Array.isArray(models)) return false;
+  instance.comparePrompt = typeof stash.comparePrompt === 'string' ? stash.comparePrompt : null;
   const byId = new Map(models.map(m => [m.id, m]));
   const slots = [];
   const restoredModelIds = new Set();
@@ -5397,7 +5488,6 @@ function restoreConversationFromStash(instance, stash, models) {
   });
 
   instance.compareWord = stash.word || null;
-  instance.comparePrompt = null;
   instance.compareFirstMessages = Array.isArray(stash.firstMessages) ? stash.firstMessages : null;
   instance.compareSlots = slots;
   instance.compareGen = (instance.compareGen || 0) + 1; // invalidate any stale callbacks
@@ -5427,7 +5517,8 @@ function reopenLastConversationPopup() {
     readConfiguredModels(({ models, defaultModelId, customPrompts, defaultPromptId }) => {
       const begin = (curModels) => {
         if (!activePopups.includes(popupInstance)) return; // closed while loading
-        createSelectors(popupInstance, curModels, customPrompts, defaultModelId, null, (stash && stash.word) || 'Conversation', defaultPromptId);
+        const restoredPrompt = stash && typeof stash.comparePrompt === 'string' ? stash.comparePrompt : null;
+        createSelectors(popupInstance, curModels, customPrompts, defaultModelId, restoredPrompt, (stash && stash.word) || 'Conversation', defaultPromptId);
         const restored = restoreConversationFromStash(popupInstance, stash, curModels);
         if (restored) {
           adjustPopupPosition(popupInstance, null);

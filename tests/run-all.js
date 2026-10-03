@@ -135,6 +135,11 @@ async function run() {
   const draftCode = await new Promise(res => draftProc.on('exit', code => res(code ?? 0)));
   if (draftCode !== 0) throw new Error('Follow-up draft recovery tests failed.');
 
+  console.log('Testing custom selection button settings...');
+  const selectionSettingsProc = spawn(process.execPath, [path.join(__dirname, 'test-selection-button-settings.js')], { stdio: 'inherit' });
+  const selectionSettingsCode = await new Promise(res => selectionSettingsProc.on('exit', code => res(code ?? 0)));
+  if (selectionSettingsCode !== 0) throw new Error('Selection button settings tests failed.');
+
   console.log('Testing saved-meaning recognition and actions...');
   const meaningsProc = spawn(process.execPath, [path.join(__dirname, 'test-saved-meanings.js')], { stdio: 'inherit' });
   const meaningsCode = await new Promise(res => meaningsProc.on('exit', code => res(code ?? 0)));
@@ -244,6 +249,11 @@ async function run() {
     const draftBrowserProc = spawn(process.execPath, [path.join(__dirname, 'e2e-followup-draft.js')], { stdio: 'inherit' });
     const draftBrowserCode = await new Promise(res => draftBrowserProc.on('exit', code => res(code ?? 0)));
     if (draftBrowserCode !== 0) exitCode = draftBrowserCode;
+
+    console.log('Testing custom selection popup buttons...');
+    const selectionButtonsProc = spawn(process.execPath, [path.join(__dirname, 'test-selection-buttons.js')], { stdio: 'inherit' });
+    const selectionButtonsCode = await new Promise(res => selectionButtonsProc.on('exit', code => res(code ?? 0)));
+    if (selectionButtonsCode !== 0) exitCode = selectionButtonsCode;
   } catch (err) {
     console.error('Test runner failed:', err.message);
     exitCode = 1;
