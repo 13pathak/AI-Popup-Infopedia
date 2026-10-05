@@ -1546,6 +1546,28 @@
 
         body.focus-lock { overflow: hidden; }
 
+        .prompt-icon-chip {
+            background: var(--bg-card, #2d3748);
+            border: 1px solid var(--border-color, #4a5568);
+            border-radius: 6px;
+            padding: 4px 8px;
+            font-size: 14px;
+            cursor: pointer;
+            color: var(--text-color, #fff);
+            transition: background-color 0.15s, border-color 0.15s;
+        }
+        .prompt-icon-chip:hover {
+            background: var(--primary-color, #3b82f6);
+            color: #fff;
+            border-color: var(--primary-color, #3b82f6);
+        }
+        .prompt-icon-badge {
+            display: inline-block;
+            margin-right: 6px;
+            font-size: 1.1em;
+            vertical-align: middle;
+        }
+
         @media (prefers-reduced-motion: reduce) {
             #focus-overlay { animation: none; }
             #focus-progress-fill { transition: none; }
@@ -2456,12 +2478,58 @@
         <h2>Custom Prompts</h2>
         <p>Create custom prompts and optional buttons that appear alongside Ask AI and Clip when you select text.</p>
 
+        <div id="selection-toolbar-settings" class="settings-section" style="margin-bottom: 20px;">
+            <h3 class="section-title">Selection Toolbar Appearance</h3>
+            <p>Customize the buttons that appear when text is selected on a page.</p>
+            <div style="display: flex; gap: 16px; align-items: center; flex-wrap: wrap;">
+                <div>
+                    <label for="ask-ai-button-style">Ask AI Button Style</label>
+                    <select id="ask-ai-button-style" style="margin-top: 5px; min-width: 220px;">
+                        <option value="text">Text ("Ask AI")</option>
+                        <option value="sparkles">Sparkles SVG Icon (✨)</option>
+                        <option value="emoji_robot">Robot Emoji (🤖)</option>
+                        <option value="emoji_sparkles">Sparkles Emoji (✨)</option>
+                        <option value="custom">Custom Icon or Emoji…</option>
+                    </select>
+                </div>
+                <div id="ask-ai-custom-icon-container" style="display: none;">
+                    <label for="ask-ai-custom-icon">Custom Emoji / SVG Name</label>
+                    <input type="text" id="ask-ai-custom-icon" placeholder="e.g. 🤖 or sparkles" style="margin-top: 5px; max-width: 160px;">
+                </div>
+            </div>
+            <small style="display: block; margin-top: 6px; color: var(--text-muted, #888);">
+                Replace the "Ask AI" text with an SVG or emoji icon just like the Clip button for a compact, consistent toolbar.
+            </small>
+        </div>
+
         <div id="prompt-form-container" class="settings-section">
             <h3 class="section-title">Add New Prompt</h3>
             <input type="hidden" id="prompt-id">
             <div>
                 <label for="prompt-name">Prompt Name</label>
                 <input type="text" id="prompt-name" placeholder="e.g., Explain like I'm 5">
+            </div>
+            <div>
+                <label for="prompt-icon">Button Icon or Emoji (Optional)</label>
+                <div style="display: flex; gap: 8px; align-items: center; margin-top: 5px; margin-bottom: 6px;">
+                    <input type="text" id="prompt-icon" placeholder="e.g. ✍️, 🌐, or sparkles" style="max-width: 160px;">
+                    <span id="prompt-icon-preview" style="font-size: 18px; min-width: 24px; text-align: center; display: inline-flex; align-items: center; justify-content: center;"></span>
+                </div>
+                <div id="prompt-icon-presets" style="display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px;">
+                    <button type="button" class="prompt-icon-chip" data-icon="✍️" title="Grammar / Pen">✍️</button>
+                    <button type="button" class="prompt-icon-chip" data-icon="🌐" title="Translate / Globe">🌐</button>
+                    <button type="button" class="prompt-icon-chip" data-icon="📝" title="Summary / Notes">📝</button>
+                    <button type="button" class="prompt-icon-chip" data-icon="💡" title="Explain / Idea">💡</button>
+                    <button type="button" class="prompt-icon-chip" data-icon="🔍" title="Analyze / Search">🔍</button>
+                    <button type="button" class="prompt-icon-chip" data-icon="⚡" title="Quick / Simplify">⚡</button>
+                    <button type="button" class="prompt-icon-chip" data-icon="🤖" title="AI / Bot">🤖</button>
+                    <button type="button" class="prompt-icon-chip" data-icon="sparkles" title="Sparkles (SVG)">✨</button>
+                    <button type="button" class="prompt-icon-chip" data-icon="pen" title="Pen (SVG)">🖊️</button>
+                    <button type="button" class="prompt-icon-chip" data-icon="bookmark" title="Bookmark (SVG)">🔖</button>
+                </div>
+                <small style="display: block; color: var(--text-muted, #888);">
+                    When set, replaces the text on the selection popup button with this icon or emoji (just like the Clip button). Leave blank to display the prompt name as text.
+                </small>
             </div>
             <div>
                 <label for="prompt-content">Prompt Content</label>
@@ -2474,8 +2542,7 @@
                     <input type="checkbox" id="prompt-show-in-selection-popup" aria-describedby="prompt-selection-popup-help">
                     Show as a selection popup button
                 </label>
-                <small id="prompt-selection-popup-help" style="display: block;">The prompt name becomes the button label. For example, name it <strong>Check Grammar</strong> and use
-                    <strong>Check the grammar of {word}. Explain any mistakes and provide a corrected version.</strong></small>
+                <small id="prompt-selection-popup-help" style="display: block;">The button appears alongside Ask AI and Clip on text selection. Set an icon or emoji (e.g. <strong>✍️</strong>) to display it as a compact icon button just like Clip.</small>
             </div>
             <div style="margin-top: 10px;">
                 <button id="save-custom-prompt-btn" style="background-color: var(--secondary-color);">Save

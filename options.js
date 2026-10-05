@@ -93,6 +93,7 @@ document.addEventListener('DOMContentLoaded', () => {
       // --- NEW: Load Prompts when tab is clicked ---
       if (tab.dataset.tab === "prompts-content") {
         loadPrompts();
+        loadSelectionToolbarSettings();
       }
 
       // --- NEW: Load TTS Settings when tab is clicked ---
@@ -360,6 +361,37 @@ document.addEventListener('DOMContentLoaded', () => {
 
   safeAddListener('save-custom-prompt-btn', 'click', savePrompt);
   safeAddListener('cancel-custom-prompt-btn', 'click', cancelPromptEdit);
+  safeAddListener('ask-ai-button-style', 'change', (e) => {
+    const customContainer = document.getElementById('ask-ai-custom-icon-container');
+    if (customContainer) {
+      customContainer.style.display = e.target.value === 'custom' ? 'block' : 'none';
+    }
+    saveAskAiButtonStyle();
+  });
+  safeAddListener('ask-ai-custom-icon', 'input', debounce(() => {
+    saveAskAiButtonStyle();
+  }, 400));
+
+  const promptIconInput = document.getElementById('prompt-icon');
+  const promptIconPreview = document.getElementById('prompt-icon-preview');
+  if (promptIconInput) {
+    promptIconInput.addEventListener('input', () => {
+      if (promptIconPreview) {
+        promptIconPreview.textContent = promptIconInput.value.trim();
+      }
+    });
+  }
+  document.querySelectorAll('.prompt-icon-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      const icon = chip.dataset.icon;
+      if (promptIconInput) {
+        promptIconInput.value = icon;
+        if (promptIconPreview) {
+          promptIconPreview.textContent = icon;
+        }
+      }
+    });
+  });
 
   // --- TTS Event Listeners ---
   safeAddListener('tts-test-btn', 'click', testTTSVoice);
@@ -1882,6 +1914,46 @@ function savePdfViewerToggle() {
   if (!checkbox) return;
   chrome.storage.sync.set({ pdfViewerEnabled: checkbox.checked }, () => {
     updateStatus('PDF viewer preference saved.', 'success');
+  });
+}
+
+function loadSelectionToolbarSettings() {
+  chrome.storage.sync.get({ askAiButtonIcon: 'text' }, (data) => {
+    const val = data.askAiButtonIcon || 'text';
+    const select = document.getElementById('ask-ai-button-style');
+    const customContainer = document.getElementById('ask-ai-custom-icon-container');
+    const customInput = document.getElementById('ask-ai-custom-icon');
+    if (!select) return;
+
+    if (val === 'text' || val === 'sparkles') {
+      select.value = val;
+      if (customContainer) customContainer.style.display = 'none';
+    } else if (val === '🤖') {
+      select.value = 'emoji_robot';
+      if (customContainer) customContainer.style.display = 'none';
+    } else if (val === '✨') {
+      select.value = 'emoji_sparkles';
+      if (customContainer) customContainer.style.display = 'none';
+    } else {
+      select.value = 'custom';
+      if (customContainer) {
+        customContainer.style.display = 'block';
+        if (customInput) customInput.value = val;
+      }
+    }
+  });
+}
+
+function saveAskAiButtonStyle() {
+  const select = document.getElementById('ask-ai-button-style');
+  const customInput = document.getElementById('ask-ai-custom-icon');
+  if (!select) return;
+  let val = select.value;
+  if (val === 'emoji_robot') val = '🤖';
+  else if (val === 'emoji_sparkles') val = '✨';
+  else if (val === 'custom') val = (customInput?.value || '').trim() || 'sparkles';
+  chrome.storage.sync.set({ askAiButtonIcon: val }, () => {
+    updateStatus('Selection toolbar settings saved.', 'success');
   });
 }
 
@@ -4015,7 +4087,7 @@ function restoreBackup() {
           const currentSecrets = isLocalSecrets ? existingLocalSecrets : existingSyncData;
 
           const syncKeys = [
-            'models', 'customPrompts', 'defaultModelId', 'defaultPromptId',
+            'models', 'customPrompts', 'defaultModelId', 'defaultPromptId', 'askAiButtonIcon',
             'tavilyApiKey', 'enableHallucinationGuard', 'verificationModelId',
             'enableModelFallback', 'enableImplicitContext',
             'ttsSettings', 'ankiSettings', 'backupReminderFrequency', 'backupSubfolder',
@@ -4242,7 +4314,8 @@ function loadPrompts() {
 
         const infoDiv = document.createElement('div');
         infoDiv.style.overflowWrap = 'anywhere';
-        infoDiv.innerHTML = `<strong>${escapeHTML(prompt.name)}</strong><br><small style="color: #888;">${escapeHTML(prompt.content.substring(0, 50))}${prompt.content.length > 50 ? '...' : ''}</small>`;
+        const iconBadge = prompt.icon ? `<span class="prompt-icon-badge" title="Button icon">${escapeHTML(prompt.icon)}</span>` : '';
+        infoDiv.innerHTML = `<strong>${iconBadge}${escapeHTML(prompt.name)}</strong><br><small style="color: #888;">${escapeHTML(prompt.content.substring(0, 50))}${prompt.content.length > 50 ? '...' : ''}</small>`;
 
         infoWrapper.appendChild(dragHandle);
         infoWrapper.appendChild(infoDiv);
@@ -4441,6 +4514,8 @@ function savePrompt() {
   const id = document.getElementById('prompt-id').value;
   const name = document.getElementById('prompt-name').value.trim();
   const content = document.getElementById('prompt-content').value.trim();
+  const iconInput = document.getElementById('prompt-icon');
+  const icon = iconInput ? iconInput.value.trim() : '';
   const showInSelectionPopup = document.getElementById('prompt-show-in-selection-popup').checked;
 
   if (!name || !content) {
@@ -4458,7 +4533,16 @@ function savePrompt() {
       if (!prompts.some(p => p.id === id)) {
         throw new Error('This prompt was deleted. Cancel editing to create a new prompt.');
       }
-      prompts = prompts.map(p => p.id === id ? { ...p, name, content, showInSelectionPopup } : p);
+      prompts = prompts.map(p => {
+        if (p.id !== id) return p;
+        const updated = { ...p, name, content, showInSelectionPopup };
+        if (icon) {
+          updated.icon = icon;
+        } else {
+          delete updated.icon;
+        }
+        return updated;
+      });
     } else {
       // Add new
       const newPrompt = {
@@ -4467,6 +4551,9 @@ function savePrompt() {
         content,
         showInSelectionPopup
       };
+      if (icon) {
+        newPrompt.icon = icon;
+      }
       prompts.push(newPrompt);
     }
 
@@ -4487,6 +4574,10 @@ function cancelPromptEdit() {
   document.getElementById('prompt-id').value = '';
   document.getElementById('prompt-name').value = '';
   document.getElementById('prompt-content').value = '';
+  const iconInput = document.getElementById('prompt-icon');
+  if (iconInput) iconInput.value = '';
+  const iconPreview = document.getElementById('prompt-icon-preview');
+  if (iconPreview) iconPreview.textContent = '';
   document.getElementById('prompt-show-in-selection-popup').checked = false;
   updatePromptStatus('');
 
@@ -4505,6 +4596,10 @@ function editPrompt(id) {
       document.getElementById('prompt-id').value = prompt.id;
       document.getElementById('prompt-name').value = prompt.name;
       document.getElementById('prompt-content').value = prompt.content;
+      const iconInput = document.getElementById('prompt-icon');
+      if (iconInput) iconInput.value = prompt.icon || '';
+      const iconPreview = document.getElementById('prompt-icon-preview');
+      if (iconPreview) iconPreview.textContent = prompt.icon || '';
       document.getElementById('prompt-show-in-selection-popup').checked = prompt.showInSelectionPopup === true;
       updatePromptStatus('');
 

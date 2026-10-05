@@ -200,4 +200,29 @@ assert.equal(store.customPrompts.some(prompt => prompt.id === first.id), false);
 assert.equal(store.defaultPromptId, 'system', 'deleting the default button resets the default prompt');
 assert.equal(savedToggle('invalid-flag').checked, true);
 
-console.log('Selection button settings tests passed (CRUD, legacy flags, metadata, storage errors, and concurrent changes).');
+// Icon/Emoji support: saving, editing, and clearing
+context.cancelPromptEdit();
+fill('Grammar', 'Check grammar of {word}', true);
+el('prompt-icon').value = '✍️';
+context.savePrompt();
+const iconPrompt = store.customPrompts.find(p => p.name === 'Grammar');
+assert.ok(iconPrompt, 'prompt with icon was created');
+assert.equal(iconPrompt.icon, '✍️', 'icon is saved');
+assert.equal(el('prompt-icon').value, '', 'savePrompt resets the icon input');
+
+// Editing loads the icon back into the input
+context.editPrompt(iconPrompt.id);
+assert.equal(el('prompt-icon').value, '✍️', 'editPrompt loads saved icon');
+
+// Clearing icon removes the icon property on update
+el('prompt-icon').value = '';
+context.savePrompt();
+const updatedIconPrompt = store.customPrompts.find(p => p.id === iconPrompt.id);
+assert.equal(updatedIconPrompt.icon, undefined, 'clearing icon removes icon property');
+
+// Canceling edit clears the icon input
+el('prompt-icon').value = 'sparkles';
+context.cancelPromptEdit();
+assert.equal(el('prompt-icon').value, '', 'cancelPromptEdit clears icon input');
+
+console.log('Selection button settings tests passed (CRUD, legacy flags, metadata, storage errors, concurrent changes, and button icons).');

@@ -218,8 +218,33 @@ async function run() {
     assert.equal(await evaluate(`(() => { const group = toolbar.popup, bounds = group.getBoundingClientRect(); return bounds.left >= 0 && bounds.right <= innerWidth + 1 && bounds.top >= 0 && bounds.bottom <= innerHeight + 1 && group.scrollWidth <= group.clientWidth + 1; })()`), true, `${theme} toolbar fits inside narrow viewport`);
   }
   assert.equal(await evaluate('buttonLabels().length'), 25, 'layout does not discard enabled buttons');
+
+  // Icon and emoji buttons: custom prompts with emoji or SVG, and Ask AI icon styles
+  await evaluate(`
+    updatePrompts([
+      { id: 'grammar-icon', name: 'Grammar', content: 'Check grammar', showInSelectionPopup: true, icon: '✍️' },
+      { id: 'translate-icon', name: 'Translate', content: 'Translate text', showInSelectionPopup: true, icon: 'sparkles' }
+    ]);
+  `);
+  assert.equal(await evaluate(`toolbar.popup.querySelector('[data-prompt-id="grammar-icon"]').textContent`), '✍️');
+  assert.equal(await evaluate(`toolbar.popup.querySelector('[data-prompt-id="grammar-icon"]').getAttribute('aria-label')`), 'Grammar');
+  assert.equal(await evaluate(`toolbar.popup.querySelector('[data-prompt-id="grammar-icon"]').classList.contains('ai-selection-icon-only')`), true);
+  assert.equal(await evaluate(`!!toolbar.popup.querySelector('[data-prompt-id="translate-icon"] svg')`), true);
+  assert.equal(await evaluate(`toolbar.popup.querySelector('[data-prompt-id="translate-icon"]').getAttribute('aria-label')`), 'Translate');
+
+  // Ask AI icon customization via sync storage changes
+  await evaluate(`changeListeners.forEach(listener => listener({ askAiButtonIcon: { newValue: 'sparkles' } }, 'sync'))`);
+  assert.equal(await evaluate(`!!toolbar.popup.querySelector('#ai-open-button-popup svg')`), true);
+  assert.equal(await evaluate(`toolbar.popup.querySelector('#ai-open-button-popup').classList.contains('ai-selection-icon-only')`), true);
+
+  await evaluate(`changeListeners.forEach(listener => listener({ askAiButtonIcon: { newValue: '🤖' } }, 'sync'))`);
+  assert.equal(await evaluate(`toolbar.popup.querySelector('#ai-open-button-popup').textContent`), '🤖');
+
+  await evaluate(`changeListeners.forEach(listener => listener({ askAiButtonIcon: { newValue: 'text' } }, 'sync'))`);
+  assert.equal(await evaluate(`toolbar.popup.querySelector('#ai-open-button-popup').textContent`), 'Ask AI');
+
   assert.deepEqual(await evaluate('errors'), [], 'no uncaught content-script errors');
-  console.log('Selection buttons passed: opt-in filtering, live sync/race, safe labels, request/context, compare/retry, built-ins, and responsive layout.');
+  console.log('Selection buttons passed: opt-in filtering, live sync/race, safe labels, request/context, compare/retry, built-ins, responsive layout, and SVG/emoji icons.');
 }
 
 run().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => {

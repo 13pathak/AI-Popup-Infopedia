@@ -11,12 +11,16 @@ console.log('[AI Popup] content script build 2026-08-27.1');
 let currentUiTheme = 'dark';
 let selectionPopupPrompts = [];
 let selectionPromptsVersion = 0;
+let currentAskAiButtonIcon = 'text';
 
 const initialSelectionPromptsVersion = selectionPromptsVersion;
-chrome.storage.sync.get({ uiTheme: 'dark', customPrompts: [] }, (data) => {
+chrome.storage.sync.get({ uiTheme: 'dark', customPrompts: [], askAiButtonIcon: 'text' }, (data) => {
   if (data && data.uiTheme) {
     currentUiTheme = data.uiTheme;
     updateActivePopupsTheme();
+  }
+  if (data && data.askAiButtonIcon) {
+    currentAskAiButtonIcon = data.askAiButtonIcon;
   }
   // A newer storage event wins over an in-flight initial read.
   if (selectionPromptsVersion === initialSelectionPromptsVersion) {
@@ -32,6 +36,14 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'sync' && changes.uiTheme) {
     currentUiTheme = changes.uiTheme.newValue || 'dark';
     updateActivePopupsTheme();
+  }
+  if (area === 'sync' && changes.askAiButtonIcon) {
+    currentAskAiButtonIcon = changes.askAiButtonIcon.newValue || 'text';
+    activePopups.forEach(instance => {
+      const openBtn = instance.popup?.querySelector('#ai-open-button-popup');
+      if (openBtn) applyAskAiButtonContent(openBtn, currentAskAiButtonIcon);
+      positionSelectionButtonGroup(instance);
+    });
   }
   if (area === 'sync' && changes.customPrompts) {
     selectionPromptsVersion++;
@@ -1049,6 +1061,22 @@ const popupStyles = `
     max-width: 100%;
     overflow-wrap: anywhere;
   }
+  #ai-open-button-popup.ai-selection-icon-only,
+  .ai-selection-prompt-button.ai-selection-icon-only {
+    padding: 6px 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 32px;
+    font-size: 14px;
+    line-height: 1;
+    font-weight: normal;
+  }
+  #ai-open-button-popup.ai-selection-icon-only svg,
+  .ai-selection-prompt-button.ai-selection-icon-only svg,
+  #ai-clip-button-popup svg {
+    display: block;
+  }
   #ai-clip-button-popup {
     background-color: var(--popup-accent-btn-bg);
     color: var(--popup-accent-btn-text);
@@ -1529,7 +1557,9 @@ const POPUP_ICON_PATHS = {
   bookmarkPlus: '<path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/><line x1="12" y1="7" x2="12" y2="13"/><line x1="9" y1="10" x2="15" y2="10"/>',
   bookmarkCheck: '<path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/><polyline points="9 10 11 12 15 8"/>',
   send: '<line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>',
-  arrowRight: '<line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>'
+  arrowRight: '<line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>',
+  pen: '<path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>',
+  spellCheck: '<path d="m6 16 6-12 6 12"/><path d="M8 12h8"/><path d="m16 20 2 2 4-4"/>'
 };
 
 function iconSvg(name, size = 16) {
@@ -2200,6 +2230,27 @@ function positionSelectionButtonGroup(instance) {
   group.style.top = `${Math.max(margin, Math.min(top, window.innerHeight - bounds.height - margin))}px`;
 }
 
+function applyAskAiButtonContent(button, iconMode) {
+  if (!button) return;
+  const mode = typeof iconMode === 'string' ? iconMode.trim() : '';
+  if (!mode || mode === 'text') {
+    button.textContent = 'Ask AI';
+    button.title = 'Explain the selection with AI';
+    button.removeAttribute('aria-label');
+    button.classList.remove('ai-selection-icon-only');
+  } else if (POPUP_ICON_PATHS[mode]) {
+    button.innerHTML = iconSvg(mode, 15);
+    button.title = 'Ask AI: Explain the selection with AI';
+    button.setAttribute('aria-label', 'Ask AI');
+    button.classList.add('ai-selection-icon-only');
+  } else {
+    button.textContent = mode;
+    button.title = 'Ask AI: Explain the selection with AI';
+    button.setAttribute('aria-label', 'Ask AI');
+    button.classList.add('ai-selection-icon-only');
+  }
+}
+
 function refreshSelectionPromptButtons(instance) {
   if (!instance.selectionRect) return;
   const group = instance.popup;
@@ -2209,8 +2260,20 @@ function refreshSelectionPromptButtons(instance) {
     button.type = 'button';
     button.className = 'ai-selection-prompt-button';
     button.dataset.promptId = prompt.id;
-    button.textContent = prompt.name;
-    button.title = `Run ${prompt.name} on the selected text`;
+    const icon = typeof prompt.icon === 'string' ? prompt.icon.trim() : '';
+    if (icon) {
+      if (POPUP_ICON_PATHS[icon]) {
+        button.innerHTML = iconSvg(icon, 15);
+      } else {
+        button.textContent = icon;
+      }
+      button.classList.add('ai-selection-icon-only');
+      button.setAttribute('aria-label', prompt.name);
+      button.title = `Run ${prompt.name} on the selected text`;
+    } else {
+      button.textContent = prompt.name;
+      button.title = `Run ${prompt.name} on the selected text`;
+    }
     button.addEventListener('click', event => {
       event.stopPropagation();
       removePopupInstance(instance);
@@ -2254,8 +2317,8 @@ function showOpenButtonPopup(rect, selectedText, implicitContext) {
   const openBtn = document.createElement('button');
   openBtn.type = 'button';
   openBtn.id = 'ai-open-button-popup';
-  openBtn.textContent = 'Ask AI';
-  openBtn.title = 'Explain the selection with AI';
+  applyAskAiButtonContent(openBtn, currentAskAiButtonIcon);
+
 
   openBtn.addEventListener('click', (e) => {
     e.stopPropagation();
