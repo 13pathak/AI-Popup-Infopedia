@@ -988,18 +988,21 @@ const popupStyles = `
      answer just a chip's height. Field-styled pills — quieter than the
      accent action buttons — that pick up the accent on hover. */
   .ai-compare-chips {
+    margin-top: 10px;
+    flex-shrink: 0;
+  }
+  .ai-compare-chips-strip {
+    position: relative;
     display: flex;
     flex-wrap: nowrap;
     gap: 6px;
     align-items: center;
-    margin-top: 10px;
     overflow-x: auto;
     overflow-y: hidden;
     scrollbar-width: none;
     overscroll-behavior-x: contain;
-    flex-shrink: 0;
   }
-  .ai-compare-chips::-webkit-scrollbar { display: none; }
+  .ai-compare-chips-strip::-webkit-scrollbar { display: none; }
   /* The divider above the input moves above the chips, so chips and input
      read as one "ask more" group. */
   .ai-compare-chips {
@@ -1012,6 +1015,49 @@ const popupStyles = `
     padding-top: 0;
   }
   .ai-compare-chips .ai-popup-followup-chip { flex-shrink: 0; max-width: 220px; }
+  /* One dot per chip, shown only while the strip overflows: a click brings
+     that chip into view, so hidden chips are one click away instead of a
+     sideways scroll. Filled dots mark the chips currently in view. The
+     button is a 12px hit area around a 6px dot. */
+  .ai-compare-chip-dots {
+    display: flex;
+    justify-content: center;
+    gap: 1px;
+    margin-top: 5px;
+    user-select: none;
+  }
+  .ai-compare-chip-dots[hidden] { display: none; }
+  .ai-compare-chip-dot {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 12px;
+    height: 12px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+  }
+  .ai-compare-chip-dot::before {
+    content: '';
+    box-sizing: border-box;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    border: 1px solid var(--popup-text-muted);
+    opacity: 0.6;
+    transition: background 150ms ease, border-color 150ms ease, opacity 150ms ease, transform 150ms ease;
+  }
+  .ai-compare-chip-dot.in-view::before {
+    background: rgba(var(--popup-accent-rgb), 0.9);
+    border-color: transparent;
+    opacity: 1;
+  }
+  .ai-compare-chip-dot:hover::before {
+    border-color: rgba(var(--popup-accent-rgb), 0.9);
+    opacity: 1;
+    transform: scale(1.3);
+  }
 
   .ai-popup-followup-chip {
     font-family: inherit;
@@ -4119,18 +4165,7 @@ function renderPinnedFollowupChips(instance) {
     if (row) row.remove();
     return;
   }
-  if (!row) {
-    row = document.createElement('div');
-    row.className = 'ai-compare-chips';
-    row.setAttribute('role', 'group');
-    row.setAttribute('aria-label', 'Suggested follow-up questions');
-    // A plain mouse wheel scrolls the single-line row sideways.
-    row.addEventListener('wheel', (e) => {
-      if (row.scrollWidth <= row.clientWidth || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
-      e.preventDefault();
-      row.scrollLeft += e.deltaY;
-    }, { passive: false });
-  }
+  if (!row) row = buildFollowupChipRow();
   // Just above the input — re-seated every time, since the toolbar mounts
   // itself before the input too and may land after the row.
   if (row.nextElementSibling !== followup) popup.insertBefore(row, followup);
@@ -4138,8 +4173,11 @@ function renderPinnedFollowupChips(instance) {
   const key = JSON.stringify(labels);
   if (row.dataset.labels === key) return;
   row.dataset.labels = key;
-  row.replaceChildren();
-  labels.forEach((label) => {
+  const strip = row.querySelector('.ai-compare-chips-strip');
+  const dots = row.querySelector('.ai-compare-chip-dots');
+  strip.replaceChildren();
+  dots.replaceChildren();
+  labels.forEach((label, i) => {
     const chip = document.createElement('button');
     chip.type = 'button';
     chip.className = 'ai-popup-followup-chip';
@@ -4153,9 +4191,98 @@ function renderPinnedFollowupChips(instance) {
       e.stopPropagation();
       dispatchFollowupText(instance, label);
     });
-    row.appendChild(chip);
+    strip.appendChild(chip);
+
+    // Mouse-only shortcut (keyboard users Tab through the chips, which
+    // scrolls each into view), so it stays out of the Tab order and never
+    // takes focus from the input.
+    const dot = document.createElement('button');
+    dot.type = 'button';
+    dot.className = 'ai-compare-chip-dot';
+    dot.tabIndex = -1;
+    dot.title = `Show “${label}”`;
+    dot.setAttribute('aria-label', dot.title);
+    dot.addEventListener('mousedown', (e) => e.preventDefault());
+    dot.addEventListener('click', (e) => {
+      e.stopPropagation();
+      scrollFollowupChipIntoView(strip, i);
+    });
+    dots.appendChild(dot);
   });
-  row.scrollLeft = 0;
+  strip.scrollLeft = 0;
+  syncFollowupChipDots(row);
+}
+
+// The row is a scrolling strip of chips over a dot pager. The dots follow
+// the strip's scroll and size (the popup is resizable), so they appear only
+// while some chip is out of view.
+function buildFollowupChipRow() {
+  const row = document.createElement('div');
+  row.className = 'ai-compare-chips';
+  row.setAttribute('role', 'group');
+  row.setAttribute('aria-label', 'Suggested follow-up questions');
+
+  const strip = document.createElement('div');
+  strip.className = 'ai-compare-chips-strip';
+  // A plain mouse wheel scrolls the single-line strip sideways.
+  strip.addEventListener('wheel', (e) => {
+    if (strip.scrollWidth <= strip.clientWidth || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+    e.preventDefault();
+    strip.scrollLeft += e.deltaY;
+  }, { passive: false });
+
+  const dots = document.createElement('div');
+  dots.className = 'ai-compare-chip-dots';
+  dots.hidden = true;
+
+  let frame = 0;
+  const sync = () => {
+    if (frame) return;
+    frame = requestAnimationFrame(() => {
+      frame = 0;
+      syncFollowupChipDots(row);
+    });
+  };
+  strip.addEventListener('scroll', sync, { passive: true });
+  if (typeof ResizeObserver === 'function') new ResizeObserver(sync).observe(strip);
+
+  row.appendChild(strip);
+  row.appendChild(dots);
+  return row;
+}
+
+// Shows the dots only while the chips overflow, and fills the dot of every
+// chip that is mostly in view.
+function syncFollowupChipDots(row) {
+  const strip = row.querySelector('.ai-compare-chips-strip');
+  const dots = row.querySelector('.ai-compare-chip-dots');
+  if (!strip || !dots) return;
+  const overflowing = strip.scrollWidth - strip.clientWidth > 1;
+  dots.hidden = !overflowing;
+  if (!overflowing) return;
+  const left = strip.scrollLeft;
+  const right = left + strip.clientWidth;
+  const chips = strip.children;
+  [...dots.children].forEach((dot, i) => {
+    const chip = chips[i];
+    if (!chip) return;
+    const start = chip.offsetLeft;
+    const end = start + chip.offsetWidth;
+    const shown = Math.min(end, right) - Math.max(start, left);
+    dot.classList.toggle('in-view', shown >= chip.offsetWidth * 0.6);
+  });
+}
+
+// Centers chip `index` in the strip (clamped at both ends, so the first dot
+// shows the first chip flush left). Scrolls only the strip — scrollIntoView
+// would also scroll the host page.
+function scrollFollowupChipIntoView(strip, index) {
+  const chip = strip.children[index];
+  if (!chip) return;
+  const target = chip.offsetLeft - (strip.clientWidth - chip.offsetWidth) / 2;
+  const max = strip.scrollWidth - strip.clientWidth;
+  const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  strip.scrollTo({ left: Math.max(0, Math.min(target, max)), behavior: reduceMotion ? 'auto' : 'smooth' });
 }
 
 // Sends `text` as a follow-up exactly as if the user had typed it into the

@@ -356,6 +356,45 @@ async function run() {
     };
   })()`), { labels: ['💡 Simpler', '📝 2 Examples', '🏛️ Etymology'], inCard: false, aboveInput: true, visible: true }, 'chips are pinned above the input');
 
+  // Chip dots: none while every chip fits; once the chips overflow, one dot
+  // per chip with the in-view chips' dots filled, and clicking a dot scrolls
+  // only the strip to that chip, keeping the popup open and the input focused.
+  const chipDots = `[...activePopups.at(-1).popup.querySelectorAll('.ai-compare-chip-dot')].map(d => d.classList.contains('in-view'))`;
+  const chipStrip = `activePopups.at(-1).popup.querySelector('.ai-compare-chips-strip')`;
+  const savedChips = await evaluate(`(async () => {
+    const instance = activePopups.at(-1), popup = instance.popup, saved = instance.followupChips;
+    const dots = () => popup.querySelector('.ai-compare-chip-dots');
+    const settle = (test) => new Promise(resolve => { let n = 0; const tick = () => (test() || ++n > 100) ? resolve() : setTimeout(tick, 20); tick(); });
+    instance.followupChips = ['Only one'];
+    renderPinnedFollowupChips(instance);
+    await settle(() => dots().hidden);
+    window.chipDotsWhenFitting = { hidden: dots().hidden, count: dots().children.length };
+    instance.followupChips = ['💡 Simpler', '📝 2 Examples', '🏛️ Etymology', '🔁 Synonyms', '🚫 Antonyms', '🗣️ Use it in a sentence', '🎯 Common mistakes', '📚 Related words'];
+    renderPinnedFollowupChips(instance);
+    await settle(() => !dots().hidden && ${chipDots}[0]);
+    popup.querySelector('#ai-popup-followup-input').focus();
+    window.chipDotsPageScroll = [scrollX, scrollY];
+    return saved;
+  })()`);
+  const chipDotsBefore = await evaluate(chipDots);
+  await click(`activePopups.at(-1).popup.querySelectorAll('.ai-compare-chip-dot')[7]`);
+  await waitFor(`${chipStrip}.scrollLeft >= ${chipStrip}.scrollWidth - ${chipStrip}.clientWidth - 1 && ${chipDots}[7]`, 'the last dot scrolls the strip to the last chip');
+  assert.deepEqual(await evaluate(`(() => {
+    const instance = activePopups.at(-1), popup = instance.popup;
+    const after = ${chipDots};
+    const result = {
+      fitting: chipDotsWhenFitting, count: after.length, before: [${JSON.stringify(chipDotsBefore)}[0], ${JSON.stringify(chipDotsBefore)}[7]], after: [after[0], after[7]],
+      open: popup.isConnected, inputFocused: popup.getRootNode().activeElement === popup.querySelector('#ai-popup-followup-input'),
+      pageScrolled: scrollX !== chipDotsPageScroll[0] || scrollY !== chipDotsPageScroll[1]
+    };
+    instance.followupChips = ${JSON.stringify(savedChips)};
+    renderPinnedFollowupChips(instance);
+    return result;
+  })()`), {
+    fitting: { hidden: true, count: 1 }, count: 8, before: [true, false], after: [false, true],
+    open: true, inputFocused: true, pageScrolled: false
+  }, 'chip dots appear on overflow and jump to their chip');
+
   // Resize: dragging the bottom-left grip grows the popup left and down
   // (right edge fixed), saves the size, new popups open at it, and a
   // double-click on the grip returns to the default size.
