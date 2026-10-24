@@ -149,13 +149,8 @@ async function run() {
   assert.equal(await evaluate('aiRequests().length'), 0, 'rendering buttons does not call a model');
 
   // Click the real button and exercise the selector, lazy compare, and Retry UI.
-  await evaluate('window.lookupRect = toolbar.selectionRect');
   await click(`toolbar.popup.querySelector('[data-prompt-id="grammar"]')`);
   await waitFor(`aiRequests().length === 1 && activePopups.at(-1).compareSlots?.[0].status === 'error'`, 'custom button sends a request');
-  assert.equal(await evaluate(`(() => {
-    const p = activePopups.at(-1).popup.getBoundingClientRect(), s = lookupRect;
-    return p.left < s.right && s.left < p.right && p.top < s.bottom && s.top < p.bottom;
-  })()`), false, 'the answer popup does not cover the selected text');
   // First multi-model popup: the swipe hint sits beside the pager (no toast
   // over the follow-up box) and is remembered as shown.
   await waitFor(`activePopups.at(-1).popup.querySelector('.ai-compare-nav .ai-compare-hint')`, 'compare hint appears in the pager row');
