@@ -2040,7 +2040,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           return;
         }
         
-        sendResponse({ success: true, result: verificationResult });
+        // The checking model's display name, so the popup can say who
+        // checked the answer. Only the user's own label leaves the worker.
+        sendResponse({ success: true, result: verificationResult, checkedBy: modelToUse.name || modelToUse.modelName || '' });
         
       } catch (error) {
         console.error("Verification API Error:", error);

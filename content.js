@@ -158,6 +158,9 @@ const popupStyles = `
     --popup-btn-icon-color: #b9f6ed;
     --popup-btn-icon-hover: #e6fffb;
     --popup-toast-bg: #0b1220;
+    /* The toast is dark in every theme, so its text has its own light
+       colour: --popup-text turns dark in the light theme. */
+    --popup-toast-text: #f1f5f9;
     --popup-shadow-1: rgba(0, 0, 0, 0.42);
     --popup-shadow-2: rgba(0, 0, 0, 0.28);
     --popup-dropdown-bg: #0f172a;
@@ -391,7 +394,7 @@ const popupStyles = `
     background: var(--popup-toast-bg);
     border: 1px solid rgba(var(--popup-accent-rgb), 0.35);
     border-radius: 8px;
-    color: var(--popup-text);
+    color: var(--popup-toast-text);
     font-size: 12.5px;
     font-weight: 600;
     box-shadow: 0 6px 18px var(--popup-shadow-1);
@@ -1407,30 +1410,59 @@ const popupStyles = `
     text-decoration: underline;
   }
 
-  /* Verification Badges in Popup */
-  .ai-popup-verification {
-    margin-top: 12px;
-    padding: 8px;
-    border-radius: 8px;
+  /* --- Verification (Hallucination Guard) ---
+     Checking, clean and unavailable results are a small badge at the end of
+     the answer; a clean result's reasoning opens from the badge. Only
+     "possible errors" gets a full box, since that is the result to read. */
+  .ai-popup-verification { margin-top: 8px; font-size: 12px; color: inherit; }
+  .ai-verify-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 9px 2px 7px;
+    border-radius: 999px;
+    font-size: 11.5px;
+    font-weight: 600;
+    line-height: 1.6;
+    color: var(--popup-text-muted);
+    background: rgba(100, 116, 139, 0.12);
+    list-style: none;
+    user-select: none;
+  }
+  .ai-verify-badge::-webkit-details-marker { display: none; }
+  .ai-popup-verification.verified .ai-verify-badge {
+    color: rgba(var(--popup-accent-rgb), 1);
+    background: rgba(var(--popup-accent-rgb), 0.12);
+  }
+  summary.ai-verify-badge { cursor: pointer; }
+  summary.ai-verify-badge:hover { background: rgba(var(--popup-accent-rgb), 0.2); }
+  .ai-verify-caret { display: inline-flex; opacity: 0.7; transition: transform 150ms ease; }
+  details[open] > summary .ai-verify-caret { transform: rotate(90deg); }
+  .ai-verify-detail {
+    margin-top: 6px;
     font-size: 12px;
-    color: inherit;
-  }
-  .ai-popup-verification.pending {
-    background-color: rgba(59, 130, 246, 0.1);
-    border-left: 3px solid #3b82f6;
-  }
-  .ai-popup-verification.failed {
-    background-color: rgba(100, 116, 139, 0.1);
-    border-left: 3px solid #64748b;
+    line-height: 1.55;
+    color: var(--popup-text-muted);
   }
   .ai-popup-verification.hallucination {
+    margin-top: 12px;
+    padding: 8px 10px;
+    border-radius: 8px;
     background-color: rgba(239, 68, 68, 0.1);
     border-left: 3px solid #ef4444;
   }
-  .ai-popup-verification.verified {
-    background-color: rgba(var(--popup-accent-rgb), 0.1);
-    border-left: 3px solid rgba(var(--popup-accent-rgb), 0.9);
+  .ai-verify-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: #ef4444;
+    font-weight: 700;
   }
+  .ai-verify-by { margin-top: 2px; font-size: 11.5px; color: var(--popup-text-muted); }
+  .ai-popup-verification.hallucination ul { margin: 6px 0 0 18px; padding: 0; }
+  .ai-popup-verification.hallucination li { margin-bottom: 3px; }
+  .ai-popup-verification.hallucination details { margin-top: 6px; font-size: 11.5px; }
+  .ai-popup-verification.hallucination summary { cursor: pointer; color: var(--popup-text-muted); }
 
   /* --- Multi-model compare (Issue #27): horizontal card slider ---
      One card fills the popup; the row of cards is dragged/swiped/scrolled
@@ -1812,6 +1844,7 @@ const POPUP_ICON_PATHS = {
   refresh: '<polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>',
   globe: '<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>',
   shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+  shieldCheck: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/>',
   alertTriangle: '<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
   thumbsUp: '<path d="M7 10v12"/><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z"/>',
   thumbsDown: '<path d="M17 14V2"/><path d="M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22a3.13 3.13 0 0 1-3-3.88Z"/>',
@@ -1866,6 +1899,19 @@ function showPopupToast(instance, message, type = 'success') {
 
   toast.append(iconWrap, text);
   popup.appendChild(toast);
+
+  // Sit just above the action row (read aloud / PDF / Save) instead of over
+  // the question box below it: the toast stays up for two seconds and would
+  // hide what is being typed. Layout offsets ignore the open animation's
+  // transform. A popup without these rows keeps the CSS bottom offset.
+  const anchor = ['.ai-popup-actions', '.ai-compare-chips', '#ai-popup-followup-container']
+    .map(selector => popup.querySelector(selector))
+    .find(el => el && el.offsetParent === popup && el.offsetHeight > 0);
+  if (anchor) {
+    const bottom = popup.clientHeight - anchor.offsetTop + 8;
+    const maxBottom = popup.clientHeight - toast.offsetHeight - 8; // stay inside a short popup
+    toast.style.bottom = `${Math.max(12, Math.min(bottom, maxBottom))}px`;
+  }
 
   instance.toastTimer = setTimeout(() => {
     toast.classList.add('toast-hiding');
@@ -6690,18 +6736,6 @@ function appendSearchGroundedBadge(container) {
   container.appendChild(indicator);
 }
 
-// Module-level twin of the transcript's escapeHtml (which is function-
-// scoped there): reasoning and corrections come back from model output
-// and are inlined into innerHTML below.
-function escapeVerifyText(str) {
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-}
-
 function triggerCompareVerification(instance, slot, msg, originalPrompt, aiResponse) {
   if (!instance || !instance.popup) return;
   if (!slot || !slot.messages.includes(msg)) return;
@@ -6724,49 +6758,103 @@ function triggerCompareVerification(instance, slot, msg, originalPrompt, aiRespo
       msg.verification = {
         state: response.result && response.result.is_hallucinating ? 'hallucination' : 'verified',
         reasoning: (response.result && response.result.reasoning) || '',
-        corrections: Array.isArray(response.result && response.result.corrections) ? response.result.corrections.map(String) : []
+        corrections: Array.isArray(response.result && response.result.corrections) ? response.result.corrections.map(String) : [],
+        checkedBy: typeof response.checkedBy === 'string' ? response.checkedBy : ''
       };
     }
     renderCompareView(instance);
   });
 }
 
+// Hallucination Guard result for one answer. Checking, a clean result and an
+// unavailable check are a small badge at the end of the answer; a clean
+// result's reasoning opens from its badge. Possible errors get a full box,
+// corrections first. Fold states live on the verification object, so the
+// re-renders that happen while other models stream do not close them.
+// Verifier text is model-authored: it is only ever assigned as text.
 function appendVerificationBadge(container, verification) {
   const ind = document.createElement('div');
-  ind.className = 'ai-popup-verification';
+  const checker = verification.checkedBy
+    ? `Checked by ${verification.checkedBy}`
+    : 'Checked by your verification model';
+
+  const badge = (tag, icon, label) => {
+    const el = document.createElement(tag);
+    el.className = 'ai-verify-badge';
+    el.innerHTML = iconSvg(icon, 12);
+    const text = document.createElement('span');
+    text.textContent = label;
+    el.appendChild(text);
+    return el;
+  };
+  const foldable = (summary, body, key) => {
+    const details = document.createElement('details');
+    details.append(summary, body);
+    details.open = !!verification[key];
+    details.addEventListener('toggle', () => { verification[key] = details.open; });
+    return details;
+  };
 
   if (verification.state === 'pending') {
     ind.className = 'ai-popup-verification pending';
-    ind.innerHTML = `<span style="color:#3b82f6;">${iconSvg('shield', 13)}</span> <span style="opacity:0.8;">Verifying response...</span>`;
-    container.appendChild(ind);
-    return;
-  }
-
-  if (verification.state === 'failed') {
+    ind.appendChild(badge('span', 'shield', 'Checking…'));
+  } else if (verification.state === 'failed') {
     ind.className = 'ai-popup-verification failed';
-    ind.innerHTML = `<span style="color:#94a3b8;">${iconSvg('shield', 13)}</span> <span style="opacity:0.7">Verification failed or unavailable.</span>`;
-    container.appendChild(ind);
-    return;
-  }
-
-  // Reasoning folds via native <details> (like citations do): no toggle
-  // listener wiring is needed, and the fold state is simply rebuilt on
-  // every re-render.
-  const reasoningHtml = verification.reasoning
-    ? `<details style="margin-top: 8px; font-size: 11px; opacity: 0.9; border-top: 1px solid rgba(128,128,128,0.3); padding-top: 6px;"><summary style="cursor:pointer; text-decoration: underline; opacity: 0.7;">View reasoning</summary><div style="margin-top: 6px;"><strong>Reasoning:</strong> ${escapeVerifyText(verification.reasoning)}</div></details>`
-    : '';
-
-  if (verification.state === 'hallucination') {
+    const el = badge('span', 'shield', 'Couldn’t check');
+    el.title = 'The verification model could not be reached or returned an unreadable result.';
+    ind.appendChild(el);
+  } else if (verification.state === 'hallucination') {
     ind.className = 'ai-popup-verification hallucination';
-    let correctionsHtml = '<ul style="margin:5px 0 0 20px; padding:0;">';
-    verification.corrections.forEach(c => {
-      correctionsHtml += `<li style="margin-bottom:3px;">${escapeVerifyText(c)}</li>`;
-    });
-    correctionsHtml += '</ul>';
-    ind.innerHTML = `<span style="color:#ef4444;">${iconSvg('alertTriangle', 13)}</span> <strong style="color:#ef4444;">Hallucination Detected</strong>${reasoningHtml}<div>${correctionsHtml}</div>`;
+    const title = document.createElement('div');
+    title.className = 'ai-verify-title';
+    title.innerHTML = iconSvg('alertTriangle', 13);
+    title.append('Possible errors found');
+    const by = document.createElement('div');
+    by.className = 'ai-verify-by';
+    by.textContent = `${checker}.`;
+    ind.append(title, by);
+    const corrections = Array.isArray(verification.corrections) ? verification.corrections : [];
+    if (corrections.length > 0) {
+      const list = document.createElement('ul');
+      corrections.forEach((correction) => {
+        const item = document.createElement('li');
+        item.textContent = correction;
+        list.appendChild(item);
+      });
+      ind.appendChild(list);
+    }
+    if (verification.reasoning) {
+      const summary = document.createElement('summary');
+      summary.textContent = 'Why';
+      const reason = document.createElement('div');
+      reason.className = 'ai-verify-detail';
+      reason.textContent = verification.reasoning;
+      ind.appendChild(foldable(summary, reason, 'reasonOpen'));
+    }
   } else {
     ind.className = 'ai-popup-verification verified';
-    ind.innerHTML = `<span style="color:rgba(var(--popup-accent-rgb), 1);">${iconSvg('shield', 13)}</span> <strong style="color:rgba(var(--popup-accent-rgb), 1);">Verified</strong> <span style="opacity:0.8">- No hallucinations detected.</span>${reasoningHtml}`;
+    const verdict = `${checker}: no problems found.`;
+    if (verification.reasoning) {
+      const summary = badge('summary', 'shieldCheck', 'Verified');
+      const caret = document.createElement('span');
+      caret.className = 'ai-verify-caret';
+      caret.innerHTML = iconSvg('chevronRight', 11);
+      summary.appendChild(caret);
+      summary.title = `${verdict} Click for the reasoning.`;
+      const detail = document.createElement('div');
+      detail.className = 'ai-verify-detail';
+      const lead = document.createElement('div');
+      lead.textContent = verdict;
+      const reason = document.createElement('div');
+      reason.style.marginTop = '4px';
+      reason.textContent = verification.reasoning;
+      detail.append(lead, reason);
+      ind.appendChild(foldable(summary, detail, 'reasonOpen'));
+    } else {
+      const el = badge('span', 'shieldCheck', 'Verified');
+      el.title = verdict;
+      ind.appendChild(el);
+    }
   }
 
   container.appendChild(ind);

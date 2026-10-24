@@ -395,6 +395,72 @@ async function run() {
     open: true, inputFocused: true, pageScrolled: false
   }, 'chip dots appear on overflow and jump to their chip');
 
+  // Toast: readable in both themes (the toast is dark in each, so its text
+  // must stay light), and it sits above the action row instead of over the
+  // question box where the user may be typing.
+  assert.deepEqual(await evaluate(`(async () => {
+    const instance = activePopups.at(-1), popup = instance.popup;
+    const rgb = value => value.match(/\\d+(\\.\\d+)?/g).slice(0, 3).map(Number);
+    const luminance = ([r, g, b]) => [r, g, b].map(v => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }).reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i], 0);
+    const contrast = (a, b) => { const [x, y] = [luminance(rgb(a)), luminance(rgb(b))].sort((m, n) => n - m); return (x + 0.05) / (y + 0.05); };
+    const result = {};
+    for (const theme of ['light', 'dark']) {
+      applyThemeToPopupContainer(instance.container, theme);
+      showPopupToast(instance, 'Saved to Words');
+      const toast = popup.querySelector('.ai-popup-toast');
+      const style = getComputedStyle(toast);
+      result[theme] = contrast(style.color, style.backgroundColor) >= 4.5;
+    }
+    await new Promise(resolve => setTimeout(resolve, 250));
+    const toast = popup.querySelector('.ai-popup-toast').getBoundingClientRect();
+    const actions = popup.querySelector('.ai-popup-actions').getBoundingClientRect();
+    const input = popup.querySelector('#ai-popup-followup-container').getBoundingClientRect();
+    result.aboveActions = toast.bottom <= actions.top + 1;
+    result.clearOfInput = toast.bottom < input.top;
+    result.insidePopup = toast.top >= popup.getBoundingClientRect().top;
+    applyThemeToPopupContainer(instance.container, 'dark');
+    return result;
+  })()`), { light: true, dark: true, aboveActions: true, clearOfInput: true, insidePopup: true }, 'the toast is readable and stays off the question box');
+
+  // Verification: checking, a clean result and an unavailable check are a
+  // small badge; a clean result's reasoning opens from the badge and stays
+  // open across re-renders; possible errors get the full box. Verifier text
+  // is shown as text, never as markup.
+  assert.deepEqual(await evaluate(`(async () => {
+    const instance = activePopups.at(-1), popup = instance.popup;
+    const slot = instance.compareSlots[instance.compareIndex || 0];
+    const msg = slot.messages.filter(m => m.role === 'assistant' && !m.isThinking).at(-1);
+    const card = () => popup.querySelectorAll('.ai-compare-card')[instance.compareIndex || 0];
+    const box = () => card().querySelector('.ai-popup-verification');
+    const show = verification => { msg.verification = verification; renderCompareView(instance); return box(); };
+    const out = {};
+    out.pending = show({ state: 'pending' }).textContent.trim();
+    out.failed = show({ state: 'failed' }).textContent.trim();
+    let el = show({ state: 'verified', reasoning: 'Grammar point is correct. <img src=x>', corrections: [], checkedBy: 'Checker' });
+    const summary = el.querySelector('summary.ai-verify-badge');
+    out.verified = { badge: summary.textContent.trim(), compact: el.getBoundingClientRect().height <= 28, title: summary.title, open: el.querySelector('details').open };
+    summary.click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    renderCompareView(instance);
+    el = box();
+    out.reopened = { open: el.querySelector('details').open, detail: el.querySelector('.ai-verify-detail').textContent, injected: !!el.querySelector('img') };
+    el = show({ state: 'hallucination', reasoning: 'The subject is singular.', corrections: ['She goes to school every day.', '<b>bold</b>'], checkedBy: 'Checker' });
+    out.hallucination = {
+      title: el.querySelector('.ai-verify-title').textContent.trim(), by: el.querySelector('.ai-verify-by').textContent,
+      corrections: [...el.querySelectorAll('li')].map(li => li.textContent), injected: !!el.querySelector('li b'), why: el.querySelector('summary').textContent
+    };
+    out.unnamed = show({ state: 'verified', reasoning: '', corrections: [] }).querySelector('.ai-verify-badge').title;
+    msg.verification = undefined;
+    renderCompareView(instance);
+    return out;
+  })()`), {
+    pending: 'Checking…', failed: 'Couldn’t check',
+    verified: { badge: 'Verified', compact: true, title: 'Checked by Checker: no problems found. Click for the reasoning.', open: false },
+    reopened: { open: true, detail: 'Checked by Checker: no problems found.Grammar point is correct. <img src=x>', injected: false },
+    hallucination: { title: 'Possible errors found', by: 'Checked by Checker.', corrections: ['She goes to school every day.', '<b>bold</b>'], injected: false, why: 'Why' },
+    unnamed: 'Checked by your verification model: no problems found.'
+  }, 'verification shows as a compact badge, with the full box only for possible errors');
+
   // Resize: dragging the bottom-left grip grows the popup left and down
   // (right edge fixed), saves the size, new popups open at it, and a
   // double-click on the grip returns to the default size.

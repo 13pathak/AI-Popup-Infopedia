@@ -11,6 +11,8 @@ A powerful browser extension to get instant AI explanations for any word or phra
 
 
 #### Hallucination Guard (Works only when AI bot used its trained data, not real time grounded data)
+A second model checks each answer. A clean result is a small **Verified** badge under the answer (click it for who checked and why); only **Possible errors found** opens a red box, with the suggested corrections first.
+
 <img width="1119" height="579" alt="image" src="https://github.com/user-attachments/assets/e00681be-7473-4b5a-b7d1-179b378f7fb5" />
 
 ---
