@@ -2399,6 +2399,9 @@ function initiatePopupSequence(rect, selectedText, customPrompt, implicitContext
   // Note: we track the instance object to manage its state updates
   const initialQuote = initLoadingQuote();
   const popupInstance = showPopup(rect.left, rect.top, initialQuote);
+  // Place it beside the selection right away, so the loading state does not
+  // cover the text either.
+  adjustPopupPosition(popupInstance, rect);
   popupInstance.isLoading = true;
   popupInstance.quoteIndex = LOADING_QUOTES.indexOf(initialQuote);
   startLoadingQuoteRotation(popupInstance);
@@ -2887,9 +2890,11 @@ function makePopupDraggable(instance) {
     const offsetX = e.clientX - rect.left;
     const offsetY = e.clientY - rect.top;
 
-    // Switch from the right-anchored default (adjustPopupPosition) to
-    // explicit coordinates pinned at the card's current spot.
+    // Switch from the right- or bottom-anchored placement
+    // (adjustPopupPosition) to explicit coordinates pinned at the card's
+    // current spot.
     popup.style.right = 'auto';
+    popup.style.bottom = 'auto';
     popup.style.left = `${rect.left}px`;
     popup.style.top = `${rect.top}px`;
 
@@ -5805,7 +5810,71 @@ function toggleWordSpeech(instance, word) {
   });
 }
 
-// --- UPDATED adjustPopupPosition ---
+// --- Popup placement around the selection ---
+// The answer streams in, so the popup's final height is unknown when it is
+// placed. Placement therefore depends only on the selection and the viewport,
+// never on the popup's current size (the pre-corner version measured it and
+// jumped as text arrived); the chosen slot caps max-height instead and the
+// content scrolls. The selected text stays visible whenever any slot has room.
+const POPUP_EDGE_MARGIN = 12;     // matches the CSS width: calc(100vw - 24px)
+const POPUP_SELECTION_GAP = 10;
+const POPUP_COMFORT_HEIGHT = 340; // header + selectors + a few answer lines
+const POPUP_MIN_HEIGHT = 200;
+
+// Returns { placement, left, top, bottom, maxHeight } in viewport pixels
+// (exactly one of top/bottom is a number), or null when no slot beside the
+// selection is usable. Preference: below, above, right, left, then the larger
+// of below/above if it is at least minimally usable.
+function computePopupPlacement(rect, viewportWidth, viewportHeight, popupWidth) {
+  const margin = POPUP_EDGE_MARGIN;
+  const gap = POPUP_SELECTION_GAP;
+  // Only the on-screen part of the selection matters (a drag-selection can
+  // run past the edge). Clipping it to the usable area also guarantees that
+  // any slot with enough room lies inside that area.
+  const clip = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
+  const sel = {
+    left: clip(rect.left, margin, viewportWidth - margin),
+    right: clip(rect.right, margin, viewportWidth - margin),
+    top: clip(rect.top, margin, viewportHeight - margin),
+    bottom: clip(rect.bottom, margin, viewportHeight - margin)
+  };
+  const fullHeight = Math.round(viewportHeight * 0.85); // the CSS max-height
+  const spaceBelow = viewportHeight - sel.bottom - gap - margin;
+  const spaceAbove = sel.top - gap - margin;
+  const alignedLeft = Math.max(margin, Math.min(sel.left, viewportWidth - popupWidth - margin));
+
+  const below = () => ({
+    placement: 'below', left: alignedLeft, top: sel.bottom + gap, bottom: null,
+    maxHeight: Math.min(fullHeight, spaceBelow)
+  });
+  // Anchored by its bottom edge so it grows upward and stays snug against
+  // the selection while the answer streams in.
+  const above = () => ({
+    placement: 'above', left: alignedLeft, top: null, bottom: viewportHeight - sel.top + gap,
+    maxHeight: Math.min(fullHeight, spaceAbove)
+  });
+
+  if (spaceBelow >= POPUP_COMFORT_HEIGHT) return below();
+  if (spaceAbove >= POPUP_COMFORT_HEIGHT) return above();
+
+  // Neither vertical slot is roomy (short window, selection mid-screen):
+  // beside the selection the card can use nearly the full height. Its top
+  // follows the selection but leaves at least a comfortable height below.
+  const sideTop = Math.max(margin, Math.min(sel.top, viewportHeight - margin - POPUP_COMFORT_HEIGHT));
+  const sideHeight = Math.min(fullHeight, viewportHeight - sideTop - margin);
+  if (viewportWidth - sel.right - gap - margin >= popupWidth) {
+    return { placement: 'right', left: sel.right + gap, top: sideTop, bottom: null, maxHeight: sideHeight };
+  }
+  if (sel.left - gap - margin >= popupWidth) {
+    return { placement: 'left', left: sel.left - gap - popupWidth, top: sideTop, bottom: null, maxHeight: sideHeight };
+  }
+
+  if (Math.max(spaceBelow, spaceAbove) >= POPUP_MIN_HEIGHT) {
+    return spaceBelow >= spaceAbove ? below() : above();
+  }
+  return null;
+}
+
 function adjustPopupPosition(instance, selectionRect) {
   const popup = instance.popup;
   if (!popup) return;
@@ -5815,10 +5884,27 @@ function adjustPopupPosition(instance, selectionRect) {
 
   if (instance.isInteracting) return;
 
-  // Render the popup box at a fixed top right corner
-  popup.style.top = '20px';
-  popup.style.right = '20px';
-  popup.style.left = 'auto'; // Clear out the previously set left property
+  // offsetWidth ignores the entry animation's scale transform.
+  const spot = selectionRect && (selectionRect.width || selectionRect.height)
+    ? computePopupPlacement(selectionRect, window.innerWidth, window.innerHeight, popup.offsetWidth)
+    : null;
+
+  if (!spot) {
+    // Nothing to keep clear (hotkey and restored popups), or the selection
+    // leaves no usable room: the fixed top-right corner.
+    popup.style.top = '20px';
+    popup.style.right = '20px';
+    popup.style.left = 'auto';
+    popup.style.bottom = 'auto';
+    popup.style.maxHeight = '';
+    return;
+  }
+
+  popup.style.right = 'auto';
+  popup.style.left = `${spot.left}px`;
+  popup.style.top = spot.top === null ? 'auto' : `${spot.top}px`;
+  popup.style.bottom = spot.bottom === null ? 'auto' : `${spot.bottom}px`;
+  popup.style.maxHeight = `${spot.maxHeight}px`;
 }
 
 // --- NEW: Save Conversation as PDF ---

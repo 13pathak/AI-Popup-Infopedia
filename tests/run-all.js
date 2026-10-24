@@ -135,6 +135,11 @@ async function run() {
   const draftCode = await new Promise(res => draftProc.on('exit', code => res(code ?? 0)));
   if (draftCode !== 0) throw new Error('Follow-up draft recovery tests failed.');
 
+  console.log('Testing popup placement around the selection...');
+  const placementProc = spawn(process.execPath, [path.join(__dirname, 'test-popup-placement.js')], { stdio: 'inherit' });
+  const placementCode = await new Promise(res => placementProc.on('exit', code => res(code ?? 0)));
+  if (placementCode !== 0) throw new Error('Popup placement tests failed.');
+
   console.log('Testing custom selection button settings...');
   const selectionSettingsProc = spawn(process.execPath, [path.join(__dirname, 'test-selection-button-settings.js')], { stdio: 'inherit' });
   const selectionSettingsCode = await new Promise(res => selectionSettingsProc.on('exit', code => res(code ?? 0)));
