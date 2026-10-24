@@ -177,6 +177,11 @@ async function run() {
   const deferredNavigationCode = await new Promise(res => deferredNavigationProc.on('exit', code => res(code ?? 0)));
   if (deferredNavigationCode !== 0) throw new Error('Deferred navigation tests failed.');
 
+  console.log('Testing the FSRS scheduler and optimizer...');
+  const fsrsProc = spawn(process.execPath, [path.join(__dirname, 'test-fsrs.js')], { stdio: 'inherit' });
+  const fsrsCode = await new Promise(res => fsrsProc.on('exit', code => res(code ?? 0)));
+  if (fsrsCode !== 0) throw new Error('FSRS tests failed.');
+
   // 7. Start HTTP server
   console.log(`[7/11] Starting local HTTP server on port ${PORT}...`);
   const server = createServer();

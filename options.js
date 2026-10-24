@@ -5926,24 +5926,15 @@ function loadMemoryModelSettings() {
     // Tally review logs & multi-day prediction points
     chrome.storage.local.get(['history'], (localData) => {
       const history = localData.history || [];
+      // Counted exactly as the optimizer counts: only cards whose review log
+      // starts at their first review, and only reviews a day or more apart.
+      const stats = FSRS.trainingStats(history);
+      const predictionPoints = stats.reviewCount;
+      const eligibleCards = stats.cardCount;
+      const minPoints = FSRS.MIN_OPTIMIZE_POINTS;
       let totalLogs = 0;
-      let eligibleCards = 0;
-      let predictionPoints = 0;
-
       history.forEach(item => {
-        const logs = item && item.reviewLog;
-        if (Array.isArray(logs) && logs.length > 0) {
-          totalLogs += logs.length;
-          if (logs.length >= 2) {
-            eligibleCards++;
-            for (let i = 1; i < logs.length; i++) {
-              const entry = logs[i];
-              if (entry && entry.rating >= 1 && entry.rating <= 4 && (entry.elapsedDays || 0) > 0) {
-                predictionPoints++;
-              }
-            }
-          }
-        }
+        if (item && Array.isArray(item.reviewLog)) totalLogs += item.reviewLog.length;
       });
 
       const countEl = document.getElementById('fsrs-review-count');
@@ -5960,10 +5951,10 @@ function loadMemoryModelSettings() {
       if (hintEl) {
         if (predictionPoints >= 1000) {
           hintEl.innerHTML = `<span style="color: var(--secondary-color); font-weight: 500;">✨ Great! You have ${predictionPoints.toLocaleString()} multi-day recall points across ${eligibleCards.toLocaleString()} cards. Ready for high-confidence optimization!</span>`;
-        } else if (predictionPoints >= 5) {
+        } else if (predictionPoints >= minPoints) {
           hintEl.textContent = `${predictionPoints} multi-day recall points available across ${eligibleCards} cards (${totalLogs} total logs). 1,000+ recommended for best personalization.`;
         } else if (totalLogs > 0) {
-          hintEl.textContent = `Need at least 5 reviews on separate days to train your model (${predictionPoints} available from ${totalLogs} total reviews; 1,000+ recommended).`;
+          hintEl.textContent = `Need at least ${minPoints} reviews on separate days to train your model (${predictionPoints} available from ${totalLogs} total reviews; 1,000+ recommended).`;
         } else {
           hintEl.textContent = `No flashcard reviews logged yet. Review cards across multiple days to train your personal model (1,000+ recommended).`;
         }
@@ -6050,6 +6041,27 @@ function handleOptimizeMemoryModel() {
         return;
       }
 
+      const resultTitle = document.getElementById('fsrs-result-title');
+      if (result.keptDefaults) {
+        // The fitted weights did not predict the held-out reviews clearly
+        // better than the defaults, so the defaults are the model to use.
+        // This also clears weights saved by an earlier optimization.
+        chrome.storage.sync.remove(['customFsrsWeights', 'customFsrsWeightsMeta'], () => {
+          FSRS.setWeights(null);
+          loadMemoryModelSettings();
+          if (resultBanner && resultDetails) {
+            if (resultTitle) resultTitle.textContent = 'Default model kept';
+            resultBanner.style.display = 'block';
+            resultDetails.innerHTML = `
+              <div>Personalized parameters did not predict the <strong>${result.heldOutCount}</strong> reviews held out for checking clearly better than the defaults (log loss ${result.initialLoss} with defaults, ${result.optimizedLoss} personalized), so the default model stays active.</div>
+              <div style="margin-top: 4px; font-size: 0.95em; color: var(--text-muted);">Try again after more reviews.</div>
+            `;
+          }
+          updateStatus('Kept the default FSRS memory model.', 'success');
+        });
+        return;
+      }
+
       // Save custom weights & metadata
       chrome.storage.sync.set({
         customFsrsWeights: result.weights,
@@ -6069,14 +6081,17 @@ function handleOptimizeMemoryModel() {
         loadMemoryModelSettings();
 
         if (resultBanner && resultDetails) {
+          if (resultTitle) resultTitle.textContent = 'Optimization Successful!';
           resultBanner.style.display = 'block';
+          // Every figure is measured on the held-out reviews, not the ones
+          // the parameters were fitted to.
           resultDetails.innerHTML = `
             <div>Personalized <strong>21 FSRS parameters</strong> to your memory curve.</div>
             <div style="margin-top: 4px; display: flex; flex-wrap: wrap; gap: 12px; font-size: 0.95em;">
-              <span>📉 Error Reduction: <strong style="color: var(--secondary-color);">${result.lossReductionPercent}%</strong></span>
+              <span>📉 Error Reduction on held-out reviews: <strong style="color: var(--secondary-color);">${result.lossReductionPercent}%</strong></span>
               <span>📊 Log Loss: <strong>${result.initialLoss} → ${result.optimizedLoss}</strong></span>
               <span>📈 RMSE: <strong>${result.initialRmse} → ${result.optimizedRmse}</strong></span>
-              <span>⏱ Analyzed: <strong>${result.reviewCount}</strong> review points in <strong>${(result.durationMs / 1000).toFixed(2)}s</strong></span>
+              <span>⏱ Analyzed: <strong>${result.reviewCount}</strong> review points (<strong>${result.heldOutCount}</strong> held out for checking) in <strong>${(result.durationMs / 1000).toFixed(2)}s</strong></span>
             </div>
           `;
         }

@@ -41,7 +41,12 @@
     0.1542                           // 20: forgetting-curve decay
   ]);
 
-  // Standard FSRS parameter bounding ranges for validation & projection (matching reference ts-fsrs / fsrs-rs bounds)
+  // Ranges every weight is clamped to before use (saved custom weights and
+  // each optimizer step). These are this extension's own ranges, not the
+  // reference's: compared with ts-fsrs 5.4.1's CLAMP_PARAMETERS most are a
+  // little looser (e.g. w7 reaches 1.0 where ts-fsrs stops at 0.75, w12 0.5
+  // vs 0.25, w17 3.0 vs 2.0, w20 goes down to 0.05 vs 0.1), and w8 tops out
+  // at 4.0 vs 4.5. The default weights sit inside both.
   const WEIGHT_BOUNDS = Object.freeze([
     [0.01, 100.0], [0.01, 100.0], [0.01, 100.0], [0.01, 100.0], // 0-3: S0(1-4)
     [1.0, 10.0], [0.01, 5.0],                                   // 4-5: D0(G), spread
@@ -490,12 +495,88 @@
 
   // --- Loss Evaluation & Optimization Engine ---
 
+  // A card's review log, or null when the optimizer cannot use it. The replay
+  // seeds memory from the first logged rating, so the log must start at the
+  // card's first-ever review (state 'new'). Cards migrated from the old
+  // interval scheduler, or reviewed before logging began, start mid-life and
+  // would be replayed as if they had been brand new.
+  function usableReviewLog(item) {
+    const logs = item && item.reviewLog;
+    if (!Array.isArray(logs) || logs.length < 2) return null;
+    if (!logs[0] || logs[0].state !== 'new') return null;
+    return logs;
+  }
+
+  // Replays one card's review log under `weights` (already validated) and
+  // scores each multi-day review against the predicted recall probability.
+  // Returns the card's summed log-loss and squared error, and how many
+  // reviews it predicted.
+  function replayCard(logs, weights) {
+    const decay = -weights[20];
+    const factor = Math.exp(Math.pow(decay, -1) * Math.log(0.9)) - 1;
+    let logLoss = 0;
+    let squaredError = 0;
+    let count = 0;
+    let s = 0;
+    let d = 0;
+
+    for (let i = 0; i < logs.length; i++) {
+      const entry = logs[i];
+      const g = entry.rating;
+      if (g < 1 || g > 4) continue;
+
+      const elapsed = entry.elapsedDays || 0;
+
+      if (i === 0 || s === 0) {
+        s = Math.max(weights[g - 1], 0.1);
+        d = clamp(roundTo(weights[4] - Math.exp((g - 1) * weights[5]) + 1, 8), 1, 10);
+        continue;
+      }
+
+      // Same order as nextState: the new stability uses the difficulty
+      // from BEFORE this review; difficulty is updated afterwards.
+      if (elapsed > 0) {
+        const r = clamp(Math.pow(1 + factor * elapsed / s, decay), 1e-5, 1 - 1e-5);
+        const y = g >= 2 ? 1 : 0;
+        logLoss += -(y * Math.log(r) + (1 - y) * Math.log(1 - r));
+        squaredError += Math.pow(y - r, 2);
+        count++;
+
+        if (g === 1) {
+          const sForget = roundTo(clamp(
+            weights[11] * Math.pow(d, -weights[12]) * (Math.pow(s + 1, weights[13]) - 1) *
+              Math.exp((1 - r) * weights[14]),
+            S_MIN, S_MAX), 8);
+          const sMin = s / Math.exp(weights[17] * weights[18]);
+          s = clamp(roundTo(sMin, 8), S_MIN, sForget);
+        } else {
+          const hp = g === 2 ? weights[15] : 1;
+          const eb = g === 4 ? weights[16] : 1;
+          s = roundTo(clamp(
+            s * (1 + Math.exp(weights[8]) * (11 - d) * Math.pow(s, -weights[9]) *
+              (Math.exp((1 - r) * weights[10]) - 1) * hp * eb),
+            S_MIN, S_MAX), 8);
+        }
+      } else {
+        // Same-day review
+        const sinc = Math.pow(s, -weights[19]) * Math.exp(weights[17] * (g - 3 + weights[18]));
+        const masked = g >= 2 ? Math.max(sinc, 1) : sinc;
+        s = roundTo(clamp(s * masked, S_MIN, S_MAX), 8);
+      }
+
+      const deltaD = -weights[6] * (g - 3);
+      const damped = d + roundTo(deltaD * (10 - d) / 9, 8);
+      const d0Easy = roundTo(weights[4] - Math.exp(3 * weights[5]) + 1, 8);
+      d = clamp(roundTo(weights[7] * d0Easy + (1 - weights[7]) * damped, 8), 1, 10);
+    }
+
+    return { logLoss, squaredError, count };
+  }
+
   // Evaluates binary cross-entropy log-loss and RMSE for a set of history items
   // under a given candidate parameter vector (or active W if omitted).
   function evaluateLoss(historyItems, testWeights) {
     const weights = testWeights ? validateWeights(testWeights) : W;
-    const decay = -weights[20];
-    const factor = Math.exp(Math.pow(decay, -1) * Math.log(0.9)) - 1;
 
     let totalLogLoss = 0;
     let totalSquaredError = 0;
@@ -504,66 +585,13 @@
 
     if (Array.isArray(historyItems)) {
       for (let j = 0; j < historyItems.length; j++) {
-        const item = historyItems[j];
-        const logs = item && item.reviewLog;
-        if (!Array.isArray(logs) || logs.length < 2) continue;
+        const logs = usableReviewLog(historyItems[j]);
+        if (!logs) continue;
         cardCount++;
-
-        let s = 0;
-        let d = 0;
-
-        for (let i = 0; i < logs.length; i++) {
-          const entry = logs[i];
-          const g = entry.rating;
-          if (g < 1 || g > 4) continue;
-
-          const elapsed = entry.elapsedDays || 0;
-
-          if (i === 0 || s === 0) {
-            s = Math.max(weights[g - 1], 0.1);
-            d = clamp(roundTo(weights[4] - Math.exp((g - 1) * weights[5]) + 1, 8), 1, 10);
-          } else {
-            if (elapsed > 0) {
-              const r = clamp(Math.pow(1 + factor * elapsed / s, decay), 1e-5, 1 - 1e-5);
-              const y = g >= 2 ? 1 : 0;
-              totalLogLoss += -(y * Math.log(r) + (1 - y) * Math.log(1 - r));
-              totalSquaredError += Math.pow(y - r, 2);
-              predictionCount++;
-
-              // Next stability & difficulty
-              const deltaD = -weights[6] * (g - 3);
-              const damped = d + roundTo(deltaD * (10 - d) / 9, 8);
-              const d0Easy = roundTo(weights[4] - Math.exp(3 * weights[5]) + 1, 8);
-              d = clamp(roundTo(weights[7] * d0Easy + (1 - weights[7]) * damped, 8), 1, 10);
-
-              if (g === 1) {
-                const sForget = roundTo(clamp(
-                  weights[11] * Math.pow(d, -weights[12]) * (Math.pow(s + 1, weights[13]) - 1) *
-                    Math.exp((1 - r) * weights[14]),
-                  S_MIN, S_MAX), 8);
-                const sMin = s / Math.exp(weights[17] * weights[18]);
-                s = clamp(roundTo(sMin, 8), S_MIN, sForget);
-              } else {
-                const hp = g === 2 ? weights[15] : 1;
-                const eb = g === 4 ? weights[16] : 1;
-                s = roundTo(clamp(
-                  s * (1 + Math.exp(weights[8]) * (11 - d) * Math.pow(s, -weights[9]) *
-                    (Math.exp((1 - r) * weights[10]) - 1) * hp * eb),
-                  S_MIN, S_MAX), 8);
-              }
-            } else {
-              // Same-day review
-              const sinc = Math.pow(s, -weights[19]) * Math.exp(weights[17] * (g - 3 + weights[18]));
-              const masked = g >= 2 ? Math.max(sinc, 1) : sinc;
-              s = roundTo(clamp(s * masked, S_MIN, S_MAX), 8);
-
-              const deltaD = -weights[6] * (g - 3);
-              const damped = d + roundTo(deltaD * (10 - d) / 9, 8);
-              const d0Easy = roundTo(weights[4] - Math.exp(3 * weights[5]) + 1, 8);
-              d = clamp(roundTo(weights[7] * d0Easy + (1 - weights[7]) * damped, 8), 1, 10);
-            }
-          }
-        }
+        const card = replayCard(logs, weights);
+        totalLogLoss += card.logLoss;
+        totalSquaredError += card.squaredError;
+        predictionCount += card.count;
       }
     }
 
@@ -572,21 +600,108 @@
     return { logLoss, rmse, predictionCount, cardCount };
   }
 
-  // Pure JavaScript multi-stage Adam optimizer for FSRS parameters
+  // Fitting 21 parameters to a handful of reviews overfits: the fit looks
+  // better on the reviews it was trained on while predicting every other
+  // review worse. So the optimizer needs a minimum of multi-day reviews, and
+  // it is judged on cards it never trained on — every HOLD_OUT_EVERY-th
+  // usable card, in history order, is held out. The defaults are already a
+  // good fit for most people (real gains are a few percent of log-loss), so
+  // "any improvement" on the held-out cards is mostly noise: fitted weights
+  // are kept only when they beat the defaults there by at least
+  // ACCEPT_Z standard errors, card by card.
+  const MIN_OPTIMIZE_POINTS = 200;
+  const MIN_HELD_OUT_CARDS = 10;
+  const HOLD_OUT_EVERY = 5;
+  const ACCEPT_Z = 2;
+
+  function splitForValidation(historyItems) {
+    const train = [];
+    const heldOut = [];
+    const usable = Array.isArray(historyItems) ? historyItems.filter(usableReviewLog) : [];
+    usable.forEach((item, i) => {
+      (i % HOLD_OUT_EVERY === HOLD_OUT_EVERY - 1 ? heldOut : train).push(item);
+    });
+    return { train, heldOut };
+  }
+
+  // How much of the history the optimizer can use, for the settings UI and
+  // the optimizer's own minimum checks. heldOutCards counts held-out cards
+  // with at least one multi-day review (the ones the acceptance test uses).
+  function trainingStats(historyItems) {
+    return splitStats(splitForValidation(historyItems));
+  }
+
+  function splitStats({ train, heldOut }) {
+    const all = evaluateLoss(train.concat(heldOut), DEFAULT_W);
+    let heldOutCount = 0;
+    let heldOutCards = 0;
+    heldOut.forEach((item) => {
+      const n = replayCard(item.reviewLog, DEFAULT_W).count;
+      heldOutCount += n;
+      if (n > 0) heldOutCards++;
+    });
+    return {
+      reviewCount: all.predictionCount,
+      cardCount: all.cardCount,
+      heldOutCount,
+      heldOutCards
+    };
+  }
+
+  // Paired comparison of candidate weights against the defaults on the
+  // held-out cards. A card's reviews are not independent of each other, so
+  // the card is the unit: per card, the defaults' summed log-loss minus the
+  // candidate's. Returns the mean of those differences in standard errors
+  // (z > 0: the candidate predicts better).
+  function heldOutAdvantage(heldOut, candidate) {
+    const diffs = [];
+    heldOut.forEach((item) => {
+      const base = replayCard(item.reviewLog, DEFAULT_W);
+      if (base.count === 0) return;
+      diffs.push(base.logLoss - replayCard(item.reviewLog, candidate).logLoss);
+    });
+    const n = diffs.length;
+    if (n < 2) return { z: 0, cards: n };
+    const mean = diffs.reduce((a, b) => a + b, 0) / n;
+    const variance = diffs.reduce((a, b) => a + (b - mean) * (b - mean), 0) / (n - 1);
+    const se = Math.sqrt(variance / n);
+    const z = se > 0 ? mean / se : (mean > 0 ? Infinity : 0);
+    return { z, cards: n };
+  }
+
+  // Pure JavaScript multi-stage Adam optimizer for FSRS parameters. Fits the
+  // training cards (keeping the epoch with the lowest training loss), then
+  // tests that one candidate once on the held-out cards. The reported losses
+  // and error reduction are held-out numbers. When the candidate is not
+  // clearly better there, the result is keptDefaults.
   function optimize(historyItems, options) {
     const opts = options || {};
     const maxEpochs = opts.epochs || 100;
     const learningRate = opts.learningRate || 0.04;
     const onProgress = typeof opts.onProgress === 'function' ? opts.onProgress : null;
 
-    const baselineEval = evaluateLoss(historyItems, DEFAULT_W);
+    const split = splitForValidation(historyItems);
+    const { train, heldOut } = split;
+    const stats = splitStats(split);
+    const counts = {
+      reviewCount: stats.reviewCount,
+      cardCount: stats.cardCount,
+      heldOutCount: stats.heldOutCount
+    };
 
-    if (baselineEval.predictionCount < 5) {
+    if (stats.reviewCount < MIN_OPTIMIZE_POINTS) {
       return {
         success: false,
-        error: 'Not enough review history with elapsed days (minimum 5 required, 1,000+ recommended)',
-        reviewCount: baselineEval.predictionCount,
-        cardCount: baselineEval.cardCount,
+        error: `Not enough review history yet: ${stats.reviewCount} of ${MIN_OPTIMIZE_POINTS} multi-day reviews needed (1,000+ recommended).`,
+        ...counts,
+        weights: [...DEFAULT_W]
+      };
+    }
+    if (stats.heldOutCards < MIN_HELD_OUT_CARDS) {
+      return {
+        success: false,
+        error: `Your multi-day reviews come from too few cards to check the result (${stats.heldOutCards} of ${MIN_HELD_OUT_CARDS} held-out cards). Review more different cards and try again.`,
+        ...counts,
         weights: [...DEFAULT_W]
       };
     }
@@ -601,12 +716,12 @@
     const regLambda = 1e-4;
 
     let bestW = [...currentW];
-    let bestLoss = baselineEval.logLoss;
+    let bestTrainLoss = evaluateLoss(train, currentW).logLoss;
 
     for (let epoch = 1; epoch <= maxEpochs; epoch++) {
       const lr = learningRate * (1 - 0.5 * (epoch / maxEpochs));
 
-      // Numerical gradients with central difference
+      // Numerical gradients with central difference, on the training cards
       const grad = new Array(21);
       for (let i = 0; i < 21; i++) {
         const h = Math.max(1e-4, 1e-3 * Math.abs(currentW[i]));
@@ -615,8 +730,8 @@
         wPlus[i] += h;
         wMinus[i] -= h;
 
-        const lossPlus = evaluateLoss(historyItems, wPlus).logLoss;
-        const lossMinus = evaluateLoss(historyItems, wMinus).logLoss;
+        const lossPlus = evaluateLoss(train, wPlus).logLoss;
+        const lossMinus = evaluateLoss(train, wMinus).logLoss;
 
         const regGrad = regLambda * 2 * (currentW[i] - DEFAULT_W[i]);
         grad[i] = (lossPlus - lossMinus) / (2 * h) + regGrad;
@@ -634,10 +749,10 @@
       }
 
       currentW = validateWeights(currentW);
-      const evalAfter = evaluateLoss(historyItems, currentW);
+      const trainLoss = evaluateLoss(train, currentW).logLoss;
 
-      if (evalAfter.logLoss < bestLoss) {
-        bestLoss = evalAfter.logLoss;
+      if (trainLoss < bestTrainLoss) {
+        bestTrainLoss = trainLoss;
         bestW = [...currentW];
       }
 
@@ -646,27 +761,32 @@
           epoch,
           maxEpochs,
           percent: Math.round((epoch / maxEpochs) * 100),
-          currentLoss: evalAfter.logLoss
+          currentLoss: trainLoss
         });
       }
     }
 
-    const finalEval = evaluateLoss(historyItems, bestW);
+    // The one held-out test of the fitted candidate.
+    const baseline = evaluateLoss(heldOut, DEFAULT_W);
+    const fitted = evaluateLoss(heldOut, bestW);
+    const advantage = heldOutAdvantage(heldOut, bestW);
+    const keep = advantage.z >= ACCEPT_Z;
     const durationMs = Date.now() - t0;
-    const lossReduction = baselineEval.logLoss > 0
-      ? ((baselineEval.logLoss - finalEval.logLoss) / baselineEval.logLoss) * 100
+    const lossReduction = baseline.logLoss > 0
+      ? ((baseline.logLoss - fitted.logLoss) / baseline.logLoss) * 100
       : 0;
 
     return {
       success: true,
-      weights: bestW,
-      initialLoss: roundTo(baselineEval.logLoss, 4),
-      optimizedLoss: roundTo(finalEval.logLoss, 4),
-      initialRmse: roundTo(baselineEval.rmse, 4),
-      optimizedRmse: roundTo(finalEval.rmse, 4),
+      keptDefaults: !keep,
+      weights: keep ? bestW : [...DEFAULT_W],
+      initialLoss: roundTo(baseline.logLoss, 4),
+      optimizedLoss: roundTo(fitted.logLoss, 4),
+      initialRmse: roundTo(baseline.rmse, 4),
+      optimizedRmse: roundTo(fitted.rmse, 4),
       lossReductionPercent: roundTo(Math.max(0, lossReduction), 2),
-      reviewCount: baselineEval.predictionCount,
-      cardCount: baselineEval.cardCount,
+      heldOutZ: roundTo(advantage.z, 2),
+      ...counts,
       durationMs
     };
   }
@@ -686,6 +806,8 @@
     // Loss evaluation & optimization
     evaluateLoss: evaluateLoss,
     optimize: optimize,
+    trainingStats: trainingStats,
+    MIN_OPTIMIZE_POINTS: MIN_OPTIMIZE_POINTS,
     // Exposed for tests and internal migration
     _scheduleCard: scheduleCard,
     _cardFromItem: cardFromItem,

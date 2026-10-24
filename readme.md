@@ -121,7 +121,7 @@ Every review adjusts the card's state through structured learning phases:
 
 ### 3. Native 1-Click In-Browser Optimizer
 
-The default FSRS model uses global baseline parameters fitted on millions of reviews across diverse learners. Once you accumulate **~1,000 reviews**, you can personalize the entire model to your unique brain physiology with a single click.
+The default FSRS model uses global baseline parameters fitted on millions of reviews across diverse learners. The optimizer needs at least **200 multi-day reviews** (reviews a day or more after the card's previous one; ~1,000+ recommended), and it only switches you to personalized parameters when they predict your reviews measurably better than the defaults.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -130,14 +130,15 @@ The default FSRS model uses global baseline parameters fitted on millions of rev
 │                                                                             │
 │  [ ✨ Optimize Memory Model ]   [ Reset to Defaults ]   [ View Parameters ]  │
 │                                                                             │
-│  📉 Error Reduction: 14.82%  •  📊 Log Loss: 0.3892 → 0.3315  •  ⏱ 490ms    │
+│  📉 Held-out error reduction: 3.1%  •  📊 Log Loss: 0.4120 → 0.3992         │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 * **Zero-Setup Client-Side Machine Learning:** Runs entirely inside your browser via a dedicated Web Worker (`fsrs-optimizer.worker.js`). No Python, no CLI scripts, no Jupyter notebooks, and no external servers required.
 * **Adam Optimization Engine:** Uses a multi-epoch Adam gradient descent optimizer with central difference numerical gradients to fit all **21 FSRS-6 parameters ($W_0$–$W_{20}$)** against your personal review history.
 * **Loss Metrics:** Minimizes binary cross-entropy Log Loss and Root Mean Square Error (RMSE) against your actual recall outcomes.
-* **Safety Bounding & Parameter Projection:** Strict mathematical bounds prevent overfitting and guarantee monotonic stability ordering ($W_0 \le W_1 \le W_2 \le W_3$).
+* **Held-Out Check:** Every 5th card is held out of training. The fitted parameters are kept only if they predict those cards' reviews better than the defaults by at least two standard errors (compared card by card); otherwise the default model stays active. The error reduction shown is measured on the held-out reviews, not the ones the parameters were fitted to. Only cards whose review log starts at their first review are used, so cards carried over from the old scheduler don't skew the fit.
+* **Parameter Projection:** Weights are clamped to fixed ranges and keep the initial stabilities ordered ($W_0 \le W_1 \le W_2 \le W_3$).
 * **Full Parameter Transparency:** A collapsible inspector lets you view all 21 active weights, their explanations, and copy them to your clipboard as JSON.
 
 ---
