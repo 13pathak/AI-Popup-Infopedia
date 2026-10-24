@@ -228,26 +228,14 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   safeAddListener('reorder-models-save-btn', 'click', saveReorderedModels);
   safeAddListener('enable-model-fallback', 'change', (e) => {
-    chrome.storage.sync.set({ enableModelFallback: e.target.checked }, () => {
-      updateStatus(e.target.checked
-        ? 'Model fallback enabled — models are tried top-to-bottom on failure.'
-        : 'Model fallback disabled — only the selected model will be used.', 'success');
-    });
+    chrome.storage.sync.set({ enableModelFallback: e.target.checked }, () => showSaved(e.target));
   });
   safeAddListener('enable-implicit-context', 'change', (e) => {
-    chrome.storage.sync.set({ enableImplicitContext: e.target.checked }, () => {
-      updateStatus(e.target.checked
-        ? 'Implicit context enabled — lookups now include the surrounding sentence and page title.'
-        : 'Implicit context disabled — only the selected text is sent.', 'success');
-    });
+    chrome.storage.sync.set({ enableImplicitContext: e.target.checked }, () => showSaved(e.target));
   });
   safeAddListener('clear-usage-btn', 'click', clearUsageData);
   safeAddListener('show-user-questions-checkbox', 'change', (e) => {
-    chrome.storage.sync.set({ showUserQuestions: e.target.checked }, () => {
-      updateStatus(e.target.checked
-        ? 'Enabled: Your questions will be displayed in the popup chat history.'
-        : 'Disabled: Your questions will be hidden in the popup chat history.', 'success');
-    });
+    chrome.storage.sync.set({ showUserQuestions: e.target.checked }, () => showSaved(e.target));
   });
   safeAddListener('enable-local-secrets', 'change', handleLocalSecretsToggle);
   safeAddListener('save-model-btn', 'click', saveModel);
@@ -275,12 +263,12 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   safeAddListener('default-prompt-select', 'change', (e) => saveDefaultPromptId(e.target.value));
   safeAddListener('cancel-model-btn', 'click', hideModelForm);
-  safeAddListener('save-pdf-author-btn', 'click', savePdfAuthorName);
+  autosaveOn(['pdf-author-name'], savePdfAuthorName);
   safeAddListener('pdf-viewer-enabled-checkbox', 'change', savePdfViewerToggle);
-  safeAddListener('save-followup-settings-btn', 'click', saveFollowupSettings);
+  autosaveOn(['followup-custom-message', 'static-followup-chips', 'ai-followup-suggestions-checkbox'], saveFollowupSettings);
   safeAddListener('enable-hallucination-guard', 'change', saveHallucinationGuardSettings);
   safeAddListener('verification-model-select', 'change', saveHallucinationGuardSettings);
-  safeAddListener('save-tavily-btn', 'click', saveSearchApiSettings);
+  autosaveOn(['tavily-api-key'], saveSearchApiSettings);
   safeAddListener('run-test-setup-btn', 'click', () => runDiagnosticTest());
   safeAddListener('test-form-model-btn', 'click', () => runFormDiagnosticTest());
   safeAddListener('copy-diag-btn', 'click', copyDiagnosticInfo);
@@ -327,11 +315,15 @@ document.addEventListener('DOMContentLoaded', () => {
   safeAddListener('import-all-settings-btn', 'click', () => document.getElementById('import-settings-file-input').click());
   safeAddListener('import-settings-file-input', 'change', importAllSettings);
 
-  safeAddListener('anki-save-settings-btn', 'click', saveAnkiSettings);
-  safeAddListener('anki-model-select', 'change', (e) => loadAnkiFields(e.target.value));
+  autosaveOn(['anki-deck-select', 'anki-word-field-select', 'anki-definition-field-select'], saveAnkiSettings);
+  // A new note type reloads its fields first; the mapping saves once complete.
+  safeAddListener('anki-model-select', 'change', async (e) => {
+    await loadAnkiFields(e.target.value);
+    saveAnkiSettings(e.target);
+  });
   safeAddListener('anki-refresh-btn', 'click', loadAnkiDecksAndModels);
 
-  safeAddListener('save-reminder-settings-btn', 'click', saveReminderSettings);
+  autosaveOn(['reminder-frequency', 'backup-subfolder', ...Object.values(BACKUP_INCLUDE_KEYS)], saveReminderSettings);
   safeAddListener('manual-backup-btn', 'click', () => {
     const backupInclude = getBackupIncludeFromUI();
     const hasAnySelected = Object.values(backupInclude).some(Boolean);
@@ -343,17 +335,19 @@ document.addEventListener('DOMContentLoaded', () => {
     chrome.runtime.sendMessage({ type: "manualBackup", backupInclude });
     updateReminderStatus('Manual backup initiated... check Downloads.', 'info');
   });
-  safeAddListener('backup-select-all-btn', 'click', () => {
+  safeAddListener('backup-select-all-btn', 'click', (e) => {
     for (const elementId of Object.values(BACKUP_INCLUDE_KEYS)) {
       const el = document.getElementById(elementId);
       if (el) el.checked = true;
     }
+    saveReminderSettings(e.currentTarget);
   });
-  safeAddListener('backup-deselect-all-btn', 'click', () => {
+  safeAddListener('backup-deselect-all-btn', 'click', (e) => {
     for (const elementId of Object.values(BACKUP_INCLUDE_KEYS)) {
       const el = document.getElementById(elementId);
       if (el) el.checked = false;
     }
+    saveReminderSettings(e.currentTarget); // refuses an empty selection and says so
   });
 
   safeAddListener('restore-backup-btn', 'click', () => document.getElementById('restore-backup-file').click());
@@ -395,14 +389,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // --- TTS Event Listeners ---
   safeAddListener('tts-test-btn', 'click', testTTSVoice);
-  safeAddListener('tts-save-btn', 'click', saveTTSSettings);
+  autosaveOn(['tts-voice-select', 'tts-rate-range'], saveTTSSettings);
   safeAddListener('tts-rate-range', 'input', (e) => {
     const valSpan = document.getElementById('tts-rate-value');
     if (valSpan) valSpan.textContent = e.target.value;
   });
 
   // --- STT Event Listeners ---
-  safeAddListener('stt-save-btn', 'click', saveSTTSettings);
+  autosaveOn(['stt-engine-select', 'stt-api-key', 'stt-api-url', 'stt-model', 'stt-custom-headers', 'stt-custom-formdata'], saveSTTSettings);
   safeAddListener('stt-engine-select', 'change', (e) => {
     const apiSettings = document.getElementById('stt-api-settings');
     if (apiSettings) {
@@ -1337,9 +1331,9 @@ async function loadModels() {
     } else {
       if (noModelsMsg) noModelsMsg.style.display = 'none';
       selectEl.style.display = 'block'; // Show the select dropdown
-      if (editModelBtn) editModelBtn.style.display = 'inline-block'; // Show edit button
-      if (deleteModelBtn) deleteModelBtn.style.display = 'inline-block'; // Show delete button
-      if (reorderBtn) reorderBtn.style.display = models.length > 1 ? 'inline-block' : 'none';
+      if (editModelBtn) editModelBtn.style.display = ''; // Show edit button (CSS: inline-flex, icon + label)
+      if (deleteModelBtn) deleteModelBtn.style.display = ''; // Show delete button
+      if (reorderBtn) reorderBtn.style.display = models.length > 1 ? '' : 'none';
 
       models.forEach(model => {
         const option = document.createElement('option');
@@ -1374,14 +1368,13 @@ async function loadHallucinationGuardSettings() {
     if (!verificationSelect) return;
     verificationSelect.innerHTML = '';
     
+    verificationSelect.dataset.noModels = models.length === 0 ? 'true' : '';
     if (models.length === 0) {
       const option = document.createElement('option');
       option.value = '';
       option.textContent = 'No models available';
       verificationSelect.appendChild(option);
-      verificationSelect.disabled = true;
     } else {
-      verificationSelect.disabled = false;
       models.forEach(model => {
         const option = document.createElement('option');
         option.value = model.id;
@@ -1397,20 +1390,40 @@ async function loadHallucinationGuardSettings() {
         saveHallucinationGuardSettings();
       }
     }
+    syncHallucinationGuardState();
   } catch (err) {
     console.error("Error loading hallucination guard settings:", err);
   }
 }
 
-async function saveHallucinationGuardSettings() {
+// The verification model only matters while the guard is on: with the guard
+// off (or no models configured) its field is disabled and greyed out.
+function syncHallucinationGuardState() {
+  const guardOn = !!document.getElementById('enable-hallucination-guard')?.checked;
+  const select = document.getElementById('verification-model-select');
+  const field = document.getElementById('verification-model-field');
+  const noModels = !!(select && select.dataset.noModels === 'true');
+  if (select) select.disabled = !guardOn || noModels;
+  if (field) {
+    field.classList.toggle('setting-disabled', !guardOn || noModels);
+    field.title = !guardOn ? 'Turn on Hallucination Guard to choose a verification model' : '';
+  }
+}
+
+// Called by the guard checkbox and the model picker (with their change
+// event: confirm with "Saved ✓"), and by the loader with no event to store a
+// default verification model silently.
+async function saveHallucinationGuardSettings(event) {
   const enableGuard = document.getElementById('enable-hallucination-guard')?.checked || false;
   const verificationModelId = document.getElementById('verification-model-select')?.value || '';
-  
+  syncHallucinationGuardState();
+
   try {
     await Promise.all([
       new Promise(resolve => chrome.storage.sync.set({ enableHallucinationGuard: enableGuard }, resolve)),
       setSecretStorage({ verificationModelId: verificationModelId })
     ]);
+    if (event && event.target) showSaved(event.target);
   } catch (err) {
     console.error("Error saving hallucination guard settings:", err);
   }
@@ -1840,12 +1853,12 @@ function loadPdfAuthorName() {
   });
 }
 
-function savePdfAuthorName() {
+function savePdfAuthorName(fromEl) {
   const input = document.getElementById('pdf-author-name');
   if (input) {
     const name = input.value.trim();
     chrome.storage.local.set({ pdf_author_name: name }, () => {
-      updateStatus('Custom Author Name saved successfully!', 'success');
+      showSaved(fromEl || input);
     });
   }
 }
@@ -1913,7 +1926,7 @@ function savePdfViewerToggle() {
   const checkbox = document.getElementById('pdf-viewer-enabled-checkbox');
   if (!checkbox) return;
   chrome.storage.sync.set({ pdfViewerEnabled: checkbox.checked }, () => {
-    updateStatus('PDF viewer preference saved.', 'success');
+    showSaved(checkbox);
   });
 }
 
@@ -1953,13 +1966,13 @@ function saveAskAiButtonStyle() {
   else if (val === 'emoji_sparkles') val = '✨';
   else if (val === 'custom') val = (customInput?.value || '').trim() || 'sparkles';
   chrome.storage.sync.set({ askAiButtonIcon: val }, () => {
-    updateStatus('Selection toolbar settings saved.', 'success');
+    showSaved(select);
   });
 }
 
 function saveDefaultPromptId(promptId) {
   chrome.storage.sync.set({ defaultPromptId: promptId }, () => {
-    updateStatus('Default prompt updated.', 'success');
+    showSaved('default-prompt-select');
   });
 }
 
@@ -1973,7 +1986,7 @@ function parseFollowupChipsTextarea(raw) {
     .filter(line => line.length > 0 && line.length <= 80);
 }
 
-function saveFollowupSettings() {
+function saveFollowupSettings(fromEl) {
   const customMessage = document.getElementById('followup-custom-message').value;
   const showUserQuestions = document.getElementById('show-user-questions-checkbox').checked;
   const followupChips = parseFollowupChipsTextarea(document.getElementById('static-followup-chips').value);
@@ -1984,12 +1997,7 @@ function saveFollowupSettings() {
     followupChips: followupChips,
     enableFollowupSuggestions: enableFollowupSuggestions
   }, () => {
-    const statusEl = document.getElementById('followup-status');
-    statusEl.textContent = 'Follow-up settings saved successfully!';
-    statusEl.style.color = '#5cb85c';
-    setTimeout(() => {
-      statusEl.textContent = '';
-    }, 3000);
+    showSaved(fromEl || 'followup-custom-message');
   });
 }
 
@@ -2038,17 +2046,11 @@ async function loadSearchApiSettings() {
   }
 }
 
-async function saveSearchApiSettings() {
+async function saveSearchApiSettings(fromEl) {
   const apiKey = (document.getElementById('tavily-api-key')?.value || '').trim();
   try {
     await setSecretStorage({ tavilyApiKey: apiKey });
-    const statusEl = document.getElementById('tavily-status');
-    if (statusEl) {
-      statusEl.textContent = 'Search API key saved successfully!';
-      setTimeout(() => {
-        if (statusEl) statusEl.textContent = '';
-      }, 3000);
-    }
+    showSaved(fromEl || 'tavily-api-key');
   } catch (err) {
     console.error("Error saving search API settings:", err);
   }
@@ -2102,6 +2104,61 @@ function loadDefaultPromptSelect() {
   });
 }
 
+
+// --- Autosave ---
+// Settings save as they change; there are no per-section Save buttons
+// (forms that create or edit a model or prompt keep their explicit Save).
+// A brief "Saved ✓" appears in the title of the section that changed, so
+// the save is visible wherever it happened — the page-wide #status line sits
+// at the bottom of one tab. Sections without their own title use the tab's.
+const savedBadgeTimers = new WeakMap();
+function showSaved(from) {
+  const el = typeof from === 'string' ? document.getElementById(from) : from;
+  if (!el || typeof el.closest !== 'function') return;
+  const section = el.closest('.settings-section');
+  const tab = el.closest('.tab-content');
+  const heading = (section && section.querySelector('.section-title')) || (tab && tab.querySelector('h2'));
+  if (!heading) return;
+  let badge = heading.querySelector('.saved-badge');
+  if (!badge) {
+    badge = document.createElement('span');
+    badge.className = 'saved-badge';
+    badge.setAttribute('role', 'status');
+    heading.appendChild(badge);
+  }
+  badge.textContent = 'Saved ✓';
+  badge.classList.add('show');
+  clearTimeout(savedBadgeTimers.get(badge));
+  savedBadgeTimers.set(badge, setTimeout(() => badge.classList.remove('show'), 1800));
+}
+
+// Wires fields to a section's save function, called with the field that
+// changed. Pickers, checkboxes and sliders save on change. Text fields save
+// after a pause in typing, or right away when the field is left with an
+// edit still pending, so a half-typed key is not written letter by letter.
+function autosaveOn(ids, save, typingDelay = 700) {
+  ids.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const typed = el.tagName === 'TEXTAREA' ||
+      (el.tagName === 'INPUT' && !['checkbox', 'radio', 'range'].includes(el.type));
+    if (!typed) {
+      el.addEventListener('change', () => save(el));
+      return;
+    }
+    let timer = null;
+    const saveNow = () => {
+      clearTimeout(timer);
+      timer = null;
+      save(el);
+    };
+    el.addEventListener('input', () => {
+      clearTimeout(timer);
+      timer = setTimeout(saveNow, typingDelay);
+    });
+    el.addEventListener('change', () => { if (timer) saveNow(); });
+  });
+}
 
 function updateStatus(message, type = 'info') {
   const statusEl = document.getElementById('status');
@@ -3728,7 +3785,7 @@ async function loadAnkiFields(modelName) {
 /**
  * Saves the selected Anki configuration to chrome.storage.sync.
  */
-function saveAnkiSettings() {
+function saveAnkiSettings(fromEl) {
   const settings = {
     deckName: document.getElementById('anki-deck-select').value,
     modelName: document.getElementById('anki-model-select').value,
@@ -3736,13 +3793,14 @@ function saveAnkiSettings() {
     definitionField: document.getElementById('anki-definition-field-select').value
   };
 
+  // Saved once the mapping is complete; until then, say what is missing.
   if (!settings.deckName || !settings.modelName || !settings.wordField || !settings.definitionField) {
-    updateAnkiStatus("Please select all options before saving.", "error");
+    updateAnkiStatus("Choose a deck, note type, and both fields to save the mapping.", "info");
     return;
   }
 
   chrome.storage.sync.set({ ankiSettings: settings }, () => {
-    updateAnkiStatus('Anki settings saved!', 'success');
+    showSaved(fromEl || 'anki-deck-select');
   });
 }
 
@@ -3884,7 +3942,7 @@ function setBackupIncludeInUI(include) {
   }
 }
 
-function saveReminderSettings() {
+function saveReminderSettings(fromEl) {
   const freqEl = document.getElementById('reminder-frequency');
   const subfolderEl = document.getElementById('backup-subfolder');
   if (!freqEl || !subfolderEl) return;
@@ -3904,7 +3962,7 @@ function saveReminderSettings() {
     backupSubfolder: subfolder,
     backupInclude: backupInclude
   }, () => {
-    updateReminderStatus('Backup settings saved!', 'success');
+    showSaved(fromEl || 'reminder-frequency');
 
     // The toolbar badge now shows the due-flashcard count (Issue #25), so
     // this page no longer clears it directly — the background worker
@@ -4464,7 +4522,7 @@ function populateVoiceList(savedVoiceURI) {
   }
 }
 
-function saveTTSSettings() {
+function saveTTSSettings(fromEl) {
   const voiceSelect = document.getElementById('tts-voice-select');
   const rateRange = document.getElementById('tts-rate-range');
 
@@ -4474,7 +4532,7 @@ function saveTTSSettings() {
   };
 
   chrome.storage.sync.set({ ttsSettings: settings }, () => {
-    updateTTSStatus("Settings saved successfully!", "success");
+    showSaved(fromEl || voiceSelect);
   });
 }
 
@@ -6087,7 +6145,7 @@ async function loadSTTSettings() {
   }
 }
 
-async function saveSTTSettings() {
+async function saveSTTSettings(fromEl) {
   const engine = document.getElementById('stt-engine-select')?.value || 'native';
   const apiKey = document.getElementById('stt-api-key')?.value || '';
   const apiUrl = document.getElementById('stt-api-url')?.value || '';
@@ -6128,12 +6186,7 @@ async function saveSTTSettings() {
       })
     ]);
 
-    const statusEl = document.getElementById('stt-status');
-    if (statusEl) {
-      statusEl.textContent = 'Settings saved successfully!';
-      statusEl.style.color = 'var(--secondary-color)';
-      setTimeout(() => { statusEl.textContent = ''; }, 3000);
-    }
+    showSaved(fromEl || 'stt-engine-select');
   } catch (err) {
     console.error("Error saving STT settings:", err);
   }

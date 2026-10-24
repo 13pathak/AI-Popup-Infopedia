@@ -1178,6 +1178,46 @@
 
         #add-model-btn { background-color: var(--secondary-color); }
         #add-model-btn:hover { background-color: #059669; }
+        #edit-model-btn { background-color: var(--primary-color); }
+
+        /* Destructive actions that should not invite a click: no fill, muted
+           until hovered, set apart at the row's end. */
+        .btn-quiet-danger {
+            background: transparent;
+            border-color: transparent;
+            color: var(--text-muted);
+        }
+        .btn-quiet-danger:hover {
+            background: rgba(239, 68, 68, 0.1);
+            border-color: rgba(239, 68, 68, 0.35);
+            color: var(--danger-color);
+        }
+        #model-selection-container #delete-model-btn { margin-left: auto; }
+
+        /* Autosave confirmation: a brief "Saved ✓" beside the section title. */
+        .saved-badge {
+            display: inline-block;
+            margin-left: 10px;
+            padding: 2px 9px;
+            border-radius: 999px;
+            background: rgba(16, 185, 129, 0.14);
+            color: var(--secondary-color);
+            font-size: 0.72rem;
+            font-weight: 600;
+            letter-spacing: 0;
+            vertical-align: middle;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+            pointer-events: none;
+        }
+        .saved-badge.show { opacity: 1; }
+
+        /* A setting that depends on a switched-off option reads as off. */
+        .setting-disabled {
+            opacity: 0.5;
+        }
+        .setting-disabled select,
+        .setting-disabled input { cursor: not-allowed; }
 
         #save-model-btn { background-color: var(--primary-color); }
         
@@ -1723,14 +1763,14 @@
         <div id="model-selection-container" style="display: flex; align-items: center; gap: 10px;">
             <label for="model-select" style="margin-bottom: 0;">Default Model:</label>
             <select id="model-select"></select>
-            <button id="add-model-btn" title="Add New Model"
-                style="background-color: var(--secondary-color);"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
-            <button id="edit-model-btn" title="Edit Selected Model"
-                style="background-color: var(--primary-color);"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></button>
-            <button id="delete-model-btn" title="Delete Selected Model"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
-            <button id="reorder-models-btn" title="Reorder Models (Fallback Order)" style="background-color: var(--button-bg);"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg></button>
+            <button id="add-model-btn" title="Add a new model"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Add</button>
+            <button id="edit-model-btn" title="Edit the selected model"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg> Edit</button>
+            <button id="reorder-models-btn" title="Change the fallback order"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg> Reorder</button>
+            <!-- Delete: last, set apart, and unfilled so it is not hit by mistake
+                 (it still asks for confirmation). -->
+            <button id="delete-model-btn" class="btn-quiet-danger" title="Delete the selected model"><svg class="oi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg> Delete</button>
         </div>
-        <p id="no-models-message" style="display: none; margin-top: 10px;">No models configured. Click '+' to add one.
+        <p id="no-models-message" style="display: none; margin-top: 10px;">No models configured. Click Add to add one.
         </p>
 
         <div id="model-form-container" style="display: none;">
@@ -1881,7 +1921,7 @@
                 <input type="checkbox" id="enable-hallucination-guard" style="width: auto;">
                 <label for="enable-hallucination-guard" style="margin-bottom: 0;">Enable Hallucination Guard</label>
             </div>
-            <div>
+            <div id="verification-model-field">
                 <label for="verification-model-select">Verification Model</label>
                 <select id="verification-model-select"></select>
                 <small>Select the model to act as the fact-checker. We recommend using a different provider than your default model.</small>
@@ -1895,7 +1935,6 @@
                 <label for="tavily-api-key">Tavily API Key</label>
                 <input type="password" id="tavily-api-key" placeholder="tvly-...">
             </div>
-            <button id="save-tavily-btn" style="margin-top: 10px; background-color: var(--secondary-color);">Save Search API Key</button>
             <div id="tavily-status" style="margin-top: 10px; font-weight: bold; min-height: 1em; color: var(--secondary-color);"></div>
         </div>
 
@@ -1919,7 +1958,7 @@
 
             <label for="static-followup-chips" style="display: block; margin-top: 18px;">Quick Follow-up Chips (Issue #35)</label>
             <textarea id="static-followup-chips" rows="3" placeholder="One chip per line, e.g.&#10;💡 Simpler&#10;📝 2 Examples&#10;🏛️ Etymology"></textarea>
-            <small style="display: block; margin-top: 5px;">One chip label per line. These pills appear right after the latest answer in the popup for one-click questions; emoji prefixes are optional. Leave empty for none.</small>
+            <small style="display: block; margin-top: 5px;">One chip label per line. These pills sit just above the follow-up box in the popup for one-click questions; emoji prefixes are optional. Leave empty for none.</small>
 
             <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; margin-top: 14px;">
                 <input type="checkbox" id="ai-followup-suggestions-checkbox" style="margin-top: 4px;">
@@ -1927,7 +1966,6 @@
                     <small>After each answer, the same model also suggests up to 3 contextual follow-up questions, shown as chips after your custom ones. Rides the existing request — no extra API calls — and models that ignore the instruction simply show none.</small></span>
             </label>
 
-            <button id="save-followup-settings-btn" style="margin-top: 10px; background-color: var(--secondary-color);">Save Follow-up Settings</button>
             <div id="followup-status" style="margin-top: 10px; font-weight: bold; min-height: 1em;"></div>
         </div>
 
@@ -1979,7 +2017,6 @@
             <div style="margin-bottom: 20px; display: flex; align-items: center; gap: 10px;">
                 <label for="pdf-author-name" style="font-weight: 500;">Custom Author Name for Highlights/Comments:</label>
                 <input type="text" id="pdf-author-name" placeholder="e.g. John Doe" style="flex-grow: 1; max-width: 300px;">
-                <button id="save-pdf-author-btn" style="background-color: var(--secondary-color);">Save Name</button>
             </div>
 
             <div style="margin-bottom: 20px;">
@@ -2144,8 +2181,6 @@
             </div>
         </div>
 
-        <button id="anki-save-settings-btn" style="margin-top: 20px; background-color: var(--secondary-color);">Save
-            Anki Settings</button>
         </div>
     </div>
 
@@ -2430,10 +2465,8 @@
                 Last Backup: Never
             </div>
 
-            <button id="save-reminder-settings-btn" style="margin-top: 20px; background-color: var(--secondary-color);">Save
-                Settings</button>
             <button id="manual-backup-btn"
-                style="margin-top: 20px; margin-left: 10px; background-color: var(--primary-color);">Backup Now</button>
+                style="margin-top: 20px; background-color: var(--primary-color);">Backup Now</button>
 
             <div id="reminder-status" style="margin-top: 10px; font-weight: bold; min-height: 1em;"></div>
         </div>
@@ -2595,7 +2628,6 @@
         <div style="margin-top: 30px;">
             <button id="tts-test-btn" style="background-color: var(--primary-color); margin-right: 10px;">Test
                 Voice</button>
-            <button id="tts-save-btn" style="background-color: var(--secondary-color);">Save Settings</button>
         </div>
         <div id="tts-status" style="margin-top: 10px; font-weight: bold; min-height: 1em;"></div>
         </div>
@@ -2643,9 +2675,6 @@
             </div>
         </div>
 
-        <div style="margin-top: 30px;">
-            <button id="stt-save-btn" style="background-color: var(--secondary-color);">Save Settings</button>
-        </div>
         <div id="stt-status" style="margin-top: 10px; font-weight: bold; min-height: 1em;"></div>
         </div>
     </div>

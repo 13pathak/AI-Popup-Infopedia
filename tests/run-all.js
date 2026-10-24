@@ -250,6 +250,11 @@ async function run() {
     const draftBrowserCode = await new Promise(res => draftBrowserProc.on('exit', code => res(code ?? 0)));
     if (draftBrowserCode !== 0) exitCode = draftBrowserCode;
 
+    console.log('Testing options page autosave and model controls...');
+    const optionsAutosaveProc = spawn(process.execPath, [path.join(__dirname, 'e2e-options-autosave.js')], { stdio: 'inherit' });
+    const optionsAutosaveCode = await new Promise(res => optionsAutosaveProc.on('exit', code => res(code ?? 0)));
+    if (optionsAutosaveCode !== 0) exitCode = optionsAutosaveCode;
+
     console.log('Testing custom selection popup buttons...');
     const selectionButtonsProc = spawn(process.execPath, [path.join(__dirname, 'test-selection-buttons.js')], { stdio: 'inherit' });
     const selectionButtonsCode = await new Promise(res => selectionButtonsProc.on('exit', code => res(code ?? 0)));
