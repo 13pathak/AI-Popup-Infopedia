@@ -342,10 +342,16 @@
             border-bottom: 1px solid var(--border-color);
         }
 
+        /* The icon is dark artwork; a light disc keeps it visible on the dark
+           sidebar (and stays crisp on the light theme with its hairline). */
         .tab-brand-logo {
-            width: 32px;
-            height: 32px;
-            border-radius: 6px;
+            width: 38px;
+            height: 38px;
+            padding: 5px;
+            box-sizing: border-box;
+            border-radius: 50%;
+            background: #f1f5f9;
+            box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.08);
             flex-shrink: 0;
         }
 
@@ -392,6 +398,18 @@
             .tab-brand { display: none; }
             .tab-indicator { display: none; }
             .settings-main { width: 100%; max-width: none; }
+            /* The strip scrolls sideways: fade whichever edge has more tabs
+               behind it (.fade-left / .fade-right, set by options.js). */
+            .tab-nav {
+                --fade-left: 0px;
+                --fade-right: 0px;
+                scrollbar-width: none;
+                -webkit-mask-image: linear-gradient(to right, transparent, #000 var(--fade-left), #000 calc(100% - var(--fade-right)), transparent);
+                mask-image: linear-gradient(to right, transparent, #000 var(--fade-left), #000 calc(100% - var(--fade-right)), transparent);
+            }
+            .tab-nav::-webkit-scrollbar { display: none; }
+            .tab-nav.fade-left { --fade-left: 56px; }
+            .tab-nav.fade-right { --fade-right: 56px; }
         }
 
         .tab-button {
@@ -854,11 +872,16 @@
         }
 
         /* --- STATS DASHBOARD STYLES --- */
+        /* Four stat tiles in one row (Flashcards, Usage); 2 x 2 only when the
+           window is too narrow for four, never a lone tile on a second row. */
         .dashboard-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            grid-template-columns: repeat(4, minmax(0, 1fr));
             gap: 15px;
             margin-bottom: 25px;
+        }
+        @media (max-width: 560px) {
+            .dashboard-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         }
 
         .stat-card {
@@ -892,24 +915,67 @@
             overflow-x: auto;
         }
 
+        /* Header: title on the left, review streak on the right */
+        .heatmap-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 8px 12px;
+            margin-bottom: 12px;
+        }
+        .heatmap-header h4 { margin: 0; }
+        .heatmap-streak {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 3px 10px;
+            border-radius: 999px;
+            background: rgba(245, 158, 11, 0.12);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            color: var(--text-color);
+            font-size: 0.85em;
+            font-weight: 500;
+            white-space: nowrap;
+        }
+        .heatmap-streak #stat-day-streak { font-weight: 700; }
+
+        /* Week columns (Sun–Sat rows) that share the full card width: the
+           number of weeks is picked to fit (renderHeatmap), and each cell is
+           a square sized by its column. */
         .heatmap-grid {
             display: grid;
-            grid-template-rows: repeat(7, 12px);
+            grid-template-rows: repeat(7, auto);
             grid-auto-flow: column;
-            grid-auto-columns: 12px;
+            grid-auto-columns: 1fr;
             gap: 4px;
-            align-items: center;
-            justify-content: center;
-            margin-top: 10px;
+            align-items: start;
         }
 
         .heatmap-cell {
-            width: 12px;
-            height: 12px;
+            width: 100%;
+            aspect-ratio: 1;
             border-radius: 3px;
             background-color: var(--button-bg);
             transition: transform 0.1s;
         }
+
+        .heatmap-legend {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 4px;
+            margin-top: 10px;
+            font-size: 0.8em;
+            color: var(--text-muted);
+        }
+        .heatmap-legend .heatmap-cell {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            aspect-ratio: auto;
+        }
+        .heatmap-legend .heatmap-cell:hover { transform: none; }
 
         .heatmap-cell:hover {
             transform: scale(1.2);
@@ -1658,7 +1724,7 @@
             <div class="onboarding-step" id="onboarding-step-1">
                 <span class="onboarding-step-icon"></span>
                 <div class="onboarding-step-body">
-                    <span>Add your first AI model — open the <strong>Model Settings</strong> tab, click <strong>+</strong>, pick a provider, and paste your API key.</span>
+                    <span>Add your first AI model — open the <strong>Model Settings</strong> tab, click <strong>Add</strong>, pick a provider, and paste your API key.</span>
                 </div>
             </div>
             <div class="onboarding-step" id="onboarding-step-2">
@@ -2207,24 +2273,25 @@
                 <div class="stat-value" id="stat-total-reviews">0</div>
                 <div class="stat-label">Total Reviews</div>
             </div>
-            <div class="stat-card">
-                <div class="stat-value" id="stat-day-streak">0</div>
-                <div class="stat-label">Day Streak 🔥</div>
-            </div>
         </div>
 
+        <!-- Activity heatmap: fills the card's width with as many weeks as fit
+             (options.js renderHeatmap); the review streak sits in its header. -->
         <div class="heatmap-container">
-            <h4 style="margin-bottom: 5px; text-align: center;">Activity (Last 90 Days)</h4>
+            <div class="heatmap-header">
+                <h4 id="heatmap-title">Activity</h4>
+                <span class="heatmap-streak" title="Consecutive days with at least one flashcard review">🔥 <span><span id="stat-day-streak">0</span>-day review streak</span></span>
+            </div>
             <div class="heatmap-grid" id="heatmap-grid">
                 <!-- Heatmap cells will be generated here -->
             </div>
-            <div style="text-align: center; margin-top: 10px; font-size: 0.8em; color: var(--text-muted);">
+            <div class="heatmap-legend">
                 <span>Less</span>
-                <span class="heatmap-cell" style="display:inline-block; margin: 0 2px;"></span>
-                <span class="heatmap-cell" data-level="1" style="display:inline-block; margin: 0 2px;"></span>
-                <span class="heatmap-cell" data-level="2" style="display:inline-block; margin: 0 2px;"></span>
-                <span class="heatmap-cell" data-level="3" style="display:inline-block; margin: 0 2px;"></span>
-                <span class="heatmap-cell" data-level="4" style="display:inline-block; margin: 0 2px;"></span>
+                <span class="heatmap-cell"></span>
+                <span class="heatmap-cell" data-level="1"></span>
+                <span class="heatmap-cell" data-level="2"></span>
+                <span class="heatmap-cell" data-level="3"></span>
+                <span class="heatmap-cell" data-level="4"></span>
                 <span>More</span>
             </div>
         </div>

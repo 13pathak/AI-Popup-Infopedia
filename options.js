@@ -130,6 +130,44 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // Narrow windows turn the rail into a horizontal strip that scrolls (see
+  // the max-width: 1024px rules). Fade whichever edge has more tabs behind
+  // it so the scroll is discoverable, let a plain mouse wheel scroll it
+  // sideways, and keep the active tab in view.
+  if (tabNavEl) {
+    const isStrip = () => getComputedStyle(tabNavEl).flexDirection === 'row';
+    const updateStripFade = () => {
+      const scrollable = isStrip() && tabNavEl.scrollWidth > tabNavEl.clientWidth + 1;
+      tabNavEl.classList.toggle('fade-left', scrollable && tabNavEl.scrollLeft > 2);
+      tabNavEl.classList.toggle('fade-right', scrollable && tabNavEl.scrollLeft + tabNavEl.clientWidth < tabNavEl.scrollWidth - 2);
+    };
+    tabNavEl.addEventListener('scroll', updateStripFade, { passive: true });
+    // Switching from the sidebar to the strip (window narrowed) starts the
+    // strip at its left end; bring the open tab into view once at that point.
+    let wasStrip = isStrip();
+    window.addEventListener('resize', () => {
+      const strip = isStrip();
+      if (strip && !wasStrip) {
+        const active = tabNavEl.querySelector('.tab-button.active');
+        if (active) active.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      }
+      wasStrip = strip;
+      updateStripFade();
+    }, { passive: true });
+    tabNavEl.addEventListener('wheel', (e) => {
+      if (!isStrip() || tabNavEl.scrollWidth <= tabNavEl.clientWidth) return;
+      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return; // already sideways
+      e.preventDefault();
+      tabNavEl.scrollLeft += e.deltaY;
+    }, { passive: false });
+    tabs.forEach(tab => tab.addEventListener('click', () => {
+      if (isStrip()) tab.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      updateStripFade();
+    }));
+    updateStripFade();
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(updateStripFade);
+  }
+
   // The HTML ships with the settings panel visible; activate its tab button so
   // the indicator and ARIA state are correct on first paint.
   if (!document.querySelector('.tab-button.active')) {
@@ -5751,52 +5789,105 @@ function loadStats() {
     animateStatValue(document.getElementById('stat-total-reviews'), totalReviews);
     animateStatValue(document.getElementById('stat-day-streak'), streakDays);
 
-    // 2. Render Heatmap (90 Days)
-    const heatmapGrid = document.getElementById('heatmap-grid');
-    heatmapGrid.innerHTML = '';
-    
-    const daysToRender = 90;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0); // Start of today
-
-    // Map timestamps to days
-    const activityMap = new Map();
-    history.forEach(item => {
-      // Activity counts both when a word was added (item.timestamp) AND when it was reviewed (item.lastReviewed)
-      const datesToLog = [item.timestamp];
-      if (item.lastReviewed) datesToLog.push(item.lastReviewed);
-
-      datesToLog.forEach(ts => {
-        if (!ts) return;
-        const d = new Date(ts);
-        d.setHours(0, 0, 0, 0);
-        const dayDiff = Math.floor((today.getTime() - d.getTime()) / (1000 * 60 * 60 * 24));
-        if (dayDiff >= 0 && dayDiff < daysToRender) {
-          activityMap.set(dayDiff, (activityMap.get(dayDiff) || 0) + 1);
-        }
-      });
-    });
-
-    // Determine grid layout (13 weeks = 91 days, we'll render exactly 90 cells)
-    // CSS grid is set to column flow.
-    for (let i = daysToRender - 1; i >= 0; i--) {
-      const cell = document.createElement('div');
-      cell.className = 'heatmap-cell';
-      
-      const count = activityMap.get(i) || 0;
-      if (count > 0 && count <= 2) cell.dataset.level = "1";
-      else if (count > 2 && count <= 5) cell.dataset.level = "2";
-      else if (count > 5 && count <= 10) cell.dataset.level = "3";
-      else if (count > 10) cell.dataset.level = "4";
-
-      // Tooltip with date and count
-      const cellDate = new Date(today.getTime() - (i * 24 * 60 * 60 * 1000));
-      const dateStr = cellDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-      cell.title = `${count} interactions on ${dateStr}`;
-
-      heatmapGrid.appendChild(cell);
-    }
+    // 2. Render the activity heatmap
+    heatmapHistory = history;
+    renderHeatmap();
+    watchHeatmapWidth();
   });
+}
+
+// --- Activity heatmap ---
+// One column per week (rows Sunday–Saturday, today in the last column),
+// with as many weeks as fit the card at roughly the classic cell size, so
+// the grid fills the width instead of sitting small in the middle. The grid
+// is re-rendered when the card's width changes the number of weeks that fit
+// (window resize, or the Flashcards tab becoming visible).
+const HEATMAP_CELL_PX = 14;
+const HEATMAP_GAP_PX = 4;
+const HEATMAP_MIN_WEEKS = 13;
+const HEATMAP_MAX_WEEKS = 53;
+let heatmapHistory = [];
+let heatmapWeeksShown = 0;
+let heatmapObserver = null;
+
+function heatmapWeeksToFit(width) {
+  if (!width) return HEATMAP_MIN_WEEKS; // hidden tab: re-rendered once visible
+  const fit = Math.floor((width + HEATMAP_GAP_PX) / (HEATMAP_CELL_PX + HEATMAP_GAP_PX));
+  return Math.max(HEATMAP_MIN_WEEKS, Math.min(HEATMAP_MAX_WEEKS, fit));
+}
+
+function renderHeatmap() {
+  const heatmapGrid = document.getElementById('heatmap-grid');
+  if (!heatmapGrid) return;
+  const weeks = heatmapWeeksToFit(heatmapGrid.clientWidth);
+  heatmapWeeksShown = weeks;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0); // Start of today
+  // The first column starts on a Sunday (weeks - 1) weeks back, so every row
+  // is one weekday and the last column ends today.
+  const firstDayAgo = (weeks - 1) * 7 + today.getDay();
+
+  // Activity counts both when a word was added (item.timestamp) AND when it
+  // was reviewed (item.lastReviewed). Keyed by days before today.
+  const activityMap = new Map();
+  heatmapHistory.forEach(item => {
+    if (!item) return;
+    const datesToLog = [item.timestamp];
+    if (item.lastReviewed) datesToLog.push(item.lastReviewed);
+    datesToLog.forEach(ts => {
+      if (!ts) return;
+      const d = new Date(ts);
+      d.setHours(0, 0, 0, 0);
+      const dayDiff = Math.round((today.getTime() - d.getTime()) / (1000 * 60 * 60 * 24));
+      if (dayDiff >= 0 && dayDiff <= firstDayAgo) {
+        activityMap.set(dayDiff, (activityMap.get(dayDiff) || 0) + 1);
+      }
+    });
+  });
+
+  const fragment = document.createDocumentFragment();
+  for (let i = firstDayAgo; i >= 0; i--) {
+    const cell = document.createElement('div');
+    cell.className = 'heatmap-cell';
+
+    const count = activityMap.get(i) || 0;
+    if (count > 0 && count <= 2) cell.dataset.level = "1";
+    else if (count > 2 && count <= 5) cell.dataset.level = "2";
+    else if (count > 5 && count <= 10) cell.dataset.level = "3";
+    else if (count > 10) cell.dataset.level = "4";
+
+    // Tooltip with date and count
+    const cellDate = new Date(today);
+    cellDate.setDate(today.getDate() - i);
+    const dateStr = cellDate.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+    cell.title = `${count} interactions on ${dateStr}`;
+
+    fragment.appendChild(cell);
+  }
+  heatmapGrid.replaceChildren(fragment);
+
+  const title = document.getElementById('heatmap-title');
+  if (title) title.textContent = `Activity · last ${weeks} weeks`;
+}
+
+function watchHeatmapWidth() {
+  if (heatmapObserver || typeof ResizeObserver !== 'function') return;
+  const heatmapGrid = document.getElementById('heatmap-grid');
+  if (!heatmapGrid) return;
+  // Re-rendering changes the grid's height, so it waits for the next frame:
+  // doing it inside the observer callback trips the "ResizeObserver loop"
+  // error.
+  let framePending = false;
+  heatmapObserver = new ResizeObserver(() => {
+    if (framePending) return;
+    framePending = true;
+    requestAnimationFrame(() => {
+      framePending = false;
+      if (heatmapWeeksToFit(heatmapGrid.clientWidth) !== heatmapWeeksShown) renderHeatmap();
+    });
+  });
+  heatmapObserver.observe(heatmapGrid);
 }
 
 // --- FSRS MEMORY MODEL & 1-CLICK OPTIMIZER ---

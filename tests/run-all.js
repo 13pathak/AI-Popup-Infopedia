@@ -255,6 +255,11 @@ async function run() {
     const optionsAutosaveCode = await new Promise(res => optionsAutosaveProc.on('exit', code => res(code ?? 0)));
     if (optionsAutosaveCode !== 0) exitCode = optionsAutosaveCode;
 
+    console.log('Testing options page layout...');
+    const optionsLayoutProc = spawn(process.execPath, [path.join(__dirname, 'e2e-options-layout.js')], { stdio: 'inherit' });
+    const optionsLayoutCode = await new Promise(res => optionsLayoutProc.on('exit', code => res(code ?? 0)));
+    if (optionsLayoutCode !== 0) exitCode = optionsLayoutCode;
+
     console.log('Testing custom selection popup buttons...');
     const selectionButtonsProc = spawn(process.execPath, [path.join(__dirname, 'test-selection-buttons.js')], { stdio: 'inherit' });
     const selectionButtonsCode = await new Promise(res => selectionButtonsProc.on('exit', code => res(code ?? 0)));
