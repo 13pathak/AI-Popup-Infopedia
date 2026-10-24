@@ -29,9 +29,20 @@ chrome.storage.sync.get({ uiTheme: 'dark', customPrompts: [], askAiButtonIcon: '
   }
 });
 
+// The size the user dragged the popup to (resize grip); null = default size.
+// New popups open at it; it lives in local storage, shared by all tabs.
+let savedPopupSize = null;
+chrome.storage.local.get({ popupSize: null }, (data) => {
+  if (chrome.runtime.lastError) return;
+  savedPopupSize = sanitizePopupSize(data && data.popupSize);
+});
+
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && (changes.history || changes.wordLists)) {
     activePopups.forEach(refreshSavedHistory);
+  }
+  if (area === 'local' && changes.popupSize) {
+    savedPopupSize = sanitizePopupSize(changes.popupSize.newValue);
   }
   if (area === 'sync' && changes.uiTheme) {
     currentUiTheme = changes.uiTheme.newValue || 'dark';
@@ -255,6 +266,42 @@ const popupStyles = `
     z-index: 1; /* z-index is now relative to its container */
     animation: ai-popup-enter 180ms ease-out;
   }
+
+  /* Resize grip (bottom-left: the popup grows left and down from its
+     top-right placement). Quiet until hovered. */
+  .ai-popup-resize-grip {
+    position: absolute;
+    left: 3px;
+    bottom: 3px;
+    width: 14px;
+    height: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--popup-text-muted);
+    opacity: 0.45;
+    cursor: nesw-resize;
+    touch-action: none;
+    border-radius: 0 0 0 12px;
+    z-index: 2;
+    transition: opacity 140ms ease, color 140ms ease;
+  }
+  .ai-popup-resize-grip:hover,
+  #ai-definition-popup.is-resizing .ai-popup-resize-grip {
+    opacity: 1;
+    color: rgba(var(--popup-accent-rgb), 1);
+  }
+  #ai-definition-popup.is-resizing { user-select: none; }
+  #ai-definition-popup.is-resizing .ai-compare-viewport { transition: none; }
+  /* A user-sized popup: the answer body fills the room left in the content
+     area (--ai-answer-max, measured in applyCompareScroll) instead of the
+     default 38vh cap. The body stays the scroller, so stream re-renders
+     keep the reading position. */
+  #ai-definition-popup.is-resized .ai-compare-body { max-height: var(--ai-answer-max, 38vh); }
+  /* ...which needs the content area to take the popup's spare height (it
+     only shrinks in an auto-height popup), keeping the pager, toolbar,
+     chips and input at the bottom. */
+  #ai-definition-popup.is-resized #ai-popup-content.ai-compare-mode { flex: 1 1 auto; }
 
   @keyframes ai-popup-enter {
     from { opacity: 0; transform: translateY(6px) scale(0.985); }
@@ -579,23 +626,46 @@ const popupStyles = `
     flex: 1 1 auto;
   }
 
-  /* Thin rounded scrollbars, accent-muted (shared pattern with options page and PDF viewer) */
+  /* Thin, muted scrollbars that stay out of the way. The answer areas show
+     theirs only while hovered (or holding keyboard focus), so the text —
+     not a bright bar — draws the eye; open menus keep a visible thin bar.
+     The standard properties do the work (Chrome 121+): unlike
+     ::-webkit-scrollbar styles, which Chrome does not repaint when the
+     element's :hover changes, scrollbar-color follows it. Where they are
+     unsupported, the -webkit- rules below draw a faint, always-on thin bar. */
+  #ai-popup-content,
+  .ai-compare-body {
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+    transition: scrollbar-color 160ms ease;
+  }
+  #ai-popup-content:hover,
+  #ai-popup-content:focus-within,
+  .ai-compare-body:hover,
+  .ai-compare-body:focus-within {
+    scrollbar-color: rgba(148, 163, 184, 0.45) transparent;
+    scrollbar-color: color-mix(in srgb, var(--popup-text-muted) 45%, transparent) transparent;
+  }
+  .custom-options {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(148, 163, 184, 0.45) transparent;
+    scrollbar-color: color-mix(in srgb, var(--popup-text-muted) 45%, transparent) transparent;
+  }
   #ai-popup-content::-webkit-scrollbar,
+  .ai-compare-body::-webkit-scrollbar,
   .custom-options::-webkit-scrollbar {
-    width: 8px;
+    width: 5px;
   }
   #ai-popup-content::-webkit-scrollbar-track,
+  .ai-compare-body::-webkit-scrollbar-track,
   .custom-options::-webkit-scrollbar-track {
     background: transparent;
   }
   #ai-popup-content::-webkit-scrollbar-thumb,
+  .ai-compare-body::-webkit-scrollbar-thumb,
   .custom-options::-webkit-scrollbar-thumb {
-    background: rgba(var(--popup-accent-rgb), 0.4);
-    border-radius: 8px;
-  }
-  #ai-popup-content::-webkit-scrollbar-thumb:hover,
-  .custom-options::-webkit-scrollbar-thumb:hover {
-    background: rgba(var(--popup-accent-rgb), 0.65);
+    background: rgba(148, 163, 184, 0.3);
+    border-radius: 5px;
   }
   
   #ai-popup-content p {
@@ -902,18 +972,35 @@ const popupStyles = `
   }
 
   /* --- Follow-up action chips (Issue #35) --- */
-  /* Rendered INSIDE the answer card, right after the latest settled answer:
-     they scroll with the conversation instead of occupying fixed height
-     between the answer and the input (which clipped long answers). Field-
-     styled pills — quieter than the accent action buttons — that pick up
-     the accent on hover. */
+  /* Pinned just above the follow-up input so they are always in view. One
+     line only (scrolls sideways, no visible scrollbar) so the row costs the
+     answer just a chip's height. Field-styled pills — quieter than the
+     accent action buttons — that pick up the accent on hover. */
   .ai-compare-chips {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     gap: 6px;
     align-items: center;
-    margin: 12px 0 2px;
+    margin-top: 10px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    overscroll-behavior-x: contain;
+    flex-shrink: 0;
   }
+  .ai-compare-chips::-webkit-scrollbar { display: none; }
+  /* The divider above the input moves above the chips, so chips and input
+     read as one "ask more" group. */
+  .ai-compare-chips {
+    border-top: 1px solid var(--popup-border);
+    padding-top: 10px;
+  }
+  .ai-compare-chips + #ai-popup-followup-container {
+    border-top: none;
+    margin-top: 8px;
+    padding-top: 0;
+  }
+  .ai-compare-chips .ai-popup-followup-chip { flex-shrink: 0; max-width: 220px; }
 
   .ai-popup-followup-chip {
     font-family: inherit;
@@ -1393,12 +1480,6 @@ const popupStyles = `
      text grows into it instead of stretching the card line by line. */
   .ai-compare-card { --ai-answer-reserve: min(38vh, 260px); }
   .ai-compare-body.ai-compare-body-reserved { min-height: var(--ai-answer-reserve); }
-  .ai-compare-body::-webkit-scrollbar { width: 8px; }
-  .ai-compare-body::-webkit-scrollbar-track { background: transparent; }
-  .ai-compare-body::-webkit-scrollbar-thumb {
-    background: rgba(var(--popup-accent-rgb), 0.4);
-    border-radius: 8px;
-  }
   .ai-compare-body p { margin-top: 0; margin-bottom: 12px; text-align: left; }
   .ai-compare-body p:last-child { margin-bottom: 0; }
   /* Stacked conversation turns: follow-up answers land below earlier ones,
@@ -3051,6 +3132,7 @@ function showPopup(x, y, content) {
   });
 
   makePopupDraggable(instance);
+  makePopupResizable(instance);
 
   activePopups.push(instance);
   return instance;
@@ -3100,6 +3182,150 @@ function makePopupDraggable(instance) {
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
   });
+}
+
+// --- Resizable popup with a remembered size ---
+// A grip in the BOTTOM-LEFT corner: the popup opens in the top-right corner,
+// so the room to grow is to the left and down. The right edge stays put
+// while the left edge and the bottom follow the pointer. The size is saved
+// on release and new popups open at it; double-clicking the grip returns to
+// the default size. Pointer-only, so the grip is hidden from screen readers.
+const POPUP_RESIZE_MIN_WIDTH = 320;
+const POPUP_RESIZE_MAX_WIDTH = 900;
+const POPUP_RESIZE_MIN_HEIGHT = 280;
+const POPUP_RESIZE_MARGIN = 12;
+
+function sanitizePopupSize(size) {
+  if (!size || typeof size !== 'object') return null;
+  const width = Number(size.width);
+  const height = Number(size.height);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
+  return { width: Math.round(width), height: Math.round(height) };
+}
+
+// Limits for a popup whose top edge is at `top` and right edge at `right`
+// (viewport px): never past the viewport margins, never below the minimums
+// unless the viewport itself is smaller.
+function popupSizeLimits(top, right) {
+  const margin = POPUP_RESIZE_MARGIN;
+  const minWidth = Math.min(POPUP_RESIZE_MIN_WIDTH, window.innerWidth - 2 * margin);
+  const maxWidth = Math.max(minWidth, Math.min(POPUP_RESIZE_MAX_WIDTH, right - margin));
+  const minHeight = Math.min(POPUP_RESIZE_MIN_HEIGHT, window.innerHeight - 2 * margin);
+  const maxHeight = Math.max(minHeight, window.innerHeight - top - margin);
+  return { minWidth, maxWidth, minHeight, maxHeight };
+}
+
+function applyPopupSize(popup, width, height) {
+  popup.style.width = `${width}px`;
+  popup.style.maxWidth = 'none';
+  popup.style.height = `${height}px`;
+  popup.style.maxHeight = 'none';
+  popup.classList.add('is-resized');
+}
+
+function clearPopupSize(popup) {
+  popup.style.width = '';
+  popup.style.maxWidth = '';
+  popup.style.height = '';
+  popup.style.maxHeight = '';
+  popup.style.removeProperty('--ai-answer-max');
+  popup.classList.remove('is-resized');
+}
+
+function makePopupResizable(instance) {
+  const popup = instance.popup;
+  if (!popup) return;
+
+  // A new popup opens at the saved size, fitted to this viewport (it starts
+  // in the top-right corner: 20px from the top and right edges).
+  if (savedPopupSize) {
+    const limits = popupSizeLimits(20, window.innerWidth - 20);
+    applyPopupSize(popup,
+      Math.min(Math.max(savedPopupSize.width, limits.minWidth), limits.maxWidth),
+      Math.min(Math.max(savedPopupSize.height, limits.minHeight), limits.maxHeight));
+  }
+
+  const grip = document.createElement('div');
+  grip.className = 'ai-popup-resize-grip';
+  grip.title = 'Drag to resize · double-click for the default size';
+  grip.setAttribute('aria-hidden', 'true');
+  grip.innerHTML = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M1.5 2.5l8 8M1.5 7l3.5 3.5"/></svg>';
+  popup.appendChild(grip);
+
+  grip.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault(); // no text selection while dragging
+    e.stopPropagation();
+    // Layout size, not getBoundingClientRect: the entry animation's scale
+    // transform would skew a drag that starts while the popup opens.
+    const startWidth = popup.offsetWidth;
+    const startHeight = popup.offsetHeight;
+    const rect = popup.getBoundingClientRect();
+    const startX = e.clientX;
+    const startY = e.clientY;
+    // The corner placement anchors the right edge (style.right); a dragged
+    // popup is anchored by style.left, which must move as the width grows.
+    const leftAnchored = popup.style.left && popup.style.left !== 'auto';
+    const startLeft = leftAnchored ? parseFloat(popup.style.left) || rect.left : rect.left;
+    const right = startLeft + startWidth;
+    const limits = popupSizeLimits(rect.top, right);
+    grip.setPointerCapture(e.pointerId);
+    popup.classList.add('is-resizing');
+
+    const onMove = (ev) => {
+      const width = Math.round(Math.min(Math.max(startWidth + (startX - ev.clientX), limits.minWidth), limits.maxWidth));
+      const height = Math.round(Math.min(Math.max(startHeight + (ev.clientY - startY), limits.minHeight), limits.maxHeight));
+      applyPopupSize(popup, width, height);
+      if (leftAnchored) popup.style.left = `${Math.round(right - width)}px`;
+    };
+    const onEnd = () => {
+      grip.removeEventListener('pointermove', onMove);
+      grip.removeEventListener('pointerup', onEnd);
+      grip.removeEventListener('pointercancel', onEnd);
+      popup.classList.remove('is-resizing');
+      if (!popup.classList.contains('is-resized')) return; // a click, not a drag
+      const size = { width: Math.round(popup.offsetWidth), height: Math.round(popup.offsetHeight) };
+      savedPopupSize = size;
+      chrome.storage.local.set({ popupSize: size }, () => { void chrome.runtime.lastError; });
+    };
+    grip.addEventListener('pointermove', onMove);
+    grip.addEventListener('pointerup', onEnd);
+    grip.addEventListener('pointercancel', onEnd);
+  });
+
+  grip.addEventListener('dblclick', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    clearPopupSize(popup);
+    savedPopupSize = null;
+    chrome.storage.local.remove('popupSize', () => { void chrome.runtime.lastError; });
+  });
+
+  // The compare slider positions cards by the viewport's pixel width and
+  // sizes itself to the visible card, so a width change (this grip, or the
+  // window narrowing) must re-run that layout — once per frame at most. A
+  // user-sized popup also re-fits its answer height when its height changes
+  // (an auto-height popup's height follows its content, so not then).
+  if (typeof ResizeObserver === 'function') {
+    let lastWidth = 0;
+    let lastHeight = 0;
+    let framePending = false;
+    new ResizeObserver((entries) => {
+      const box = entries[0] && entries[0].contentRect;
+      if (!box || !box.width) return;
+      const widthChanged = box.width !== lastWidth;
+      const heightChanged = popup.classList.contains('is-resized') && box.height !== lastHeight;
+      lastWidth = box.width;
+      lastHeight = box.height;
+      if (!widthChanged && !heightChanged) return;
+      if (framePending) return;
+      framePending = true;
+      requestAnimationFrame(() => {
+        framePending = false;
+        if (activePopups.includes(instance) && instance.compareSlots) applyCompareScroll(instance, false);
+      });
+    }).observe(popup);
+  }
 }
 
 // --- Markdown rendering (shared by the popup and the PDF export) ---
@@ -3841,26 +4067,24 @@ function updateCompareFollowupState(instance, wasFollowup) {
 }
 
 // --- Follow-up action chips (Issue #35) ---
-// One-click prompts rendered INSIDE the answer card, right after the latest
-// settled answer: the user's customizable static chips (options → Follow-up
-// Settings) plus contextual suggestions the answering model piggybacked onto
-// its reply through the [[SUGGESTIONS]] trailer — parsed and stripped by the
-// background worker, so the answer text never contains them. Living in the
-// card's scrollable body (not between the answer and the input) means they
-// never steal fixed height from the answer, and each compare model shows
-// its OWN suggestions.
+// One-click prompts: the user's customizable static chips (options →
+// Follow-up Settings) plus contextual suggestions the answering model
+// piggybacked onto its reply through the [[SUGGESTIONS]] trailer — parsed
+// and stripped by the background worker, so the answer text never contains
+// them. They sit in one row pinned just above the follow-up input, so they
+// are always in view instead of below the fold of a long answer. The row is
+// a single line (it scrolls sideways when full), so it takes only a chip's
+// height from the answer, and it shows the chips of the model card on
+// screen — each compare model keeps its OWN suggestions.
 const DEFAULT_FOLLOWUP_CHIPS = ['💡 Simpler', '📝 2 Examples', '🏛️ Etymology'];
 const FOLLOWUP_CHIPS_MAX = 8;
 
-// Appends the chip row to a card body. Rendered only when the slot's last
-// non-volatile message is a settled assistant turn — the chips appear after
-// the AI output ends and vanish the moment a new question is asked (the
-// pending turn's placeholder becomes the last message). Clicks go through
-// dispatchFollowupText, exactly like a typed question; while ANOTHER card is
-// still streaming, the shared pending-followup queue absorbs the click, the
-// same straggler behavior the unlocked input box has.
-function appendFollowupChips(instance, body, slot) {
-  const msgs = Array.isArray(slot.messages) ? slot.messages : [];
+// The chip labels for one card. Only when the slot's last non-volatile
+// message is a settled assistant turn: the chips appear after the AI output
+// ends and vanish the moment a new question is asked (the pending turn's
+// placeholder becomes the last message).
+function followupChipLabels(instance, slot) {
+  const msgs = slot && Array.isArray(slot.messages) ? slot.messages : [];
   let lastAnswer = null;
   for (let i = msgs.length - 1; i >= 0; i--) {
     const m = msgs[i];
@@ -3868,7 +4092,7 @@ function appendFollowupChips(instance, body, slot) {
     if (m.role === 'assistant') lastAnswer = m;
     break; // the first settled message from the end decides
   }
-  if (!lastAnswer) return;
+  if (!lastAnswer) return [];
 
   const chips = [];
   const seen = new Set();
@@ -3882,11 +4106,48 @@ function appendFollowupChips(instance, body, slot) {
   if (instance.enableFollowupSuggestions !== false && Array.isArray(lastAnswer.suggestions)) {
     lastAnswer.suggestions.forEach(addChip);
   }
-  if (chips.length === 0) return;
+  return chips.slice(0, FOLLOWUP_CHIPS_MAX);
+}
 
-  const row = document.createElement('div');
-  row.className = 'ai-compare-chips';
-  chips.slice(0, FOLLOWUP_CHIPS_MAX).forEach((label) => {
+// Syncs the pinned chip row with the card on screen; runs on every compare
+// render and slide (applyCompareScroll). The row is rebuilt only when its
+// labels change, so a stream re-render never resets its sideways scroll.
+// Clicks go through dispatchFollowupText, exactly like a typed question;
+// while ANOTHER card is still streaming, the shared pending-followup queue
+// absorbs the click, the same straggler behavior the unlocked input has.
+function renderPinnedFollowupChips(instance) {
+  const popup = instance.popup;
+  const followup = popup && popup.querySelector('#ai-popup-followup-container');
+  if (!followup) return;
+  const slot = (instance.compareSlots || [])[instance.compareIndex || 0] || null;
+  const labels = followupChipLabels(instance, slot);
+  let row = popup.querySelector('.ai-compare-chips');
+
+  if (labels.length === 0) {
+    if (row) row.remove();
+    return;
+  }
+  if (!row) {
+    row = document.createElement('div');
+    row.className = 'ai-compare-chips';
+    row.setAttribute('role', 'group');
+    row.setAttribute('aria-label', 'Suggested follow-up questions');
+    // A plain mouse wheel scrolls the single-line row sideways.
+    row.addEventListener('wheel', (e) => {
+      if (row.scrollWidth <= row.clientWidth || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+      e.preventDefault();
+      row.scrollLeft += e.deltaY;
+    }, { passive: false });
+  }
+  // Just above the input — re-seated every time, since the toolbar mounts
+  // itself before the input too and may land after the row.
+  if (row.nextElementSibling !== followup) popup.insertBefore(row, followup);
+
+  const key = JSON.stringify(labels);
+  if (row.dataset.labels === key) return;
+  row.dataset.labels = key;
+  row.replaceChildren();
+  labels.forEach((label) => {
     const chip = document.createElement('button');
     chip.type = 'button';
     chip.className = 'ai-popup-followup-chip';
@@ -3902,7 +4163,7 @@ function appendFollowupChips(instance, body, slot) {
     });
     row.appendChild(chip);
   });
-  body.appendChild(row);
+  row.scrollLeft = 0;
 }
 
 // Sends `text` as a follow-up exactly as if the user had typed it into the
@@ -4486,11 +4747,9 @@ function appendCompareConversation(instance, body, slot) {
   // flight, and animated dots above the error would read as a contradiction.
   if (!drewAny && slot.status !== 'error') {
     body.insertAdjacentHTML('beforeend', buildLoadingHtml('Thinking...', true));
-    return;
   }
-  // One-click follow-up chips close out the conversation — rendered only
-  // when the latest answer has settled (Issue #35).
-  appendFollowupChips(instance, body, slot);
+  // Follow-up chips are not part of the card: they sit pinned above the
+  // input (renderPinnedFollowupChips, run from applyCompareScroll).
 }
 
 // Arrows + one dot per model; the dot doubles as that model's status light.
@@ -4615,6 +4874,16 @@ function applyCompareScroll(instance, animate) {
   // Dynamically adapt viewport height to the active card so cards hug their content
   const cards = track.querySelectorAll('.ai-compare-card');
   const activeCard = cards[instance.compareIndex];
+  // In a user-sized popup the answer body fills whatever height the content
+  // area has: that height minus the card's own header/actions.
+  if (activeCard && popup.classList.contains('is-resized')) {
+    const contentEl = popup.querySelector('#ai-popup-content');
+    const activeBody = activeCard.querySelector('.ai-compare-body');
+    if (contentEl && activeBody) {
+      const cardChrome = activeCard.offsetHeight - activeBody.offsetHeight;
+      popup.style.setProperty('--ai-answer-max', `${Math.max(80, contentEl.clientHeight - cardChrome - 4)}px`);
+    }
+  }
   if (activeCard) {
     const cardHeight = activeCard.offsetHeight;
     if (cardHeight > 0) {
@@ -4630,6 +4899,7 @@ function applyCompareScroll(instance, animate) {
 
   updateCompareNav(instance);
   updateCompareSaveButton(instance);
+  renderPinnedFollowupChips(instance);
   ensureCompareSlotLoaded(instance, instance.compareIndex);
   // The lock follows the card in front, so every landing (slide, arrow, dot,
   // wheel — this also runs on each render) must re-evaluate it: arriving on a

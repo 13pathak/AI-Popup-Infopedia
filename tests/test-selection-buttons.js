@@ -98,7 +98,8 @@ async function run() {
       storage: {
         local: {
           get: (defaults, callback) => setTimeout(() => callback(Array.isArray(defaults) ? {} : { ...defaults, ...localData }), 0),
-          set: (values, callback) => { Object.assign(localData, structuredClone(values)); if (callback) setTimeout(callback, 0); }
+          set: (values, callback) => { Object.assign(localData, structuredClone(values)); if (callback) setTimeout(callback, 0); },
+          remove: (keys, callback) => { [].concat(keys).forEach(key => delete localData[key]); if (callback) setTimeout(callback, 0); }
         },
         sync: { get(defaults, callback) {
           const result = Array.isArray(defaults)
@@ -320,6 +321,45 @@ async function run() {
     prev: 'Previous model', next: 'Next model', firstDot: 'First model — answered', current: ['true', null],
     modelName: 'AI model: First model', opened: 'true', closed: 'false', listbox: 'listbox'
   }, 'popup controls are named and expose their state');
+
+  // Follow-up chips sit pinned just above the input (not inside the
+  // scrolling answer), for the card on screen.
+  assert.deepEqual(await evaluate(`(() => {
+    const popup = activePopups.at(-1).popup, row = popup.querySelector('.ai-compare-chips');
+    const input = popup.querySelector('#ai-popup-followup-container');
+    return {
+      labels: [...row.querySelectorAll('.ai-popup-followup-chip')].map(chip => chip.textContent),
+      inCard: !!row.closest('.ai-compare-card'), aboveInput: row.nextElementSibling === input,
+      visible: row.getBoundingClientRect().bottom <= input.getBoundingClientRect().top && row.getBoundingClientRect().height > 0
+    };
+  })()`), { labels: ['💡 Simpler', '📝 2 Examples', '🏛️ Etymology'], inCard: false, aboveInput: true, visible: true }, 'chips are pinned above the input');
+
+  // Resize: dragging the bottom-left grip grows the popup left and down
+  // (right edge fixed), saves the size, new popups open at it, and a
+  // double-click on the grip returns to the default size.
+  // Sizes are layout sizes (offsetWidth/Height): the open animation's
+  // transform can still be applied in this background test tab.
+  const before = await evaluate(`(() => { const p = activePopups.at(-1).popup, r = p.getBoundingClientRect(); const g = p.querySelector('.ai-popup-resize-grip').getBoundingClientRect(); return { right: p.style.right, top: r.top, width: p.offsetWidth, height: p.offsetHeight, gx: g.left + g.width / 2, gy: g.top + g.height / 2, vh: innerHeight }; })()`);
+  await send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', buttons: 1, clickCount: 1, x: before.gx, y: before.gy });
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', button: 'left', buttons: 1, x: before.gx - 50, y: before.gy + 20 });
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', button: 'left', buttons: 1, x: before.gx - 100, y: before.gy + 40 });
+  await send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', buttons: 0, clickCount: 1, x: before.gx - 100, y: before.gy + 40 });
+  await waitFor('localData.popupSize', 'the dragged size is saved');
+  const after = await evaluate(`(() => { const p = activePopups.at(-1).popup; return { right: p.style.right, width: p.offsetWidth, height: p.offsetHeight, saved: localData.popupSize }; })()`);
+  const expectedHeight = Math.min(before.height + 40, before.vh - before.top - 12);
+  // Within 2px: pointer coordinates are whole pixels, the grip's centre is not.
+  const near = (actual, expected) => Math.abs(actual - expected) <= 2;
+  assert.deepEqual({ right: after.right === before.right, width: near(after.width, before.width + 100), height: near(after.height, expectedHeight) },
+    { right: true, width: true, height: true }, `the grip resizes left and down (right edge anchored): ${JSON.stringify({ before, after })}`);
+  assert.deepEqual(after.saved, { width: Math.round(after.width), height: Math.round(after.height) }, 'the size is remembered');
+  assert.deepEqual(await evaluate(`(() => {
+    const instance = showPopup(0, 0, 'Loading');
+    const style = { width: instance.popup.style.width, height: instance.popup.style.height };
+    instance.popup.querySelector('.ai-popup-resize-grip').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    const reset = { width: instance.popup.style.width, height: instance.popup.style.height, saved: localData.popupSize === undefined };
+    removePopupInstance(instance);
+    return { style, reset };
+  })()`), { style: { width: after.saved.width + 'px', height: after.saved.height + 'px' }, reset: { width: '', height: '', saved: true } }, 'new popups open at the saved size; double-click resets');
   await evaluate(`removeAllPopups(); window.toolbar = showOpenButtonPopup(selectionRect, selectedText, selectionContext); requests.length = 0; toolbar.popup.querySelector('#ai-clip-button-popup').click();`);
   await waitFor(`requests.some(request => request.type === 'saveClip')`, 'Clip remains callable');
   assert.equal(await evaluate('aiRequests().length'), 0, 'Clip does not call AI');
