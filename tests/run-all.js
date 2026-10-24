@@ -4,7 +4,7 @@
 //
 // Usage:
 //   node tests/run-all.js
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -65,6 +65,39 @@ function pollEndpoint(url, timeoutMs = 15000) {
     };
     check();
   });
+}
+
+// Quit the browser over CDP so it shuts down normally: a force-killed Edge
+// never unregisters its tabs, so Windows keeps listing them in Alt+Tab, and
+// it still holds the profile open when we try to delete it. Force-kill only
+// if it has not exited within the grace period.
+async function closeBrowser(browserProc) {
+  const exited = new Promise(res => {
+    if (browserProc.exitCode !== null || browserProc.signalCode !== null) res();
+    else browserProc.once('exit', res);
+  });
+  const waitForExit = (ms) => Promise.race([
+    exited.then(() => true),
+    new Promise(res => setTimeout(() => res(false), ms))
+  ]);
+
+  try {
+    const { webSocketDebuggerUrl } = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/version`)).json();
+    const ws = new WebSocket(webSocketDebuggerUrl);
+    await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
+    ws.send(JSON.stringify({ id: 1, method: 'Browser.close' }));
+  } catch (e) {}
+  if (await waitForExit(10000)) return;
+
+  console.warn('  Browser did not exit after Browser.close; force-killing it.');
+  try {
+    if (process.platform === 'win32') {
+      spawnSync('taskkill', ['/pid', String(browserProc.pid), '/f', '/t'], { stdio: 'ignore' });
+    } else {
+      browserProc.kill('SIGKILL');
+    }
+  } catch (e) {}
+  await waitForExit(5000);
 }
 
 async function run() {
@@ -274,19 +307,18 @@ async function run() {
     exitCode = 1;
   } finally {
     // Cleanup browser
-    try {
-      if (process.platform === 'win32') {
-        spawn('taskkill', ['/pid', browserProc.pid, '/f', '/t'], { stdio: 'ignore' });
-      } else {
-        browserProc.kill('SIGKILL');
-      }
-    } catch (e) {}
+    await closeBrowser(browserProc);
 
     // Cleanup server
     try { server.close(); } catch (e) {}
 
-    // Cleanup temp profile directory
-    try { fs.rmSync(tempProfile, { recursive: true, force: true }); } catch (e) {}
+    // Cleanup temp profile directory. Helper processes (crashpad, GPU) can
+    // hold files for a moment after the browser exits, so retry on EBUSY.
+    try {
+      await fs.promises.rm(tempProfile, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+    } catch (e) {
+      console.warn(`  Could not remove temp profile ${tempProfile}: ${e.message}`);
+    }
   }
 
   console.log(`=== Tests Finished (exit code: ${exitCode}) ===`);
