@@ -169,7 +169,10 @@ const popupStyles = `
     --popup-role-ai: #2dd4bf; /* mint accent */
     --popup-link-color: #a5d6ff;
     --popup-error-text: #f87171;
-    --popup-skeleton: rgba(255, 255, 255, 0.09);
+    /* Solid, not translucent white: browsers that force dark mode on web
+       pages (Brave, Chrome's flag) darken light colours, which turned a
+       translucent white into the background and hid the skeleton. */
+    --popup-skeleton: #30353f;
     color-scheme: dark;
   }
 
@@ -202,7 +205,7 @@ const popupStyles = `
     --popup-role-ai: #0d9488;
     --popup-link-color: #0284c7;
     --popup-error-text: #dc2626;
-    --popup-skeleton: rgba(15, 23, 42, 0.08);
+    --popup-skeleton: #e6eaf0;
     color-scheme: light;
   }
 
@@ -236,7 +239,7 @@ const popupStyles = `
       --popup-role-ai: #0d9488;
       --popup-link-color: #0284c7;
       --popup-error-text: #dc2626;
-      --popup-skeleton: rgba(15, 23, 42, 0.08);
+      --popup-skeleton: #e6eaf0;
       color-scheme: light;
     }
   }
