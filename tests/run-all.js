@@ -12,6 +12,8 @@ const http = require('http');
 const { createServer, PORT } = require('./serve');
 
 const CDP_PORT = 9333;
+const PROFILE_PREFIX = 'browser-test-profile-';
+const STALE_PROFILE_AGE_MS = 60 * 60 * 1000;
 
 function findBrowserBinary() {
   const isWin = process.platform === 'win32';
@@ -100,8 +102,32 @@ async function closeBrowser(browserProc) {
   await waitForExit(5000);
 }
 
+// A run that is interrupted (Ctrl+C, a killed terminal, a tool timeout)
+// never reaches its own cleanup, so its profile stays in the temp folder.
+// Remove those on the next start, skipping any changed within the last hour
+// so a run still in progress keeps its profile. One that a leftover browser
+// still holds open fails to delete and is retried next time.
+async function sweepStaleProfiles() {
+  const tmp = os.tmpdir();
+  const cutoff = Date.now() - STALE_PROFILE_AGE_MS;
+  let entries;
+  try { entries = fs.readdirSync(tmp, { withFileTypes: true }); } catch (e) { return; }
+  let removed = 0;
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !entry.name.startsWith(PROFILE_PREFIX)) continue;
+    const dir = path.join(tmp, entry.name);
+    try {
+      if (fs.statSync(dir).mtimeMs > cutoff) continue;
+      await fs.promises.rm(dir, { recursive: true, force: true, maxRetries: 2, retryDelay: 100 });
+      removed++;
+    } catch (e) {}
+  }
+  if (removed) console.log(`Removed ${removed} stale browser profile(s) left by earlier runs.`);
+}
+
 async function run() {
   console.log('=== Starting Test Suite ===');
+  await sweepStaleProfiles();
 
   // 1. Check test PDF fixture
   console.log('[1/10] Checking PDF fixture integrity...');
@@ -230,7 +256,7 @@ async function run() {
     throw new Error('No compatible browser (Edge or Chrome) found on this system.');
   }
   console.log(`[8/11] Launching headless browser: ${path.basename(browserBin)}...`);
-  const tempProfile = fs.mkdtempSync(path.join(os.tmpdir(), 'browser-test-profile-'));
+  const tempProfile = fs.mkdtempSync(path.join(os.tmpdir(), PROFILE_PREFIX));
 
   const browserProc = spawn(browserBin, [
     '--headless=new',
