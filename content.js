@@ -1394,66 +1394,53 @@ const popupStyles = `
   .ai-saved-actions button:disabled { opacity: .5; cursor: default; }
   .ai-saved-history summary:focus-visible, .ai-saved-actions button:focus-visible { outline: 2px solid rgba(var(--popup-accent-rgb), 1); outline-offset: 2px; }
   .ai-saved-preview { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow-y: auto; margin-top: 8px; color: var(--popup-text); }
-  /* Split Save button in the toolbar: the main part saves the answer on
-     screen, the arrow opens the list picker. One accent pill divided by a
-     hairline; the list panel anchors to the whole group, not the arrow. */
-  .ai-popup-actions .ai-save-split {
-    position: relative;
-    display: flex;
-    align-items: stretch;
-    margin-left: auto;
-    min-width: 0;
-    height: 34px;
-    box-sizing: border-box;
-    border: 1px solid var(--popup-accent-btn-border);
-    border-radius: 999px;
-    background: var(--popup-accent-btn-bg);
-  }
-  .ai-save-main {
+  /* Per-answer bookmark: saves that one answer to the "Save to" list. */
+  .ai-turn-save-btn {
+    float: right;
+    margin-left: 8px;
+    margin-bottom: 4px;
+    background: rgba(var(--popup-accent-rgb), 0.1);
+    border: 1px solid rgba(var(--popup-accent-rgb), 0.25);
+    color: rgba(var(--popup-accent-rgb), 1);
+    border-radius: 6px;
+    width: 26px;
+    height: 26px;
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    min-width: 0;
-    max-width: 200px;
-    padding: 0 10px 0 13px;
-    border: none;
-    border-radius: 999px 0 0 999px;
-    background: transparent;
-    color: var(--popup-accent-btn-text);
-    font-family: inherit;
-    font-size: 13px;
-    font-weight: 600;
+    justify-content: center;
     cursor: pointer;
-    transition: background-color 140ms ease;
+    padding: 0;
+    transition: all 140ms ease;
+    flex-shrink: 0;
+    line-height: 1;
   }
-  .ai-save-main svg { flex-shrink: 0; }
-  .ai-save-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .ai-save-main:hover:not(:disabled) { background: var(--popup-accent-btn-hover); }
-  .ai-save-main:disabled { opacity: 0.6; cursor: default; }
-  .ai-save-main.is-saved { cursor: default; }
-  .ai-popup-actions .ai-save-split .custom-select-container {
-    position: static;
-    flex: 0 0 auto;
-    min-width: 0;
-    margin: 0;
+  .ai-turn-save-btn:hover {
+    background: rgba(var(--popup-accent-rgb), 0.22);
+    border-color: rgba(var(--popup-accent-rgb), 0.55);
   }
-  .ai-popup-actions .ai-save-split .custom-select {
-    height: 100%;
-    padding: 0 10px 0 8px;
-    border: none;
-    border-left: 1px solid rgba(0, 0, 0, 0.2);
-    border-radius: 0 999px 999px 0;
-    background: transparent;
-    color: var(--popup-accent-btn-text);
+  .ai-turn-save-btn.is-saved {
+    background: rgba(16, 185, 129, 0.15);
+    border-color: #10b981;
+    color: #059669;
+    cursor: default;
   }
-  .ai-popup-actions .ai-save-split .custom-select:hover { background: var(--popup-accent-btn-hover); }
-  .ai-popup-actions .ai-save-split .custom-select-value { display: none; }
-  .ai-popup-actions .ai-save-split .custom-select > span:last-child { margin-left: 0; display: inline-flex; }
-  .ai-popup-actions .ai-save-split .custom-options {
-    left: auto;
-    right: 0;
-    width: 230px;
-    max-width: calc(100vw - 48px);
+  :host([data-theme="dark"]) .ai-turn-save-btn.is-saved {
+    background: rgba(52, 211, 153, 0.18);
+    border-color: #34d399;
+    color: #34d399;
+  }
+
+  /* Toolbar "Save to: <list>" picker: names where the bookmarks save. The
+     prefix sits inside the trigger so the whole pill reads as one phrase. */
+  .ai-popup-actions .ai-save-to .custom-select-value {
+    text-align: left;
+    padding-left: 0;
+    font-weight: 600;
+  }
+  .ai-save-to-prefix {
+    flex-shrink: 0;
+    margin-right: 5px;
+    color: var(--popup-text-muted);
   }
   .ai-compare-turn + .ai-compare-turn,
   .ai-compare-turn + .ai-chat-row,
@@ -4228,12 +4215,12 @@ function appendSavedHistory(instance, turn, slot, msg) {
       update.disabled = !!msg.isSaved || !!msg.historyWritePending;
       const another = button('Save another meaning', () => saveTurnToHistory(instance, slot, msg, another, { allowDuplicate: true }));
       another.disabled = !!msg.isSaved || !!msg.historyWritePending;
-      another.title = 'Save a separate entry in the list chosen next to Save';
+      another.title = 'Save a separate entry in the list chosen in "Save to"';
       entry.append(actions, preview);
       details.appendChild(entry);
     });
     const hint = document.createElement('div');
-    hint.textContent = 'Update keeps the original list. For another meaning, choose its list with the arrow next to Save.';
+    hint.textContent = 'Update keeps the original list. For another meaning, choose its list in "Save to" below.';
     details.appendChild(hint);
     host.appendChild(details);
   };
@@ -4299,6 +4286,13 @@ function saveTurnToHistory(instance, slot, msg, saveBtn, options = {}) {
       showPopupToast(instance, 'Already saved — view, update, or save another meaning');
     } else {
       msg.isSaved = true;
+      if (saveBtn && saveBtn.classList.contains('ai-turn-save-btn')) {
+        saveBtn.disabled = false;
+        saveBtn.classList.add('is-saved');
+        saveBtn.title = 'Saved to list';
+        saveBtn.setAttribute('aria-label', saveBtn.title);
+        saveBtn.innerHTML = iconSvg('bookmarkCheck', 15);
+      }
       const valEl = listSelector && listSelector.querySelector('.custom-select-value');
       const listName = valEl ? valEl.textContent : 'list';
       showPopupToast(instance, options.previousItem ? 'Saved meaning updated' : `Saved to ${listName}`);
@@ -4357,9 +4351,22 @@ function appendCompareConversation(instance, body, slot) {
       if (msg.verification) {
         appendVerificationBadge(turn, msg.verification);
       }
-      // Saving happens from the toolbar's Save button; each finished turn
-      // still discloses where it was saved before.
+      // Every finished answer has its own bookmark, so any turn (the first
+      // answer or any follow-up) can be saved on its own. It saves to the
+      // list chosen in the toolbar's "Save to" picker.
       if (!msg.isStreaming && msg.content) {
+        const saveBtn = document.createElement('button');
+        saveBtn.type = 'button';
+        saveBtn.className = 'ai-turn-save-btn' + (msg.isSaved ? ' is-saved' : '');
+        saveBtn.title = msg.isSaved ? 'Saved to list' : 'Save this answer to the chosen list';
+        saveBtn.setAttribute('aria-label', saveBtn.title);
+        saveBtn.disabled = !!msg.historyWritePending;
+        saveBtn.innerHTML = iconSvg(msg.isSaved ? 'bookmarkCheck' : 'bookmarkPlus', 15);
+        saveBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          saveTurnToHistory(instance, slot, msg, saveBtn);
+        });
+        turn.prepend(saveBtn);
         appendSavedHistory(instance, turn, slot, msg);
       }
     }
@@ -4509,7 +4516,6 @@ function applyCompareScroll(instance, animate) {
   }
 
   updateCompareNav(instance);
-  updateCompareSaveButton(instance);
   ensureCompareSlotLoaded(instance, instance.compareIndex);
   // The lock follows the card in front, so every landing (slide, arrow, dot,
   // wheel — this also runs on each render) must re-evaluate it: arriving on a
@@ -4650,11 +4656,10 @@ function makeCompareSlider(instance, wrapper) {
   }, { passive: false });
 }
 
-// The compare view's shared action row (Read aloud, Save-as-PDF, and one
-// split Save button whose arrow picks the list), seated between the slider
-// and the follow-up box. Every button resolves the card CURRENTLY on screen
-// at click time, so one row serves all models and the cards themselves
-// carry nothing but the answer.
+// The compare view's shared action row (Read aloud, Save-as-PDF, and the
+// "Save to" list picker the answers' bookmarks save into), seated between
+// the slider and the follow-up box. Every button resolves the card
+// CURRENTLY on screen at click time, so one row serves all models.
 function ensureCompareToolbar(instance) {
   const popup = instance.popup;
   if (!popup) return;
@@ -4731,25 +4736,9 @@ function ensureCompareToolbar(instance) {
       saveConversationAsPdf(instance, slot.messages, slot.answerModelName || slot.modelName);
     };
 
-    // --- Save: one split button. The main part saves the answer on screen
-    // to the chosen list; the arrow beside it opens the list picker (same
-    // component + "create new" flow as before, its label hidden because the
-    // Save button already names the list).
-    const saveGroup = document.createElement('div');
-    saveGroup.className = 'ai-save-split';
-    const saveButton = document.createElement('button');
-    saveButton.type = 'button';
-    saveButton.id = 'ai-popup-save-btn';
-    saveButton.className = 'ai-save-main';
-    saveButton.onclick = (e) => {
-      e.stopPropagation();
-      const slot = visibleSlot();
-      const answer = slot && latestCompareAnswer(slot);
-      if (!slot || !answer) { showPopupToast(instance, 'Nothing to save yet — wait for the answer'); return; }
-      saveTurnToHistory(instance, slot, answer, saveButton);
-    };
-    saveGroup.appendChild(saveButton);
-
+    // --- "Save to: <list>" picker (same component + "create new" flow as
+    // before). It only chooses the destination: each answer's own bookmark
+    // does the saving, so any answer can be saved, not just the latest.
     let listSelector;
     function recreateDropdown(listsToUse, currentVal) {
       const previousSelector = listSelector;
@@ -4766,65 +4755,43 @@ function ensureCompareToolbar(instance) {
               } else {
                 showPopupToast(instance, "Failed to create list", 'error');
                 listSelector.value = validListId;
-                updateCompareSaveButton(instance);
               }
             });
           } else {
             listSelector.value = validListId;
           }
         }
-        updateCompareSaveButton(instance);
       }, { showCreateNew: true });
 
+      listSelector.classList.add('ai-save-to');
       const trigger = listSelector.querySelector('.custom-select');
       if (trigger) {
-        trigger.title = 'Choose the list to save to';
-        trigger.setAttribute('role', 'button');
-        trigger.setAttribute('aria-label', 'Choose the list to save to');
+        // The prefix lives outside .custom-select-value, which must hold
+        // only the list name (the "Saved to <list>" toast reads it).
+        const prefix = document.createElement('span');
+        prefix.className = 'ai-save-to-prefix';
+        prefix.textContent = 'Save to:';
+        trigger.prepend(prefix);
+        trigger.setAttribute('aria-label', 'Save to list');
       }
       instance.listSelector = listSelector;
 
       // On re-creation (e.g. after "Create New List"), swap the new dropdown
-      // in where the old one sat.
+      // in where the old one sat. The INITIAL append happens in the ordered
+      // sequence below, so the row reads icons-left, list-right.
       if (previousSelector && previousSelector.parentNode) {
+        listSelector.style.marginLeft = 'auto';
         previousSelector.parentNode.replaceChild(listSelector, previousSelector);
-      } else {
-        saveGroup.appendChild(listSelector);
       }
-      updateCompareSaveButton(instance);
     }
     recreateDropdown(lists, validListId);
 
     actionsContainer.appendChild(speakButton);
     actionsContainer.appendChild(pdfButton);
-    actionsContainer.appendChild(saveGroup);
+    listSelector.style.marginLeft = 'auto';
+    actionsContainer.appendChild(listSelector);
     mount();
-    updateCompareSaveButton(instance);
   });
-}
-
-// Syncs the split Save button with the answer on screen: disabled until
-// there is a finished answer (or while its save is in flight), "Saved" once
-// that answer is in a list, otherwise "Save to <chosen list>".
-function updateCompareSaveButton(instance) {
-  const popup = instance.popup;
-  const button = popup && popup.querySelector('#ai-popup-save-btn');
-  if (!button) return;
-  const slot = (instance.compareSlots || [])[instance.compareIndex || 0] || null;
-  const answer = slot ? latestCompareAnswer(slot) : null;
-  const valueEl = instance.listSelector && instance.listSelector.querySelector('.custom-select-value');
-  const listName = valueEl && instance.listSelector.value !== '__create_new__' ? valueEl.textContent : 'list';
-  const saved = !!(answer && answer.isSaved);
-
-  button.disabled = !answer || !!answer.historyWritePending;
-  button.classList.toggle('is-saved', saved);
-  button.innerHTML = iconSvg(saved ? 'bookmarkCheck' : 'bookmarkPlus', 15);
-  const label = document.createElement('span');
-  label.className = 'ai-save-label';
-  label.textContent = saved ? 'Saved' : `Save to ${listName}`;
-  button.appendChild(label);
-  button.title = saved ? 'This answer is saved'
-    : answer ? `Save this answer to ${listName}` : 'Save becomes available when the answer is ready';
 }
 
 // --- Function to create the model and prompt selectors ---

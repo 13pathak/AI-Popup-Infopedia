@@ -240,32 +240,41 @@ async function run() {
     return { skeleton: !!body.querySelector('.ai-popup-skeleton'), reserved: body.classList.contains('ai-compare-body-reserved') };
   })()`), { skeleton: false, reserved: false }, 'a settled answer releases the reserved height');
 
-  // Toolbar: one split Save button (no per-answer bookmark, no separate list
-  // picker), a read-aloud button distinct from the word's speaker, and a pin
-  // tooltip that says what pinning does. The answer sits on the popup itself.
-  await waitFor(`activePopups.at(-1).popup.querySelector('#ai-popup-save-btn')`, 'split Save button is mounted');
+  // Every answer keeps its own bookmark, so a specific turn (the first answer
+  // or a follow-up) can be saved; the toolbar only picks the list ("Save to:
+  // <list>"). Also: a read-aloud button distinct from the word's speaker, a
+  // pin tooltip that says what pinning does, and no panel around the answer.
+  await waitFor(`activePopups.at(-1).popup.querySelector('.ai-popup-actions .ai-save-to')`, 'Save to picker is mounted');
+  const firstCard = `activePopups.at(-1).popup.querySelectorAll('.ai-compare-card')[0]`;
   assert.deepEqual(await evaluate(`(() => {
-    const popup = activePopups.at(-1).popup, save = popup.querySelector('#ai-popup-save-btn');
+    const popup = activePopups.at(-1).popup, picker = popup.querySelector('.ai-popup-actions .ai-save-to');
     const card = getComputedStyle(popup.querySelector('.ai-compare-card'));
     return {
-      label: save.textContent, disabled: save.disabled,
-      turnButtons: popup.querySelectorAll('.ai-turn-save-btn').length,
-      listPickers: popup.querySelectorAll('.ai-popup-actions .custom-select-container').length,
-      pickerInSplit: !!popup.querySelector('.ai-save-split .custom-select-container'),
+      prefix: picker.querySelector('.ai-save-to-prefix').textContent, list: picker.querySelector('.custom-select-value').textContent,
+      bookmarks: ${firstCard}.querySelectorAll('.ai-turn-save-btn').length, footerSave: !!popup.querySelector('#ai-popup-save-btn'),
       readAloud: popup.querySelector('#ai-popup-speak-btn').title,
       pinMentionsEsc: popup.querySelector('#ai-popup-pin-btn').title.includes('Esc'),
       cardBorder: card.borderTopWidth, cardBackground: card.backgroundColor
     };
   })()`), {
-    label: 'Save to Words', disabled: false, turnButtons: 0, listPickers: 1, pickerInSplit: true,
+    prefix: 'Save to:', list: 'Words', bookmarks: 1, footerSave: false,
     readAloud: 'Read this answer aloud', pinMentionsEsc: true, cardBorder: '0px', cardBackground: 'rgba(0, 0, 0, 0)'
   });
-  await evaluate(`(() => { const popup = activePopups.at(-1).popup; popup.querySelector('.ai-save-split .custom-select').click(); [...popup.querySelectorAll('.ai-save-split .custom-option')].find(option => option.textContent.trim() === 'Phrases').click(); })()`);
-  assert.equal(await evaluate(`activePopups.at(-1).popup.querySelector('#ai-popup-save-btn').textContent`), 'Save to Phrases', 'the arrow picks the list the button names');
-  await evaluate(`activePopups.at(-1).popup.querySelector('#ai-popup-save-btn').click()`);
-  await waitFor(`requests.some(request => request.type === 'saveToHistory')`, 'Save sends the answer on screen');
-  assert.deepEqual(await evaluate(`(() => { const r = requests.find(request => request.type === 'saveToHistory'); return { listId: r.listId, definition: r.definition }; })()`), { listId: 'two', definition: 'Short answer.' });
-  await waitFor(`activePopups.at(-1).popup.querySelector('#ai-popup-save-btn').textContent === 'Saved'`, 'Save shows the saved state');
+  await evaluate(`dispatchFollowupText(activePopups.at(-1), 'More examples')`);
+  await waitFor(`activePopups.at(-1).compareSlots[0].status === 'done' && ${firstCard}.querySelectorAll('.ai-turn-save-btn').length === 2`, 'the follow-up answer gets its own bookmark');
+  await evaluate(`(() => { const picker = activePopups.at(-1).popup.querySelector('.ai-popup-actions .ai-save-to'); picker.querySelector('.custom-select').click(); [...picker.querySelectorAll('.custom-option')].find(option => option.textContent.trim() === 'Phrases').click(); })()`);
+  assert.equal(await evaluate(`activePopups.at(-1).popup.querySelector('.ai-save-to .custom-select-value').textContent`), 'Phrases', 'the footer picks the list');
+  // Save the FIRST answer, not the latest one.
+  await evaluate(`${firstCard}.querySelectorAll('.ai-turn-save-btn')[0].click()`);
+  await waitFor(`requests.some(request => request.type === 'saveToHistory')`, 'the first answer bookmark saves');
+  assert.deepEqual(await evaluate(`(() => { const r = requests.filter(request => request.type === 'saveToHistory')[0]; return { listId: r.listId, word: r.word, definition: r.definition }; })()`),
+    { listId: 'two', word: 'She go to school every day.', definition: 'Short answer.' }, 'an earlier answer saves on its own');
+  await waitFor(`${firstCard}.querySelectorAll('.ai-turn-save-btn')[0].classList.contains('is-saved')`, 'the saved answer shows its saved state');
+  assert.equal(await evaluate(`${firstCard}.querySelectorAll('.ai-turn-save-btn')[1].classList.contains('is-saved')`), false, 'the follow-up answer is still unsaved');
+  await evaluate(`${firstCard}.querySelectorAll('.ai-turn-save-btn')[1].click()`);
+  await waitFor(`requests.filter(request => request.type === 'saveToHistory').length === 2`, 'the follow-up answer bookmark saves');
+  assert.deepEqual(await evaluate(`(() => { const r = requests.filter(request => request.type === 'saveToHistory')[1]; return { word: r.word, definition: r.definition }; })()`),
+    { word: 'She go to school every day.: More examples', definition: 'Use “She goes to school every day.”' }, 'a follow-up answer saves on its own');
   await evaluate(`removeAllPopups(); window.toolbar = showOpenButtonPopup(selectionRect, selectedText, selectionContext); requests.length = 0; toolbar.popup.querySelector('#ai-clip-button-popup').click();`);
   await waitFor(`requests.some(request => request.type === 'saveClip')`, 'Clip remains callable');
   assert.equal(await evaluate('aiRequests().length'), 0, 'Clip does not call AI');
