@@ -68,6 +68,8 @@ async function run() {
     window.changeListeners = [];
     window.requests = [];
     window.errors = [];
+    window.localData = {};
+    window.heldCallbacks = [];
     window.failNextRequest = true;
     window.delayInitialPromptRead = true;
     window.selectedText = 'She go to school every day.';
@@ -80,6 +82,10 @@ async function run() {
         onMessage: { addListener() {} },
         sendMessage(message, callback) {
           requests.push(structuredClone(message));
+          if (message.type === 'getAiDefinition' && window.holdAiRequests) {
+            heldCallbacks.push(callback);
+            return;
+          }
           let response = {};
           if (message.type === 'getAiDefinition') {
             response = failNextRequest ? { error: 'Temporary model error' } : { definition: 'Use “She goes to school every day.”', usedModelName: message.modelId };
@@ -90,7 +96,10 @@ async function run() {
         }
       },
       storage: {
-        local: { get: (defaults, callback) => setTimeout(() => callback(Array.isArray(defaults) ? {} : defaults), 0) },
+        local: {
+          get: (defaults, callback) => setTimeout(() => callback(Array.isArray(defaults) ? {} : { ...defaults, ...localData }), 0),
+          set: (values, callback) => { Object.assign(localData, structuredClone(values)); if (callback) setTimeout(callback, 0); }
+        },
         sync: { get(defaults, callback) {
           const result = Array.isArray(defaults)
             ? Object.fromEntries(defaults.map(key => [key, syncData[key]]))
@@ -147,6 +156,17 @@ async function run() {
     const p = activePopups.at(-1).popup.getBoundingClientRect(), s = lookupRect;
     return p.left < s.right && s.left < p.right && p.top < s.bottom && s.top < p.bottom;
   })()`), false, 'the answer popup does not cover the selected text');
+  // First multi-model popup: the swipe hint sits beside the pager (no toast
+  // over the follow-up box) and is remembered as shown.
+  await waitFor(`activePopups.at(-1).popup.querySelector('.ai-compare-nav .ai-compare-hint')`, 'compare hint appears in the pager row');
+  assert.equal(await evaluate(`activePopups.at(-1).popup.querySelector('.ai-compare-hint').textContent`), 'Swipe or use arrows to compare');
+  assert.equal(await evaluate(`!!activePopups.at(-1).popup.querySelector('.ai-popup-toast')`), false, 'no compare toast');
+  assert.equal(await evaluate('localData.compareHintShown'), true, 'the hint is shown only once');
+  assert.equal(await evaluate(`(() => {
+    const hint = activePopups.at(-1).popup.querySelector('.ai-compare-hint').getBoundingClientRect();
+    const input = activePopups.at(-1).popup.querySelector('#ai-popup-followup-container').getBoundingClientRect();
+    return hint.bottom <= input.top;
+  })()`), true, 'the hint does not cover the follow-up box');
   assert.deepEqual(await evaluate(`(() => { const r = aiRequests()[0]; return { word: r.word, customPrompt: r.customPrompt, context: r.context, modelId: r.modelId }; })()`), {
     word: 'She go to school every day.', customPrompt: grammar.content,
     context: { sentence: 'She go to school every day. She enjoys her classes.', pageTitle: 'Grammar exercise' }, modelId: 'first'
@@ -158,6 +178,7 @@ async function run() {
   assert.equal(await evaluate('aiRequests()[1].customPrompt'), grammar.content, 'Retry retains the prompt');
   await evaluate(`activePopups.at(-1).popup.querySelector('.ai-compare-nav-next').click()`);
   await waitFor(`aiRequests().length === 3 && activePopups.at(-1).compareSlots[1].status === 'done'`, 'next compare model answers on demand');
+  assert.equal(await evaluate(`!!activePopups.at(-1).popup.querySelector('.ai-compare-hint')`), false, 'moving to another model dismisses the hint');
   assert.equal(await evaluate('aiRequests()[2].modelId'), 'second');
   assert.equal(await evaluate('aiRequests()[2].customPrompt'), grammar.content, 'comparison retains the prompt');
   assert.deepEqual(await evaluate('aiRequests()[2].context'), await evaluate('selectionContext'), 'comparison retains context');
@@ -204,10 +225,25 @@ async function run() {
   await waitFor('aiRequests().length === 1', 'edited prompt is callable');
   assert.equal(await evaluate('aiRequests()[0].customPrompt'), renamed.content, 'edited content replaces the previous instruction');
 
-  // The original actions retain their request behavior.
-  await evaluate(`removeAllPopups(); window.toolbar = showOpenButtonPopup(selectionRect, selectedText, selectionContext); requests.length = 0; toolbar.popup.querySelector('#ai-open-button-popup').click();`);
+  // The original actions retain their request behavior. The answer is held
+  // back to inspect the loading state: skeleton lines in a body that already
+  // has the reserved answer height, released once the answer settles.
+  await evaluate(`window.holdAiRequests = true; removeAllPopups(); window.toolbar = showOpenButtonPopup(selectionRect, selectedText, selectionContext); requests.length = 0; toolbar.popup.querySelector('#ai-open-button-popup').click();`);
   await waitFor('aiRequests().length === 1', 'Ask AI remains callable');
   assert.equal(await evaluate(`Object.hasOwn(aiRequests()[0], 'customPrompt')`), false, 'Ask AI inherits the configured default');
+  await waitFor(`activePopups.at(-1).popup.querySelector('.ai-compare-card .ai-popup-skeleton')`, 'loading card shows skeleton lines');
+  assert.deepEqual(await evaluate(`(() => {
+    const body = activePopups.at(-1).popup.querySelector('.ai-compare-card .ai-compare-body');
+    const label = body.querySelector('.ai-popup-loading-text');
+    return { reserved: body.classList.contains('ai-compare-body-reserved'), tall: body.offsetHeight >= Math.min(innerHeight * 0.38, 260) - 1, label: !!label && label.textContent.length > 0 };
+  })()`), { reserved: true, tall: true, label: true }, 'the waiting body holds the answer height and keeps its status text');
+  assert.equal(await evaluate(`!!activePopups.at(-1).popup.querySelector('.ai-compare-hint')`), false, 'later popups do not repeat the hint');
+  await evaluate(`window.holdAiRequests = false; heldCallbacks.splice(0).forEach(callback => callback({ definition: 'Short answer.', usedModelName: 'first' }));`);
+  await waitFor(`activePopups.at(-1).compareSlots[0].status === 'done'`, 'held answer settles');
+  assert.deepEqual(await evaluate(`(() => {
+    const body = activePopups.at(-1).popup.querySelector('.ai-compare-card .ai-compare-body');
+    return { skeleton: !!body.querySelector('.ai-popup-skeleton'), reserved: body.classList.contains('ai-compare-body-reserved') };
+  })()`), { skeleton: false, reserved: false }, 'a settled answer releases the reserved height');
   await evaluate(`removeAllPopups(); window.toolbar = showOpenButtonPopup(selectionRect, selectedText, selectionContext); requests.length = 0; toolbar.popup.querySelector('#ai-clip-button-popup').click();`);
   await waitFor(`requests.some(request => request.type === 'saveClip')`, 'Clip remains callable');
   assert.equal(await evaluate('aiRequests().length'), 0, 'Clip does not call AI');

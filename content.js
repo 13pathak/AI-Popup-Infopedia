@@ -158,6 +158,7 @@ const popupStyles = `
     --popup-role-ai: #2dd4bf; /* mint accent */
     --popup-link-color: #a5d6ff;
     --popup-error-text: #f87171;
+    --popup-skeleton: rgba(255, 255, 255, 0.09);
     color-scheme: dark;
   }
 
@@ -190,6 +191,7 @@ const popupStyles = `
     --popup-role-ai: #0d9488;
     --popup-link-color: #0284c7;
     --popup-error-text: #dc2626;
+    --popup-skeleton: rgba(15, 23, 42, 0.08);
     color-scheme: light;
   }
 
@@ -223,6 +225,7 @@ const popupStyles = `
       --popup-role-ai: #0d9488;
       --popup-link-color: #0284c7;
       --popup-error-text: #dc2626;
+      --popup-skeleton: rgba(15, 23, 42, 0.08);
       color-scheme: light;
     }
   }
@@ -288,6 +291,33 @@ const popupStyles = `
   }
   .ai-popup-loading-text {
     display: inline-block;
+  }
+
+  /* Skeleton lines under the loading label: they hold the space the answer
+     will fill, so the card does not jump from one line to a full answer.
+     Clipped to the reserved height with a soft fade instead of a hard cut. */
+  .ai-popup-skeleton {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding-top: 12px;
+    max-height: calc(var(--ai-answer-reserve) - 40px);
+    overflow: hidden;
+    -webkit-mask-image: linear-gradient(to bottom, #000 75%, transparent);
+    mask-image: linear-gradient(to bottom, #000 75%, transparent);
+    animation: ai-popup-skeleton-pulse 1.6s ease-in-out infinite;
+  }
+  .ai-popup-skeleton-line {
+    display: block;
+    height: 9px;
+    border-radius: 5px;
+    background: var(--popup-skeleton);
+    flex-shrink: 0;
+  }
+  .ai-popup-skeleton-gap { height: 4px; flex-shrink: 0; }
+  @keyframes ai-popup-skeleton-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.45; }
   }
 
   /* --- Toast (save feedback, STT/speech errors) --- */
@@ -1343,6 +1373,11 @@ const popupStyles = `
     padding-right: 4px;
     overflow-wrap: break-word;
   }
+  /* Until a card's first answer settles, its body keeps the height of a
+     typical answer: the skeleton fills it while waiting, and the streaming
+     text grows into it instead of stretching the card line by line. */
+  .ai-compare-card { --ai-answer-reserve: min(38vh, 260px); }
+  .ai-compare-body.ai-compare-body-reserved { min-height: var(--ai-answer-reserve); }
   .ai-compare-body::-webkit-scrollbar { width: 8px; }
   .ai-compare-body::-webkit-scrollbar-track { background: transparent; }
   .ai-compare-body::-webkit-scrollbar-thumb {
@@ -1512,11 +1547,31 @@ const popupStyles = `
     line-height: 1;
     user-select: none;
   }
+  .ai-compare-hint {
+    min-width: 0;
+    margin-left: 4px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    background: rgba(var(--popup-accent-rgb), 0.1);
+    color: var(--popup-text);
+    font-size: 11px;
+    line-height: 1.3;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    animation: ai-compare-hint-in 220ms ease-out;
+  }
+  @keyframes ai-compare-hint-in {
+    from { opacity: 0; transform: translateX(-4px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
 
   /* --- Reduced motion: show elements at rest, no enter/bounce/pulse --- */
   @media (prefers-reduced-motion: reduce) {
     #ai-definition-popup,
     .ai-popup-loading-dot,
+    .ai-popup-skeleton,
+    .ai-compare-hint,
     .ai-compare-dot.streaming,
     .ai-popup-toast,
     .ai-popup-followup-mic.recording,
@@ -2778,7 +2833,8 @@ function cleanupStreamHandlersFor(instance) {
 
 // --- NEW: Loading indicator markup ---
 // The label is message/model text, never trusted HTML, so escape it here.
-function buildLoadingHtml(label) {
+// withSkeleton adds placeholder lines where the answer will appear.
+function buildLoadingHtml(label, withSkeleton) {
   const quoteText = (label && label !== 'Loading...' && label !== 'Thinking...') ? label : getNextLoadingQuote();
   const safeLabel = String(quoteText)
     .replace(/&/g, '&amp;')
@@ -2786,7 +2842,21 @@ function buildLoadingHtml(label) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
-  return `<div class="ai-popup-loading"><span class="ai-popup-loading-dots"><span class="ai-popup-loading-dot"></span><span class="ai-popup-loading-dot"></span><span class="ai-popup-loading-dot"></span></span><span class="ai-popup-loading-text">${safeLabel}</span></div>`;
+  const loading = `<div class="ai-popup-loading"><span class="ai-popup-loading-dots"><span class="ai-popup-loading-dot"></span><span class="ai-popup-loading-dot"></span><span class="ai-popup-loading-dot"></span></span><span class="ai-popup-loading-text">${safeLabel}</span></div>`;
+  return withSkeleton ? loading + buildSkeletonHtml() : loading;
+}
+
+// Line widths read like a short definition: a lead line, a paragraph, then
+// a list. Compare cards re-render while waiting, so the pulse is phased to
+// the clock (negative delay) — a rebuilt skeleton continues the same beat
+// instead of restarting it.
+const SKELETON_LINE_WIDTHS = [46, 100, 94, 97, 71, null, 88, 79, 92, 64];
+function buildSkeletonHtml() {
+  const phase = Math.round(performance.now() % 1600);
+  const lines = SKELETON_LINE_WIDTHS.map(w => w === null
+    ? '<span class="ai-popup-skeleton-gap"></span>'
+    : `<span class="ai-popup-skeleton-line" style="width:${w}%"></span>`).join('');
+  return `<div class="ai-popup-skeleton" aria-hidden="true" style="animation-delay:-${phase}ms">${lines}</div>`;
 }
 
 // --- UPDATED showPopup ---
@@ -3301,12 +3371,12 @@ function startCompareLookup(instance, word, customPrompt) {
   if (followupInput) followupInput.disabled = true;
   if (followupSend) followupSend.disabled = true;
 
-  if (models.length === 1) {
-    // One card, nothing to swipe to — no toast, the card is just the answer.
-  } else if (allModels.length > COMPARE_MODEL_CAP) {
-    showPopupToast(instance, `Comparing the first ${COMPARE_MODEL_CAP} of ${allModels.length} models — swipe for more`);
-  } else {
-    showPopupToast(instance, `Swipe or use arrows to compare ${models.length} models`);
+  // One card has nothing to swipe to. Otherwise a one-time hint sits beside
+  // the pager (a toast here covered the follow-up box and send button).
+  if (models.length > 1) {
+    showCompareHintOnce(instance, allModels.length > COMPARE_MODEL_CAP
+      ? `First ${COMPARE_MODEL_CAP} of ${allModels.length} models · swipe for more`
+      : 'Swipe or use arrows to compare');
   }
 
   // Lazy fan-out: only the primary model is asked up front.
@@ -3978,6 +4048,10 @@ function buildCompareCard(instance, card, slot) {
   // a failure keeps the prior turns visible above its Retry row.
   const body = document.createElement('div');
   body.className = 'ai-compare-body';
+  const inFlight = slot.status === 'streaming' || slot.status === 'waiting';
+  const hasSettledAnswer = slot.messages.some(m => m && m.role === 'assistant' &&
+    !m.isThinking && !m.isStatus && !m.isStreaming && !m.isError);
+  if (inFlight && !hasSettledAnswer) body.classList.add('ai-compare-body-reserved');
   body.addEventListener('scroll', () => {
     // Preserve manual reading position across stream re-renders
     slot.bodyScrollTop = body.scrollTop;
@@ -4257,7 +4331,7 @@ function appendCompareConversation(instance, body, slot) {
       markedFollowupAnchor = true;
     }
     if (msg.isThinking || msg.isStatus) {
-      turn.innerHTML = buildLoadingHtml(msg.content);
+      turn.innerHTML = buildLoadingHtml(msg.content, !!msg.isThinking);
     } else {
       turn.innerHTML = renderMarkdownHtml(String(msg.content || ''));
       if (!msg.isStreaming && Array.isArray(msg.citations) && msg.citations.length > 0) {
@@ -4291,7 +4365,7 @@ function appendCompareConversation(instance, body, slot) {
   // actually expected — a card that failed its FIRST question has nothing in
   // flight, and animated dots above the error would read as a contradiction.
   if (!drewAny && slot.status !== 'error') {
-    body.insertAdjacentHTML('beforeend', buildLoadingHtml('Thinking...'));
+    body.insertAdjacentHTML('beforeend', buildLoadingHtml('Thinking...', true));
     return;
   }
   // One-click follow-up chips close out the conversation — rendered only
@@ -4352,13 +4426,47 @@ function buildCompareNav(instance) {
   nav.appendChild(dots);
   nav.appendChild(counter);
   nav.appendChild(next);
+  if (instance.compareHint) nav.appendChild(buildCompareHint(instance.compareHint));
   return nav;
+}
+
+// --- One-time "how to compare" hint beside the pager ---
+// Shown on the first multi-model popup only (a flag in local storage), and
+// dismissed as soon as the user moves to another card — at that point they
+// know how the slider works.
+const COMPARE_HINT_SHOWN_KEY = 'compareHintShown';
+
+function buildCompareHint(text) {
+  const hint = document.createElement('span');
+  hint.className = 'ai-compare-hint';
+  hint.textContent = text;
+  return hint;
+}
+
+function showCompareHintOnce(instance, text) {
+  chrome.storage.local.get({ [COMPARE_HINT_SHOWN_KEY]: false }, (data) => {
+    if (chrome.runtime.lastError || !data || data[COMPARE_HINT_SHOWN_KEY]) return;
+    if (!activePopups.includes(instance) || !instance.compareSlots || instance.compareSlots.length < 2) return;
+    chrome.storage.local.set({ [COMPARE_HINT_SHOWN_KEY]: true }, () => { void chrome.runtime.lastError; });
+    instance.compareHint = text;
+    const nav = instance.popup && instance.popup.querySelector('.ai-compare-nav');
+    if (nav && !nav.querySelector('.ai-compare-hint')) nav.appendChild(buildCompareHint(text));
+  });
+}
+
+function dismissCompareHint(instance) {
+  if (!instance.compareHint) return;
+  instance.compareHint = null;
+  const hint = instance.popup && instance.popup.querySelector('.ai-compare-hint');
+  if (hint) hint.remove();
 }
 
 function slideCompareTo(instance, index, animate) {
   if (!instance.compareSlots || instance.compareSlots.length === 0) return;
   const n = instance.compareSlots.length;
-  instance.compareIndex = Math.max(0, Math.min(index, n - 1));
+  const target = Math.max(0, Math.min(index, n - 1));
+  if (target !== (instance.compareIndex || 0)) dismissCompareHint(instance);
+  instance.compareIndex = target;
   applyCompareScroll(instance, animate);
 }
 
