@@ -298,6 +298,14 @@ const popupStyles = `
      default 38vh cap. The body stays the scroller, so stream re-renders
      keep the reading position. */
   #ai-definition-popup.is-resized .ai-compare-body { max-height: var(--ai-answer-max, 38vh); }
+  /* The loading reserve never asks for more than that room either, or the
+     card would overflow the content area and the skeleton be clipped. */
+  #ai-definition-popup.is-resized .ai-compare-body.ai-compare-body-reserved {
+    min-height: min(var(--ai-answer-reserve), var(--ai-answer-max, 100vh));
+  }
+  #ai-definition-popup.is-resized .ai-popup-skeleton {
+    max-height: calc(min(var(--ai-answer-reserve), var(--ai-answer-max, 100vh)) - 40px);
+  }
   /* ...which needs the content area to take the popup's spare height (it
      only shrinks in an auto-height popup), keeping the pager, toolbar,
      chips and input at the bottom. */
@@ -3301,31 +3309,8 @@ function makePopupResizable(instance) {
     chrome.storage.local.remove('popupSize', () => { void chrome.runtime.lastError; });
   });
 
-  // The compare slider positions cards by the viewport's pixel width and
-  // sizes itself to the visible card, so a width change (this grip, or the
-  // window narrowing) must re-run that layout — once per frame at most. A
-  // user-sized popup also re-fits its answer height when its height changes
-  // (an auto-height popup's height follows its content, so not then).
-  if (typeof ResizeObserver === 'function') {
-    let lastWidth = 0;
-    let lastHeight = 0;
-    let framePending = false;
-    new ResizeObserver((entries) => {
-      const box = entries[0] && entries[0].contentRect;
-      if (!box || !box.width) return;
-      const widthChanged = box.width !== lastWidth;
-      const heightChanged = popup.classList.contains('is-resized') && box.height !== lastHeight;
-      lastWidth = box.width;
-      lastHeight = box.height;
-      if (!widthChanged && !heightChanged) return;
-      if (framePending) return;
-      framePending = true;
-      requestAnimationFrame(() => {
-        framePending = false;
-        if (activePopups.includes(instance) && instance.compareSlots) applyCompareScroll(instance, false);
-      });
-    }).observe(popup);
-  }
+  // Re-fitting the compare slider to the new size is observeCompareLayout's
+  // job: it watches the popup's size too.
 }
 
 // --- Markdown rendering (shared by the popup and the PDF export) ---
@@ -3722,6 +3707,10 @@ function startCompareLookup(instance, word, customPrompt) {
   // Lazy fan-out: only the primary model is asked up front.
   // Other models answer on demand as soon as you slide to their card.
   ensureCompareSlotLoaded(instance, 0);
+  // The first card is usually asked during the render above, before the
+  // follow-up box existed, so its lock and Stop button were never applied;
+  // settle them now that the box is there.
+  updateCompareFollowupState(instance, false);
 }
 
 // Asks one model on demand (first visit of its card, or a retry elsewhere).
@@ -4866,36 +4855,10 @@ function applyCompareScroll(instance, animate) {
   if (!viewport || !track || !instance.compareSlots) return;
   const n = instance.compareSlots.length;
   instance.compareIndex = Math.max(0, Math.min(instance.compareIndex || 0, n - 1));
-  const cardWidth = viewport.clientWidth || 1;
   track.classList.toggle('animating', !!animate);
   viewport.classList.toggle('animating', !!animate);
-  track.style.transform = `translateX(${-(instance.compareIndex || 0) * cardWidth}px)`;
-
-  // Dynamically adapt viewport height to the active card so cards hug their content
-  const cards = track.querySelectorAll('.ai-compare-card');
-  const activeCard = cards[instance.compareIndex];
-  // In a user-sized popup the answer body fills whatever height the content
-  // area has: that height minus the card's own header/actions.
-  if (activeCard && popup.classList.contains('is-resized')) {
-    const contentEl = popup.querySelector('#ai-popup-content');
-    const activeBody = activeCard.querySelector('.ai-compare-body');
-    if (contentEl && activeBody) {
-      const cardChrome = activeCard.offsetHeight - activeBody.offsetHeight;
-      popup.style.setProperty('--ai-answer-max', `${Math.max(80, contentEl.clientHeight - cardChrome - 4)}px`);
-    }
-  }
-  if (activeCard) {
-    const cardHeight = activeCard.offsetHeight;
-    if (cardHeight > 0) {
-      viewport.style.height = `${cardHeight}px`;
-    } else {
-      requestAnimationFrame(() => {
-        if (activeCard && activeCard.isConnected && activeCard.offsetHeight > 0) {
-          viewport.style.height = `${activeCard.offsetHeight}px`;
-        }
-      });
-    }
-  }
+  layoutCompareTrack(instance);
+  observeCompareLayout(instance);
 
   updateCompareNav(instance);
   updateCompareSaveButton(instance);
@@ -4905,6 +4868,70 @@ function applyCompareScroll(instance, animate) {
   // wheel — this also runs on each render) must re-evaluate it: arriving on a
   // still-answering card locks the box, returning to a finished one reopens it.
   updateCompareFollowupState(instance, false);
+}
+
+// Positions the track on the current card and sizes the viewport to it:
+// the slider moves by the viewport's pixel width, and the viewport hugs the
+// visible card's height. A user-sized popup also caps the answer body at the
+// room its content area has (--ai-answer-max). Pure layout — safe to re-run
+// whenever a size changes (observeCompareLayout).
+function layoutCompareTrack(instance) {
+  const popup = instance.popup;
+  const viewport = popup && popup.querySelector('.ai-compare-viewport');
+  const track = popup && popup.querySelector('.ai-compare-track');
+  if (!viewport || !track || !instance.compareSlots) return;
+  const cardWidth = viewport.clientWidth || 1;
+  track.style.transform = `translateX(${-(instance.compareIndex || 0) * cardWidth}px)`;
+
+  const activeCard = track.querySelectorAll('.ai-compare-card')[instance.compareIndex || 0];
+  if (!activeCard) return;
+  if (popup.classList.contains('is-resized')) {
+    const contentEl = popup.querySelector('#ai-popup-content');
+    const activeBody = activeCard.querySelector('.ai-compare-body');
+    if (contentEl && activeBody) {
+      const cardChrome = activeCard.offsetHeight - activeBody.offsetHeight;
+      popup.style.setProperty('--ai-answer-max', `${Math.max(80, contentEl.clientHeight - cardChrome - 4)}px`);
+    }
+  }
+  const cardHeight = activeCard.offsetHeight;
+  if (cardHeight > 0 && viewport.style.height !== `${cardHeight}px`) {
+    viewport.style.height = `${cardHeight}px`;
+  }
+}
+
+// The viewport's height is a measured pixel value, so it must follow every
+// later size change, not only renders: the footer and toolbar mount after
+// the first card is drawn (shrinking a user-sized popup's content area),
+// the window or the popup gets resized, fonts settle. One observer per popup
+// watches the popup, its content area and the visible card, and re-runs the
+// layout at most once per frame. Without it the first answer's skeleton was
+// measured too early and clipped out of view.
+function observeCompareLayout(instance) {
+  const popup = instance.popup;
+  if (!popup || typeof ResizeObserver !== 'function') return;
+  if (!instance.compareLayoutObserver) {
+    let framePending = false;
+    instance.compareLayoutObserver = new ResizeObserver(() => {
+      if (framePending) return;
+      framePending = true;
+      requestAnimationFrame(() => {
+        framePending = false;
+        if (activePopups.includes(instance) && instance.compareSlots && !instance.compareDragActive) {
+          layoutCompareTrack(instance);
+        }
+      });
+    });
+  }
+  const observer = instance.compareLayoutObserver;
+  const content = popup.querySelector('#ai-popup-content');
+  const activeCard = popup.querySelectorAll('.ai-compare-track .ai-compare-card')[instance.compareIndex || 0];
+  if (instance.compareObservedCard === activeCard && instance.compareObservedContent === content) return;
+  observer.disconnect();
+  observer.observe(popup);
+  if (content) observer.observe(content);
+  if (activeCard) observer.observe(activeCard);
+  instance.compareObservedCard = activeCard;
+  instance.compareObservedContent = content;
 }
 
 function updateCompareNav(instance) {

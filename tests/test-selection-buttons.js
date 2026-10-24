@@ -109,7 +109,7 @@ async function run() {
           if (delayInitialPromptRead && Object.hasOwn(defaults, 'customPrompts') && Object.hasOwn(defaults, 'uiTheme')) {
             delayInitialPromptRead = false;
             window.finishInitialPromptRead = () => callback(snapshot);
-          } else setTimeout(() => callback(snapshot), 0);
+          } else setTimeout(() => callback(snapshot), window.syncDelay || 0);
         } },
         onChanged: { addListener: listener => changeListeners.push(listener) }
       }
@@ -237,6 +237,28 @@ async function run() {
   // The original actions retain their request behavior. The answer is held
   // back to inspect the loading state: skeleton lines in a body that already
   // has the reserved answer height, released once the answer settles.
+  // Real-extension timing: settings arrive a few frames late and the popup
+  // opens at a remembered (resized) size. The first answer's skeleton must
+  // stay in view — the viewport was measured before the footer mounted and
+  // left shorter than the card, clipping it — and the input must be locked
+  // with Stop showing while the model answers.
+  await evaluate(`window.syncDelay = 120; savedPopupSize = { width: 330, height: 490 }; window.holdAiRequests = true; removeAllPopups(); window.toolbar = showOpenButtonPopup(selectionRect, selectedText, selectionContext); requests.length = 0; toolbar.popup.querySelector('#ai-open-button-popup').click();`);
+  await waitFor(`aiRequests().length === 1 && activePopups.at(-1).popup.querySelector('.ai-compare-card .ai-popup-skeleton') && activePopups.at(-1).popup.querySelector('#ai-popup-followup-input')`, 'slow-settings lookup shows the loading card');
+  await new Promise(resolve => setTimeout(resolve, 400)); // footer, toolbar and layout settle
+  assert.deepEqual(await evaluate(`(() => {
+    const p = activePopups.at(-1).popup, viewport = p.querySelector('.ai-compare-viewport'), card = p.querySelector('.ai-compare-card');
+    const skeleton = p.querySelector('.ai-popup-skeleton').getBoundingClientRect(), view = viewport.getBoundingClientRect();
+    return {
+      resized: p.classList.contains('is-resized'),
+      cardFits: viewport.offsetHeight >= card.offsetHeight - 1,
+      skeletonInView: skeleton.height > 40 && skeleton.top < view.bottom - 40,
+      locked: p.querySelector('#ai-popup-followup-input').disabled,
+      stop: p.querySelector('.ai-popup-followup-stop').style.display !== 'none',
+      mic: p.querySelector('.ai-popup-followup-mic').style.display !== 'none'
+    };
+  })()`), { resized: true, cardFits: true, skeletonInView: true, locked: true, stop: true, mic: false }, 'first answer: skeleton in view, input locked, Stop shown');
+  await evaluate(`window.syncDelay = 0; savedPopupSize = null; heldCallbacks.splice(0); window.holdAiRequests = false; removeAllPopups();`);
+
   await evaluate(`window.holdAiRequests = true; removeAllPopups(); window.toolbar = showOpenButtonPopup(selectionRect, selectedText, selectionContext); requests.length = 0; toolbar.popup.querySelector('#ai-open-button-popup').click();`);
   await waitFor('aiRequests().length === 1', 'Ask AI remains callable');
   assert.equal(await evaluate(`Object.hasOwn(aiRequests()[0], 'customPrompt')`), false, 'Ask AI inherits the configured default');
