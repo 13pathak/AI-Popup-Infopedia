@@ -461,6 +461,68 @@ async function run() {
     unnamed: 'Checked by your verification model: no problems found.'
   }, 'verification shows as a compact badge, with the full box only for possible errors');
 
+  // The line above the answer: comparing models it names the model, a
+  // finished answer shows no "done", and there is no trailing bullet. With
+  // one model the name only appears when a fallback model answered, and
+  // the line appears only while answering or after a failure.
+  assert.deepEqual(await evaluate(`(() => {
+    const instance = activePopups.at(-1), popup = instance.popup;
+    const header = popup.querySelectorAll('.ai-compare-card')[instance.compareIndex || 0].querySelector('.ai-compare-header');
+    const compare = {
+      name: header.querySelector('.ai-compare-model').textContent,
+      status: !!header.querySelector('.ai-compare-status'),
+      bullet: getComputedStyle(header.querySelector('.ai-compare-model'), '::after').content,
+      padding: getComputedStyle(header).paddingRight
+    };
+    const slot = instance.compareSlots[instance.compareIndex || 0];
+    const single = (overrides) => {
+      const all = instance.compareSlots;
+      instance.compareSlots = [slot];
+      const card = document.createElement('div');
+      try { buildCompareCard(instance, card, { ...slot, ...overrides }); } finally { instance.compareSlots = all; }
+      const h = card.querySelector('.ai-compare-header');
+      return h ? { name: h.querySelector('.ai-compare-model')?.textContent || null, title: h.querySelector('.ai-compare-model')?.title || null, status: h.querySelector('.ai-compare-status')?.textContent || null } : null;
+    };
+    return {
+      compare,
+      singleDone: single({}),
+      singleFallback: single({ answerModelName: 'Backup model', answerModelId: 'backup' }),
+      singleAnswering: single({ status: 'streaming', pendingFollowups: [] }),
+      singleFailed: single({ status: 'error', stopped: false })
+    };
+  })()`), {
+    compare: { name: 'first', status: false, bullet: 'none', padding: '2px' },
+    singleDone: null,
+    singleFallback: { name: 'Backup model', title: 'Answered by Backup model', status: null },
+    singleAnswering: { name: null, title: null, status: 'answering…' },
+    singleFailed: { name: null, title: null, status: 'failed' }
+  }, 'the line above the answer says only what the picker does not');
+
+  // Model dots: a 12 x 24 click area around a dot that still looks 6px wide
+  // (16px for the current model).
+  assert.deepEqual(await evaluate(`(() => {
+    const dots = [...activePopups.at(-1).popup.querySelectorAll('.ai-compare-dotnav')];
+    return dots.map(d => {
+      const r = d.getBoundingClientRect();
+      return { hit: r.width >= 12 && r.height >= 24, drawn: getComputedStyle(d, '::before').width, active: d.classList.contains('active') };
+    });
+  })()`), [{ hit: true, drawn: '16px', active: true }, { hit: true, drawn: '6px', active: false }], 'model dots are easy to hit and look the same');
+
+  // Cards are spaced apart, so the next card never touches the viewport's
+  // clipping edge, and a slide still lands exactly on the next card.
+  assert.deepEqual(await evaluate(`(() => {
+    const instance = activePopups.at(-1), popup = instance.popup;
+    const viewport = () => popup.querySelector('.ai-compare-viewport').getBoundingClientRect();
+    const card = i => popup.querySelectorAll('.ai-compare-card')[i].getBoundingClientRect();
+    const restingGap = Math.round(card(1).left - viewport().right);
+    instance.compareIndex = 1;
+    layoutCompareTrack(instance);
+    const secondAligned = Math.abs(card(1).left - viewport().left) < 0.5;
+    instance.compareIndex = 0;
+    layoutCompareTrack(instance);
+    return { restingGap, secondAligned, firstAligned: Math.abs(card(0).left - viewport().left) < 0.5 };
+  })()`), { restingGap: 16, secondAligned: true, firstAligned: true }, 'cards sit a gap apart and slides land on them');
+
   // Resize: dragging the bottom-left grip grows the popup left and down
   // (right edge fixed), saves the size, new popups open at it, and a
   // double-click on the grip returns to the default size.

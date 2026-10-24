@@ -1487,9 +1487,14 @@ const popupStyles = `
   .ai-compare-viewport.animating {
     transition: height 200ms ease-out;
   }
+  /* The gap keeps each neighbouring card off the viewport's clipping edge:
+     at fractional display scales (150%) a card starting exactly on the edge
+     bled half a pixel of its status dot into view. The slider steps by
+     card width + this gap (compareSlideStep reads it from here). */
   .ai-compare-track {
     display: flex;
     align-items: flex-start;
+    gap: 16px;
     width: 100%;
     will-change: transform;
   }
@@ -1503,14 +1508,20 @@ const popupStyles = `
     display: flex;
     flex-direction: column;
   }
+  /* The line above the answer: the model's name only when it adds something
+     (comparing models, or a fallback model answered), and a status only
+     while answering, not asked yet, or failed. The right padding keeps the
+     status clear of the slider's clipping edge. */
   .ai-compare-header {
     display: flex;
     align-items: center;
     gap: 7px;
     margin-bottom: 8px;
+    padding-right: 2px;
     min-width: 0;
     flex-shrink: 0;
   }
+  .ai-compare-header.no-name .ai-compare-status { margin-left: 0; }
   .ai-compare-dot {
     width: 7px;
     height: 7px;
@@ -1534,11 +1545,6 @@ const popupStyles = `
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .ai-compare-model::after {
-    content: '•';
-    margin-left: 7px;
-    opacity: 0.45;
-  }
   .ai-compare-status {
     margin-left: auto;
     font-size: 11.5px;
@@ -1549,7 +1555,6 @@ const popupStyles = `
     flex-shrink: 0;
   }
   .ai-compare-status svg { opacity: 0.9; flex-shrink: 0; }
-  .ai-compare-status.is-done svg { color: rgba(52, 211, 153, 1); opacity: 1; }
   .ai-compare-status.is-error { color: var(--popup-error-text); }
   .ai-compare-status.is-error svg { opacity: 1; }
   .ai-compare-body {
@@ -1766,23 +1771,35 @@ const popupStyles = `
   .ai-compare-dots {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
   }
+  /* Each dot is a 12 x 24 button (the row is already as tall as the arrows)
+     around the 6px dot drawn by ::before: easy to hit, no bigger to look at. */
   .ai-compare-dotnav {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 12px;
+    height: 24px;
+    padding: 0 3px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+  }
+  .ai-compare-dotnav::before {
+    content: '';
+    box-sizing: border-box;
     width: 6px;
     height: 6px;
     border-radius: 50%;
     border: 1px solid var(--popup-field-border);
     background: var(--popup-field-bg);
-    padding: 0;
-    cursor: pointer;
     transition: all 150ms ease;
   }
-  .ai-compare-dotnav.done { border-color: rgba(52, 211, 153, 0.8); }
-  .ai-compare-dotnav.error { border-color: var(--popup-error-text); }
-  .ai-compare-dotnav.active {
+  .ai-compare-dotnav.done::before { border-color: rgba(52, 211, 153, 0.8); }
+  .ai-compare-dotnav.error::before { border-color: var(--popup-error-text); }
+  .ai-compare-dotnav:not(.active):hover::before { border-color: rgba(var(--popup-accent-rgb), 0.9); }
+  .ai-compare-dotnav.active::before {
     width: 16px;
-    height: 6px;
     border-radius: 999px;
     background: rgba(var(--popup-accent-rgb), 0.9);
     border-color: transparent;
@@ -3770,6 +3787,7 @@ function startCompareLookup(instance, word, customPrompt) {
     settled: false,
     errorText: null,
     answerModelName: null,  // who actually answered (set from the response)
+    answerModelId: null,    // its id: differs from modelId when a fallback answered
     promptName: null,
     lastRequest: null,
     bodyPinned: false
@@ -3900,7 +3918,7 @@ function runCompareFollowup(instance, promptToSend, displayText) {
     instance.compareFirstMessages = [{ role: 'user', content: promptToSend, displayContent: displayText }];
     instance.compareSlots = models.map(m => ({
       modelId: m.id, modelName: m.name, messages: [], started: false, status: 'idle',
-      settled: false, errorText: null, answerModelName: null, promptName: null, lastRequest: null, bodyPinned: false
+      settled: false, errorText: null, answerModelName: null, answerModelId: null, promptName: null, lastRequest: null, bodyPinned: false
     }));
     instance.isLoading = true;
     startLoadingQuoteRotation(instance);
@@ -4048,6 +4066,7 @@ function settleCompareSlot(instance, slot, response) {
     slot.status = 'done';
     slot.errorText = null;
     slot.answerModelName = response.usedModelName || slot.modelName;
+    slot.answerModelId = response.usedModelId || slot.modelId;
     slot.promptName = response.promptName || slot.promptName;
     const assistantMsg = { role: 'assistant', content: response.definition, citations: response.citations || [], followupId: slot.latestFollowupId };
     // Issue #35: contextual chips the model piggybacked onto this reply
@@ -4539,26 +4558,19 @@ function renderCompareView(instance) {
 // Cards of never-visited models render a quiet "not asked yet" placeholder —
 // sliding onto the card asks the model and replaces it.
 function buildCompareCard(instance, card, slot) {
-  // --- Card header: status dot, model name, state chip ---
-  const header = document.createElement('div');
-  header.className = 'ai-compare-header';
-
-  const dot = document.createElement('span');
-  dot.className = 'ai-compare-dot ' + (slot.status === 'done' ? 'done' : slot.status === 'error' ? 'error' : slot.status === 'streaming' || slot.status === 'waiting' ? 'streaming' : '');
-  header.appendChild(dot);
-
-  const name = document.createElement('span');
-  name.className = 'ai-compare-model';
-  name.textContent = slot.answerModelName || slot.modelName;
-  name.title = name.textContent;
-  header.appendChild(name);
+  // --- Card header: status dot, model name, state ---
+  // The name only says something new when models are being compared, or
+  // when a fallback model answered instead of the one in the picker; a
+  // finished answer needs no "done". With nothing to say the header is
+  // left out and the answer starts at the top of the card.
+  const comparing = (instance.compareSlots || []).length > 1;
+  const answeredBy = slot.answerModelName || slot.modelName;
+  const fellBack = !!slot.answerModelId && slot.answerModelId !== slot.modelId;
+  const showName = comparing || fellBack;
 
   const status = document.createElement('span');
   status.className = 'ai-compare-status';
-  if (slot.status === 'done') {
-    status.classList.add('is-done');
-    status.innerHTML = iconSvg('checkCircle', 12) + '<span>done</span>';
-  } else if (slot.status === 'error') {
+  if (slot.status === 'error') {
     status.classList.add('is-error');
     status.innerHTML = iconSvg('xCircle', 12) + '<span>' + (slot.stopped ? 'stopped' : 'failed') + '</span>';
   } else if (slot.status === 'streaming' || slot.status === 'waiting') {
@@ -4568,11 +4580,29 @@ function buildCompareCard(instance, card, slot) {
     // instead of the question feeling swallowed.
     const queued = Array.isArray(slot.pendingFollowups) ? slot.pendingFollowups.length : 0;
     status.textContent = queued > 0 ? `answering… (+${queued} queued)` : 'answering…';
-  } else {
+  } else if (!slot.started) {
     status.textContent = 'not asked yet';
   }
-  header.appendChild(status);
-  card.appendChild(header);
+  const hasStatus = status.childNodes.length > 0;
+
+  if (showName || hasStatus) {
+    const header = document.createElement('div');
+    header.className = 'ai-compare-header' + (showName ? '' : ' no-name');
+
+    const dot = document.createElement('span');
+    dot.className = 'ai-compare-dot ' + (slot.status === 'done' ? 'done' : slot.status === 'error' ? 'error' : slot.status === 'streaming' || slot.status === 'waiting' ? 'streaming' : '');
+    header.appendChild(dot);
+
+    if (showName) {
+      const name = document.createElement('span');
+      name.className = 'ai-compare-model';
+      name.textContent = answeredBy;
+      name.title = comparing ? answeredBy : `Answered by ${answeredBy}`;
+      header.appendChild(name);
+    }
+    if (hasStatus) header.appendChild(status);
+    card.appendChild(header);
+  }
 
   if (!slot.started) {
     const idle = document.createElement('div');
@@ -5051,13 +5081,17 @@ function applyCompareScroll(instance, animate) {
 // visible card's height. A user-sized popup also caps the answer body at the
 // room its content area has (--ai-answer-max). Pure layout — safe to re-run
 // whenever a size changes (observeCompareLayout).
+// One slide's distance: a card's width plus the track's gap between cards.
+function compareSlideStep(viewport, track) {
+  return (viewport.clientWidth || 1) + (parseFloat(getComputedStyle(track).columnGap) || 0);
+}
+
 function layoutCompareTrack(instance) {
   const popup = instance.popup;
   const viewport = popup && popup.querySelector('.ai-compare-viewport');
   const track = popup && popup.querySelector('.ai-compare-track');
   if (!viewport || !track || !instance.compareSlots) return;
-  const cardWidth = viewport.clientWidth || 1;
-  track.style.transform = `translateX(${-(instance.compareIndex || 0) * cardWidth}px)`;
+  track.style.transform = `translateX(${-(instance.compareIndex || 0) * compareSlideStep(viewport, track)}px)`;
 
   const activeCard = track.querySelectorAll('.ai-compare-card')[instance.compareIndex || 0];
   if (!activeCard) return;
@@ -5173,11 +5207,13 @@ function makeCompareSlider(instance, wrapper) {
     const track = wrapper.querySelector('.ai-compare-track');
     if (!viewport || !track) return;
     const cardWidth = viewport.clientWidth || 1;
+    const step = compareSlideStep(viewport, track);
     track.classList.remove('animating');
     viewport.classList.remove('animating');
     drag = {
       startX: e.clientX,
-      base: -(instance.compareIndex || 0) * cardWidth,
+      base: -(instance.compareIndex || 0) * step,
+      step: step,
       cardWidth: cardWidth,
       track: track,
       moved: false,
@@ -5198,7 +5234,7 @@ function makeCompareSlider(instance, wrapper) {
     let t = drag.base + dx;
     // Rubber-band past either end so edges feel solid, not empty.
     if (t > 0) t *= 0.35;
-    const min = -(n - 1) * drag.cardWidth;
+    const min = -(n - 1) * drag.step;
     if (t < min) t = min + (t - min) * 0.35;
     drag.track.style.transform = `translateX(${t}px)`;
     if (e.cancelable) e.preventDefault();
@@ -6279,6 +6315,7 @@ function buildConversationStash(instance) {
     stashed.push({
       modelId: slot.modelId,
       answerModelName: slot.answerModelName || slot.modelName,
+      answerModelId: slot.answerModelId || slot.modelId,
       promptName: slot.promptName || null,
       messages: msgs
     });
@@ -6341,6 +6378,7 @@ function restoreConversationFromStash(instance, stash, models) {
       settled: true,
       errorText: null,
       answerModelName: s.answerModelName || model.name,
+      answerModelId: typeof s.answerModelId === 'string' ? s.answerModelId : model.id,
       promptName: s.promptName || null,
       lastRequest: null,
       bodyPinned: false
@@ -6371,6 +6409,7 @@ function restoreConversationFromStash(instance, stash, models) {
         settled: false,
         errorText: null,
         answerModelName: null,
+        answerModelId: null,
         promptName: null,
         lastRequest: null,
         bodyPinned: false
