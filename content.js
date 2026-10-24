@@ -1297,26 +1297,20 @@ const popupStyles = `
     will-change: transform;
   }
   .ai-compare-track.animating { transition: transform 200ms ease-out; }
+  /* The answer sits directly on the popup: no panel around it and no pill
+     around its model line, so the text gets the full width. */
   .ai-compare-card {
     flex: 0 0 100%;
     min-width: 100%;
     box-sizing: border-box;
     display: flex;
     flex-direction: column;
-    border: 1px solid var(--popup-border);
-    background: var(--popup-card-bg);
-    border-radius: 16px;
-    padding: 14px 16px;
   }
   .ai-compare-header {
     display: flex;
     align-items: center;
     gap: 7px;
-    margin-bottom: 10px;
-    padding: 5px 11px;
-    background: rgba(var(--popup-accent-rgb), 0.06);
-    border: 1px solid var(--popup-border);
-    border-radius: 999px;
+    margin-bottom: 8px;
     min-width: 0;
     flex-shrink: 0;
   }
@@ -1392,29 +1386,6 @@ const popupStyles = `
     display: flow-root;
     position: relative;
   }
-  .ai-turn-save-btn {
-    float: right;
-    margin-left: 8px;
-    margin-bottom: 4px;
-    background: rgba(var(--popup-accent-rgb), 0.1);
-    border: 1px solid rgba(var(--popup-accent-rgb), 0.25);
-    color: rgba(var(--popup-accent-rgb), 1);
-    border-radius: 6px;
-    width: 26px;
-    height: 26px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    padding: 0;
-    transition: all 140ms ease;
-    flex-shrink: 0;
-    line-height: 1;
-  }
-  .ai-turn-save-btn:hover {
-    background: rgba(var(--popup-accent-rgb), 0.22);
-    border-color: rgba(var(--popup-accent-rgb), 0.55);
-  }
   .ai-saved-history { clear: both; margin-top: 10px; font-size: 12px; color: var(--popup-text-muted); }
   .ai-saved-history summary { cursor: pointer; color: var(--popup-text-muted); }
   .ai-saved-entry { margin-top: 8px; padding: 8px; border: 1px solid var(--popup-border); border-radius: 8px; }
@@ -1423,16 +1394,66 @@ const popupStyles = `
   .ai-saved-actions button:disabled { opacity: .5; cursor: default; }
   .ai-saved-history summary:focus-visible, .ai-saved-actions button:focus-visible { outline: 2px solid rgba(var(--popup-accent-rgb), 1); outline-offset: 2px; }
   .ai-saved-preview { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow-y: auto; margin-top: 8px; color: var(--popup-text); }
-  .ai-turn-save-btn.is-saved {
-    background: rgba(16, 185, 129, 0.15);
-    border-color: #10b981;
-    color: #059669;
-    cursor: default;
+  /* Split Save button in the toolbar: the main part saves the answer on
+     screen, the arrow opens the list picker. One accent pill divided by a
+     hairline; the list panel anchors to the whole group, not the arrow. */
+  .ai-popup-actions .ai-save-split {
+    position: relative;
+    display: flex;
+    align-items: stretch;
+    margin-left: auto;
+    min-width: 0;
+    height: 34px;
+    box-sizing: border-box;
+    border: 1px solid var(--popup-accent-btn-border);
+    border-radius: 999px;
+    background: var(--popup-accent-btn-bg);
   }
-  :host([data-theme="dark"]) .ai-turn-save-btn.is-saved {
-    background: rgba(52, 211, 153, 0.18);
-    border-color: #34d399;
-    color: #34d399;
+  .ai-save-main {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    max-width: 200px;
+    padding: 0 10px 0 13px;
+    border: none;
+    border-radius: 999px 0 0 999px;
+    background: transparent;
+    color: var(--popup-accent-btn-text);
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 140ms ease;
+  }
+  .ai-save-main svg { flex-shrink: 0; }
+  .ai-save-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ai-save-main:hover:not(:disabled) { background: var(--popup-accent-btn-hover); }
+  .ai-save-main:disabled { opacity: 0.6; cursor: default; }
+  .ai-save-main.is-saved { cursor: default; }
+  .ai-popup-actions .ai-save-split .custom-select-container {
+    position: static;
+    flex: 0 0 auto;
+    min-width: 0;
+    margin: 0;
+  }
+  .ai-popup-actions .ai-save-split .custom-select {
+    height: 100%;
+    padding: 0 10px 0 8px;
+    border: none;
+    border-left: 1px solid rgba(0, 0, 0, 0.2);
+    border-radius: 0 999px 999px 0;
+    background: transparent;
+    color: var(--popup-accent-btn-text);
+  }
+  .ai-popup-actions .ai-save-split .custom-select:hover { background: var(--popup-accent-btn-hover); }
+  .ai-popup-actions .ai-save-split .custom-select-value { display: none; }
+  .ai-popup-actions .ai-save-split .custom-select > span:last-child { margin-left: 0; display: inline-flex; }
+  .ai-popup-actions .ai-save-split .custom-options {
+    left: auto;
+    right: 0;
+    width: 230px;
+    max-width: calc(100vw - 48px);
   }
   .ai-compare-turn + .ai-compare-turn,
   .ai-compare-turn + .ai-chat-row,
@@ -1590,6 +1611,7 @@ const POPUP_ICON_PATHS = {
   volume: '<path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>',
   stop: '<rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none"/>',
   fileText: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>',
+  headphones: '<path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/>',
   pin: '<path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z"/>',
   refresh: '<polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>',
   globe: '<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>',
@@ -4206,12 +4228,12 @@ function appendSavedHistory(instance, turn, slot, msg) {
       update.disabled = !!msg.isSaved || !!msg.historyWritePending;
       const another = button('Save another meaning', () => saveTurnToHistory(instance, slot, msg, another, { allowDuplicate: true }));
       another.disabled = !!msg.isSaved || !!msg.historyWritePending;
-      another.title = 'Save a separate entry in the list selected in the toolbar';
+      another.title = 'Save a separate entry in the list chosen next to Save';
       entry.append(actions, preview);
       details.appendChild(entry);
     });
     const hint = document.createElement('div');
-    hint.textContent = 'Update keeps the original list. For another meaning, choose its list in the toolbar.';
+    hint.textContent = 'Update keeps the original list. For another meaning, choose its list with the arrow next to Save.';
     details.appendChild(hint);
     host.appendChild(details);
   };
@@ -4277,12 +4299,6 @@ function saveTurnToHistory(instance, slot, msg, saveBtn, options = {}) {
       showPopupToast(instance, 'Already saved — view, update, or save another meaning');
     } else {
       msg.isSaved = true;
-      if (saveBtn && saveBtn.classList.contains('ai-turn-save-btn')) {
-        saveBtn.disabled = false;
-        saveBtn.classList.add('is-saved');
-        saveBtn.title = 'Saved to list';
-        saveBtn.innerHTML = iconSvg('bookmarkCheck', 15);
-      }
       const valEl = listSelector && listSelector.querySelector('.custom-select-value');
       const listName = valEl ? valEl.textContent : 'list';
       showPopupToast(instance, options.previousItem ? 'Saved meaning updated' : `Saved to ${listName}`);
@@ -4341,18 +4357,9 @@ function appendCompareConversation(instance, body, slot) {
       if (msg.verification) {
         appendVerificationBadge(turn, msg.verification);
       }
+      // Saving happens from the toolbar's Save button; each finished turn
+      // still discloses where it was saved before.
       if (!msg.isStreaming && msg.content) {
-        const saveBtn = document.createElement('button');
-        saveBtn.type = 'button';
-        saveBtn.className = 'ai-turn-save-btn' + (msg.isSaved ? ' is-saved' : '');
-        saveBtn.title = msg.isSaved ? 'Saved to list' : 'Save this output to list';
-        saveBtn.disabled = !!msg.historyWritePending;
-        saveBtn.innerHTML = iconSvg(msg.isSaved ? 'bookmarkCheck' : 'bookmarkPlus', 15);
-        saveBtn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          saveTurnToHistory(instance, slot, msg, saveBtn);
-        });
-        turn.prepend(saveBtn);
         appendSavedHistory(instance, turn, slot, msg);
       }
     }
@@ -4502,6 +4509,7 @@ function applyCompareScroll(instance, animate) {
   }
 
   updateCompareNav(instance);
+  updateCompareSaveButton(instance);
   ensureCompareSlotLoaded(instance, instance.compareIndex);
   // The lock follows the card in front, so every landing (slide, arrow, dot,
   // wheel — this also runs on each render) must re-evaluate it: arriving on a
@@ -4642,11 +4650,11 @@ function makeCompareSlider(instance, wrapper) {
   }, { passive: false });
 }
 
-// The compare view's shared action row: the same toolbar the single-answer
-// view had (Listen, Save-as-PDF, Pin, list picker, Save), seated between the
-// slider and the follow-up box. Every button resolves the card CURRENTLY on
-// screen at click time, so one row serves all models and the cards
-// themselves carry nothing but the answer.
+// The compare view's shared action row (Read aloud, Save-as-PDF, and one
+// split Save button whose arrow picks the list), seated between the slider
+// and the follow-up box. Every button resolves the card CURRENTLY on screen
+// at click time, so one row serves all models and the cards themselves
+// carry nothing but the answer.
 function ensureCompareToolbar(instance) {
   const popup = instance.popup;
   if (!popup) return;
@@ -4692,12 +4700,15 @@ function ensureCompareToolbar(instance) {
       const slot = visibleSlot();
       return slot ? latestCompareAnswer(slot) : null;
     };
-    // --- Listen (same button id so toggleSpeech can swap its icon) ---
+    // --- Read aloud (same button id so toggleSpeech can swap its icon) ---
+    // Headphones, not a speaker: the speaker beside the word only
+    // pronounces the word; this reads the whole answer.
     const speakButton = document.createElement('button');
     speakButton.type = 'button';
     speakButton.id = 'ai-popup-speak-btn';
-    speakButton.innerHTML = iconSvg('volume', 16);
-    speakButton.title = 'Listen to this answer';
+    speakButton.innerHTML = iconSvg('headphones', 16);
+    speakButton.title = 'Read this answer aloud';
+    speakButton.setAttribute('aria-label', speakButton.title);
     speakButton.onclick = (e) => {
       e.stopPropagation();
       const answer = visibleAnswer();
@@ -4711,6 +4722,7 @@ function ensureCompareToolbar(instance) {
     pdfButton.id = 'ai-popup-pdf-btn';
     pdfButton.innerHTML = iconSvg('fileText', 16);
     pdfButton.title = 'Save this conversation as PDF';
+    pdfButton.setAttribute('aria-label', pdfButton.title);
     pdfButton.onclick = (e) => {
       e.stopPropagation();
       const slot = visibleSlot();
@@ -4719,7 +4731,25 @@ function ensureCompareToolbar(instance) {
       saveConversationAsPdf(instance, slot.messages, slot.answerModelName || slot.modelName);
     };
 
-    // --- List picker (same component + "create new" flow as before) ---
+    // --- Save: one split button. The main part saves the answer on screen
+    // to the chosen list; the arrow beside it opens the list picker (same
+    // component + "create new" flow as before, its label hidden because the
+    // Save button already names the list).
+    const saveGroup = document.createElement('div');
+    saveGroup.className = 'ai-save-split';
+    const saveButton = document.createElement('button');
+    saveButton.type = 'button';
+    saveButton.id = 'ai-popup-save-btn';
+    saveButton.className = 'ai-save-main';
+    saveButton.onclick = (e) => {
+      e.stopPropagation();
+      const slot = visibleSlot();
+      const answer = slot && latestCompareAnswer(slot);
+      if (!slot || !answer) { showPopupToast(instance, 'Nothing to save yet — wait for the answer'); return; }
+      saveTurnToHistory(instance, slot, answer, saveButton);
+    };
+    saveGroup.appendChild(saveButton);
+
     let listSelector;
     function recreateDropdown(listsToUse, currentVal) {
       const previousSelector = listSelector;
@@ -4736,32 +4766,65 @@ function ensureCompareToolbar(instance) {
               } else {
                 showPopupToast(instance, "Failed to create list", 'error');
                 listSelector.value = validListId;
+                updateCompareSaveButton(instance);
               }
             });
           } else {
             listSelector.value = validListId;
           }
         }
+        updateCompareSaveButton(instance);
       }, { showCreateNew: true });
 
+      const trigger = listSelector.querySelector('.custom-select');
+      if (trigger) {
+        trigger.title = 'Choose the list to save to';
+        trigger.setAttribute('role', 'button');
+        trigger.setAttribute('aria-label', 'Choose the list to save to');
+      }
       instance.listSelector = listSelector;
 
       // On re-creation (e.g. after "Create New List"), swap the new dropdown
-      // in where the old one sat. The INITIAL append happens in the ordered
-      // sequence below, so the row reads icons-left, list-right.
+      // in where the old one sat.
       if (previousSelector && previousSelector.parentNode) {
-        listSelector.style.marginLeft = 'auto';
         previousSelector.parentNode.replaceChild(listSelector, previousSelector);
+      } else {
+        saveGroup.appendChild(listSelector);
       }
+      updateCompareSaveButton(instance);
     }
     recreateDropdown(lists, validListId);
 
     actionsContainer.appendChild(speakButton);
     actionsContainer.appendChild(pdfButton);
-    listSelector.style.marginLeft = 'auto';
-    actionsContainer.appendChild(listSelector);
+    actionsContainer.appendChild(saveGroup);
     mount();
+    updateCompareSaveButton(instance);
   });
+}
+
+// Syncs the split Save button with the answer on screen: disabled until
+// there is a finished answer (or while its save is in flight), "Saved" once
+// that answer is in a list, otherwise "Save to <chosen list>".
+function updateCompareSaveButton(instance) {
+  const popup = instance.popup;
+  const button = popup && popup.querySelector('#ai-popup-save-btn');
+  if (!button) return;
+  const slot = (instance.compareSlots || [])[instance.compareIndex || 0] || null;
+  const answer = slot ? latestCompareAnswer(slot) : null;
+  const valueEl = instance.listSelector && instance.listSelector.querySelector('.custom-select-value');
+  const listName = valueEl && instance.listSelector.value !== '__create_new__' ? valueEl.textContent : 'list';
+  const saved = !!(answer && answer.isSaved);
+
+  button.disabled = !answer || !!answer.historyWritePending;
+  button.classList.toggle('is-saved', saved);
+  button.innerHTML = iconSvg(saved ? 'bookmarkCheck' : 'bookmarkPlus', 15);
+  const label = document.createElement('span');
+  label.className = 'ai-save-label';
+  label.textContent = saved ? 'Saved' : `Save to ${listName}`;
+  button.appendChild(label);
+  button.title = saved ? 'This answer is saved'
+    : answer ? `Save this answer to ${listName}` : 'Save becomes available when the answer is ready';
 }
 
 // --- Function to create the model and prompt selectors ---
@@ -4830,11 +4893,16 @@ function createSelectors(instance, models, prompts, currentModelId, currentPromp
   // Top-right window Pin button (stays pinned on screen)
   // Kept in the title header row (#ai-popup-context) so it reads as part of
   // the header, not a floating control. No DOM move — alignment only.
+  // The tooltip says what pinning does: a pinned popup ignores outside
+  // clicks and Esc (removeAllPopups / removeLastPopup skip it).
+  const pinTitle = () => instance.isPinned
+    ? 'Pinned: stays open when you click the page or press Esc. Click to unpin.'
+    : 'Pin: keep this popup open when you click the page or press Esc';
   const pinButton = document.createElement('button');
   pinButton.type = 'button';
   pinButton.id = 'ai-popup-pin-btn';
   pinButton.innerHTML = iconSvg('pin', 15);
-  pinButton.title = instance.isPinned ? 'Unpin popup' : 'Pin popup on screen';
+  pinButton.title = pinTitle();
   pinButton.setAttribute('aria-label', pinButton.title);
   pinButton.setAttribute('aria-pressed', instance.isPinned ? 'true' : 'false');
   pinButton.classList.toggle('pinned', !!instance.isPinned);
@@ -4842,7 +4910,7 @@ function createSelectors(instance, models, prompts, currentModelId, currentPromp
     e.stopPropagation();
     instance.isPinned = !instance.isPinned;
     pinButton.classList.toggle('pinned', instance.isPinned);
-    pinButton.title = instance.isPinned ? 'Unpin popup' : 'Pin popup on screen';
+    pinButton.title = pinTitle();
     pinButton.setAttribute('aria-label', pinButton.title);
     pinButton.setAttribute('aria-pressed', instance.isPinned ? 'true' : 'false');
   };
@@ -5060,8 +5128,8 @@ function createActionButtons(instance, word, definition, modelName, promptName, 
     const speakButton = document.createElement('button');
     speakButton.type = 'button';
     speakButton.id = 'ai-popup-speak-btn';
-    speakButton.innerHTML = iconSvg('volume', 16);
-    speakButton.title = 'Listen to explanation';
+    speakButton.innerHTML = iconSvg('headphones', 16);
+    speakButton.title = 'Read the explanation aloud';
     speakButton.onclick = (e) => {
       e.stopPropagation();
       toggleSpeech(instance, definition);
@@ -5782,7 +5850,7 @@ function toggleSpeech(instance, text) {
   if (instance.isSpeaking) {
     window.speechSynthesis.cancel();
     instance.isSpeaking = false;
-    if (btn) btn.innerHTML = iconSvg('volume', 16);
+    if (btn) btn.innerHTML = iconSvg('headphones', 16);
     // Reset all buttons just in case? Or just the active one?
     // Let's reset all check to simple state
   } else {
@@ -5818,13 +5886,13 @@ function toggleSpeech(instance, text) {
 
       utterance.onend = () => {
         instance.isSpeaking = false;
-        if (btn) btn.innerHTML = iconSvg('volume', 16);
+        if (btn) btn.innerHTML = iconSvg('headphones', 16);
       };
 
       utterance.onerror = (e) => {
         console.error("Speech error", e);
         instance.isSpeaking = false;
-        if (btn) btn.innerHTML = iconSvg('volume', 16);
+        if (btn) btn.innerHTML = iconSvg('headphones', 16);
       };
 
       window.speechSynthesis.speak(utterance);
@@ -5889,7 +5957,7 @@ function toggleWordSpeech(instance, word) {
     if (instance.isSpeaking) {
       instance.isSpeaking = false;
       const speakBtn = popup.querySelector('#ai-popup-speak-btn');
-      if (speakBtn) speakBtn.innerHTML = iconSvg('volume', 16);
+      if (speakBtn) speakBtn.innerHTML = iconSvg('headphones', 16);
     }
     window.speechSynthesis.cancel();
 

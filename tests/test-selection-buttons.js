@@ -90,7 +90,7 @@ async function run() {
           if (message.type === 'getAiDefinition') {
             response = failNextRequest ? { error: 'Temporary model error' } : { definition: 'Use “She goes to school every day.”', usedModelName: message.modelId };
             failNextRequest = false;
-          } else if (message.type === 'getLists') response = { lists: [{ id: 'one', name: 'Words' }], lastUsedListId: 'one' };
+          } else if (message.type === 'getLists' || message.type === 'getWordLists') response = { lists: [{ id: 'one', name: 'Words' }, { id: 'two', name: 'Phrases' }], lastUsedListId: 'one' };
           else if (message.type === 'saveClip') response = { status: 'saved' };
           if (callback) setTimeout(() => callback(response), 0);
         }
@@ -239,6 +239,33 @@ async function run() {
     const body = activePopups.at(-1).popup.querySelector('.ai-compare-card .ai-compare-body');
     return { skeleton: !!body.querySelector('.ai-popup-skeleton'), reserved: body.classList.contains('ai-compare-body-reserved') };
   })()`), { skeleton: false, reserved: false }, 'a settled answer releases the reserved height');
+
+  // Toolbar: one split Save button (no per-answer bookmark, no separate list
+  // picker), a read-aloud button distinct from the word's speaker, and a pin
+  // tooltip that says what pinning does. The answer sits on the popup itself.
+  await waitFor(`activePopups.at(-1).popup.querySelector('#ai-popup-save-btn')`, 'split Save button is mounted');
+  assert.deepEqual(await evaluate(`(() => {
+    const popup = activePopups.at(-1).popup, save = popup.querySelector('#ai-popup-save-btn');
+    const card = getComputedStyle(popup.querySelector('.ai-compare-card'));
+    return {
+      label: save.textContent, disabled: save.disabled,
+      turnButtons: popup.querySelectorAll('.ai-turn-save-btn').length,
+      listPickers: popup.querySelectorAll('.ai-popup-actions .custom-select-container').length,
+      pickerInSplit: !!popup.querySelector('.ai-save-split .custom-select-container'),
+      readAloud: popup.querySelector('#ai-popup-speak-btn').title,
+      pinMentionsEsc: popup.querySelector('#ai-popup-pin-btn').title.includes('Esc'),
+      cardBorder: card.borderTopWidth, cardBackground: card.backgroundColor
+    };
+  })()`), {
+    label: 'Save to Words', disabled: false, turnButtons: 0, listPickers: 1, pickerInSplit: true,
+    readAloud: 'Read this answer aloud', pinMentionsEsc: true, cardBorder: '0px', cardBackground: 'rgba(0, 0, 0, 0)'
+  });
+  await evaluate(`(() => { const popup = activePopups.at(-1).popup; popup.querySelector('.ai-save-split .custom-select').click(); [...popup.querySelectorAll('.ai-save-split .custom-option')].find(option => option.textContent.trim() === 'Phrases').click(); })()`);
+  assert.equal(await evaluate(`activePopups.at(-1).popup.querySelector('#ai-popup-save-btn').textContent`), 'Save to Phrases', 'the arrow picks the list the button names');
+  await evaluate(`activePopups.at(-1).popup.querySelector('#ai-popup-save-btn').click()`);
+  await waitFor(`requests.some(request => request.type === 'saveToHistory')`, 'Save sends the answer on screen');
+  assert.deepEqual(await evaluate(`(() => { const r = requests.find(request => request.type === 'saveToHistory'); return { listId: r.listId, definition: r.definition }; })()`), { listId: 'two', definition: 'Short answer.' });
+  await waitFor(`activePopups.at(-1).popup.querySelector('#ai-popup-save-btn').textContent === 'Saved'`, 'Save shows the saved state');
   await evaluate(`removeAllPopups(); window.toolbar = showOpenButtonPopup(selectionRect, selectedText, selectionContext); requests.length = 0; toolbar.popup.querySelector('#ai-clip-button-popup').click();`);
   await waitFor(`requests.some(request => request.type === 'saveClip')`, 'Clip remains callable');
   assert.equal(await evaluate('aiRequests().length'), 0, 'Clip does not call AI');
