@@ -519,6 +519,27 @@ const popupStyles = `
     min-width: 0;
     width: 100%;
   }
+  /* Compact prompt (no custom prompt in effect): a small "Prompt ▾" chip on
+     the Model pill's line, without its label, so the Model pill gets the
+     width. Its menu opens right-aligned at a readable width. */
+  .ai-prompt-chip-text { display: none; }
+  #ai-popup-selectors-container.prompt-compact .selector-field.is-prompt-field {
+    flex: 0 0 auto;
+    justify-content: flex-end;
+  }
+  #ai-popup-selectors-container.prompt-compact .is-prompt-field .selector-label { display: none; }
+  #ai-popup-selectors-container.prompt-compact .custom-select-container.is-prompt {
+    flex: 0 0 auto;
+    width: auto;
+  }
+  #ai-popup-selectors-container.prompt-compact .is-prompt .custom-select-value { display: none; }
+  #ai-popup-selectors-container.prompt-compact .ai-prompt-chip-text { display: inline; white-space: nowrap; }
+  #ai-popup-selectors-container.prompt-compact .is-prompt .custom-options {
+    left: auto;
+    right: 0;
+    width: 230px;
+    max-width: calc(100vw - 48px);
+  }
   .selector-label {
     font-size: 10px;
     font-weight: 700;
@@ -1694,6 +1715,8 @@ function showPopupToast(instance, message, type = 'success') {
 
   const toast = document.createElement('div');
   toast.className = 'ai-popup-toast' + (type === 'error' ? ' toast-error' : '');
+  // Announced by screen readers ("Saved to Words", errors) without moving focus.
+  toast.setAttribute('role', type === 'error' ? 'alert' : 'status');
 
   const iconWrap = document.createElement('span');
   iconWrap.style.color = type === 'error' ? '#f87171' : '#5eead4';
@@ -1745,7 +1768,13 @@ function createCustomDropdown(lists, currentValue, onChange, options = {}) {
   const selectBtn = document.createElement('div');
   selectBtn.className = 'custom-select';
   selectBtn.tabIndex = 0;
-  
+  // A div trigger, so screen readers need the button/listbox semantics
+  // spelled out. aria-expanded follows the panel's .show class (observer
+  // below), whichever code path opens or closes it.
+  selectBtn.setAttribute('role', 'button');
+  selectBtn.setAttribute('aria-haspopup', 'listbox');
+  selectBtn.setAttribute('aria-expanded', 'false');
+
   const valueDisplay = document.createElement('span');
   valueDisplay.className = 'custom-select-value';
   valueDisplay.textContent = 'Select a list...';
@@ -1754,19 +1783,29 @@ function createCustomDropdown(lists, currentValue, onChange, options = {}) {
     valueDisplay.textContent = name;
     // Tooltip on the whole trigger (not just the text span) so the full name
     // shows when hovering anywhere over a truncated label.
-    selectBtn.title = name;
+    selectBtn.title = selectBtn.dataset.fixedTitle || name;
     valueDisplay.title = name;
+    // With a prefix (setDropdownAriaPrefix) the accessible name says what
+    // the picker is for AND its current value: "AI model: Gemini 2.5 Flash".
+    if (selectBtn.dataset.ariaPrefix) selectBtn.setAttribute('aria-label', `${selectBtn.dataset.ariaPrefix}: ${name}`);
   }
 
   const arrow = document.createElement('span');
   arrow.innerHTML = iconSvg('chevronDown', 12);
-  
+
   selectBtn.append(valueDisplay, arrow);
-  
+
   const optionsContainer = document.createElement('div');
   optionsContainer.className = 'custom-options';
+  optionsContainer.setAttribute('role', 'listbox');
   if (options.direction === 'down') optionsContainer.classList.add('drop-down');
-  if (options.disabled) selectBtn.classList.add('disabled');
+  if (options.disabled) {
+    selectBtn.classList.add('disabled');
+    selectBtn.setAttribute('aria-disabled', 'true');
+  }
+  new MutationObserver(() => {
+    selectBtn.setAttribute('aria-expanded', optionsContainer.classList.contains('show') ? 'true' : 'false');
+  }).observe(optionsContainer, { attributes: true, attributeFilter: ['class'] });
 
   container.append(selectBtn, optionsContainer);
 
@@ -1799,6 +1838,8 @@ function createCustomDropdown(lists, currentValue, onChange, options = {}) {
 
       const optEl = document.createElement('div');
       optEl.className = 'custom-option';
+      optEl.setAttribute('role', 'option');
+      optEl.setAttribute('aria-selected', item.id === selectedId ? 'true' : 'false');
       if (item.id === selectedId) {
         optEl.classList.add('selected');
         setSelectedLabel(item.name);
@@ -1926,6 +1967,16 @@ function createCustomDropdown(lists, currentValue, onChange, options = {}) {
   });
 
   return container;
+}
+
+// Names a custom dropdown for screen readers as "<prefix>: <current value>",
+// kept current as the selection changes (see setSelectedLabel).
+function setDropdownAriaPrefix(dropdownEl, prefix) {
+  const trigger = dropdownEl && dropdownEl.querySelector('.custom-select');
+  if (!trigger) return;
+  trigger.dataset.ariaPrefix = prefix;
+  const valueEl = trigger.querySelector('.custom-select-value');
+  trigger.setAttribute('aria-label', `${prefix}: ${valueEl ? valueEl.textContent : ''}`);
 }
 
 // The floating "Ask AI" button appears for selections up to this many words.
@@ -2422,6 +2473,8 @@ function showOpenButtonPopup(rect, selectedText, implicitContext) {
 
   const buttonGroup = document.createElement('div');
   buttonGroup.id = 'ai-open-button-group';
+  buttonGroup.setAttribute('role', 'toolbar');
+  buttonGroup.setAttribute('aria-label', 'AI actions for the selected text');
 
   // Position it a bit above the selection if possible
   const topPos = rect.top >= 40 ? rect.top - 40 : rect.bottom + 10;
@@ -2947,6 +3000,10 @@ function showPopup(x, y, content) {
   // Create the popup element
   const popup = document.createElement('div');
   popup.id = 'ai-definition-popup';
+  // Non-modal: the page stays usable around it. createSelectors names it
+  // after the looked-up text once that is known.
+  popup.setAttribute('role', 'dialog');
+  popup.setAttribute('aria-label', 'AI explanation');
 
   const contentWrapper = document.createElement('div');
   contentWrapper.id = 'ai-popup-content';
@@ -4109,6 +4166,7 @@ function buildCompareCard(instance, card, slot) {
   const hasSettledAnswer = slot.messages.some(m => m && m.role === 'assistant' &&
     !m.isThinking && !m.isStatus && !m.isStreaming && !m.isError);
   if (inFlight && !hasSettledAnswer) body.classList.add('ai-compare-body-reserved');
+  if (inFlight) body.setAttribute('aria-busy', 'true');
   body.addEventListener('scroll', () => {
     // Preserve manual reading position across stream re-renders
     slot.bodyScrollTop = body.scrollTop;
@@ -4444,12 +4502,15 @@ function buildCompareNav(instance) {
 
   const nav = document.createElement('div');
   nav.className = 'ai-compare-nav';
+  nav.setAttribute('role', 'group');
+  nav.setAttribute('aria-label', 'Compare models');
 
   const prev = document.createElement('button');
   prev.type = 'button';
   prev.className = 'ai-compare-nav-btn ai-compare-nav-prev';
   prev.innerHTML = iconSvg('chevronLeft', 14);
   prev.title = 'Previous model';
+  prev.setAttribute('aria-label', prev.title);
   prev.addEventListener('click', (e) => {
     e.stopPropagation();
     slideCompareTo(instance, (instance.compareIndex || 0) - 1, true);
@@ -4461,7 +4522,8 @@ function buildCompareNav(instance) {
     const d = document.createElement('button');
     d.type = 'button';
     d.className = 'ai-compare-dotnav';
-    d.title = `${slot.modelName} — ${slot.status === 'done' ? 'answered' : slot.status === 'error' ? 'failed' : slot.started ? 'answering…' : 'not asked yet'}`;
+    d.title = compareDotLabel(slot);
+    d.setAttribute('aria-label', d.title);
     d.addEventListener('click', (e) => {
       e.stopPropagation();
       slideCompareTo(instance, i, true);
@@ -4474,6 +4536,7 @@ function buildCompareNav(instance) {
   next.className = 'ai-compare-nav-btn ai-compare-nav-next';
   next.innerHTML = iconSvg('chevronRight', 14);
   next.title = 'Next model';
+  next.setAttribute('aria-label', next.title);
   next.addEventListener('click', (e) => {
     e.stopPropagation();
     slideCompareTo(instance, (instance.compareIndex || 0) + 1, true);
@@ -4591,7 +4654,22 @@ function updateCompareNav(instance) {
     const slot = instance.compareSlots[i];
     d.classList.toggle('done', !!slot && slot.status === 'done');
     d.classList.toggle('error', !!slot && slot.status === 'error');
+    // The dots are built once per model count, so their status text is
+    // refreshed here or it would stay at "answering…" forever.
+    if (slot) {
+      d.title = compareDotLabel(slot);
+      d.setAttribute('aria-label', d.title);
+    }
+    if (i === idx) d.setAttribute('aria-current', 'true');
+    else d.removeAttribute('aria-current');
   });
+}
+
+function compareDotLabel(slot) {
+  const state = slot.status === 'done' ? 'answered'
+    : slot.status === 'error' ? 'failed'
+    : slot.started ? 'answering…' : 'not asked yet';
+  return `${slot.modelName} — ${state}`;
 }
 
 // Wires the slider gestures ONCE per popup (listeners live on the persistent
@@ -4834,11 +4912,13 @@ function ensureCompareToolbar(instance) {
         updateCompareSaveButton(instance);
       }, { showCreateNew: true });
 
-      const trigger = listSelector.querySelector('.custom-select');
-      if (trigger) {
-        trigger.title = 'Choose the list to save to';
-        trigger.setAttribute('role', 'button');
-        trigger.setAttribute('aria-label', 'Choose the list to save to');
+      setDropdownAriaPrefix(listSelector, 'List to save to');
+      // Only the arrow shows (the Save button names the list), so its
+      // tooltip says what it does rather than repeating the list name.
+      const listTrigger = listSelector.querySelector('.custom-select');
+      if (listTrigger) {
+        listTrigger.dataset.fixedTitle = 'Choose the list to save to';
+        listTrigger.title = listTrigger.dataset.fixedTitle;
       }
       instance.listSelector = listSelector;
 
@@ -4901,6 +4981,10 @@ function createSelectors(instance, models, prompts, currentModelId, currentPromp
   }
 
   const activeModel = models.find(model => model.id === currentModelId) || models[0];
+  const dialogSubject = selectedText === 'Custom Question' ? '' : String(selectedText || '').trim();
+  popup.setAttribute('aria-label', dialogSubject
+    ? `AI explanation: ${dialogSubject.length > 80 ? dialogSubject.slice(0, 79) + '…' : dialogSubject}`
+    : 'Ask AI');
   const context = document.createElement('div');
   context.id = 'ai-popup-context';
 
@@ -5042,6 +5126,7 @@ function createSelectors(instance, models, prompts, currentModelId, currentPromp
     promptSelector = createCustomDropdown(promptItems, initialPromptValue, (val) => {
       if (val === lastPromptValue) return; // change-only-on-different-choice, like native
       lastPromptValue = val;
+      syncPromptCompact();
       triggerRedefine();
     }, { direction: 'down' });
   } else {
@@ -5075,7 +5160,7 @@ function createSelectors(instance, models, prompts, currentModelId, currentPromp
     icon.setAttribute('aria-hidden', 'true');
     icon.innerHTML = iconSvg(iconName, 13);
     btn.prepend(icon);
-    if (ariaLabel) btn.setAttribute('aria-label', ariaLabel);
+    if (ariaLabel) setDropdownAriaPrefix(dropdownEl, ariaLabel);
   };
   addLeadingIcon(modelSelector, 'zap', 'AI model');
   addLeadingIcon(promptSelector, 'messageCircle', 'Prompt style');
@@ -5092,7 +5177,34 @@ function createSelectors(instance, models, prompts, currentModelId, currentPromp
   };
 
   container.appendChild(wrapWithLabel(modelSelector, 'Model'));
-  container.appendChild(wrapWithLabel(promptSelector, 'Prompt'));
+  const promptField = wrapWithLabel(promptSelector, 'Prompt');
+  promptField.classList.add('is-prompt-field');
+  container.appendChild(promptField);
+
+  // Compact prompt: with no custom prompt in effect (System Default, or none
+  // configured) the picker shrinks to a small "Prompt ▾" chip beside a wider
+  // Model pill; choosing a custom prompt brings back the labeled field that
+  // shows its name. CSS keys off .prompt-compact on the container.
+  const promptTrigger = promptSelector.querySelector('.custom-select');
+  const promptValueEl = promptTrigger && promptTrigger.querySelector('.custom-select-value');
+  if (promptTrigger && promptValueEl) {
+    const chipText = document.createElement('span');
+    chipText.className = 'ai-prompt-chip-text';
+    chipText.textContent = 'Prompt';
+    chipText.setAttribute('aria-hidden', 'true');
+    promptTrigger.insertBefore(chipText, promptValueEl);
+  }
+  const noPromptsConfigured = !(selectorPrompts.length > 0 || hasExplicitCustomPrompt);
+  function syncPromptCompact() {
+    const compact = !promptSelector.value;
+    container.classList.toggle('prompt-compact', compact);
+    if (!promptTrigger) return;
+    promptTrigger.dataset.fixedTitle = !compact ? ''
+      : noPromptsConfigured ? 'No custom prompts yet — add them in Settings → Prompts'
+      : 'Prompt: System Default — choose a custom prompt';
+    promptTrigger.title = promptTrigger.dataset.fixedTitle || (promptValueEl ? promptValueEl.textContent : '');
+  }
+  syncPromptCompact();
 
   // Keep the selected text and active model visible above the controls.
   popup.prepend(container);
@@ -5188,6 +5300,7 @@ function createActionButtons(instance, word, definition, modelName, promptName, 
     speakButton.id = 'ai-popup-speak-btn';
     speakButton.innerHTML = iconSvg('headphones', 16);
     speakButton.title = 'Read the explanation aloud';
+    speakButton.setAttribute('aria-label', speakButton.title);
     speakButton.onclick = (e) => {
       e.stopPropagation();
       toggleSpeech(instance, definition);
@@ -5199,6 +5312,7 @@ function createActionButtons(instance, word, definition, modelName, promptName, 
     pdfButton.id = 'ai-popup-pdf-btn';
     pdfButton.innerHTML = iconSvg('fileText', 16);
     pdfButton.title = 'Save conversation as PDF';
+    pdfButton.setAttribute('aria-label', pdfButton.title);
     pdfButton.onclick = (e) => {
       e.stopPropagation();
       saveConversationAsPdf(instance);
@@ -5357,6 +5471,7 @@ function createFollowupInput(instance, word) {
   input.type = 'text';
   input.id = 'ai-popup-followup-input';
   input.placeholder = 'Ask a follow-up question...';
+  input.setAttribute('aria-label', 'Ask a follow-up question');
   input.addEventListener('input', () => {
     instance.followupDraftEdited = true;
     if (!input.value.trim()) clearSavedFollowupDraft(instance);
@@ -5367,12 +5482,14 @@ function createFollowupInput(instance, word) {
   sendBtn.className = 'ai-popup-followup-send';
   sendBtn.innerHTML = iconSvg('send', 13);
   sendBtn.title = 'Send question';
+  sendBtn.setAttribute('aria-label', sendBtn.title);
 
   const micBtn = document.createElement('button');
   micBtn.type = 'button';
   micBtn.className = 'ai-popup-followup-mic';
   micBtn.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>';
   micBtn.title = 'Type by speaking';
+  micBtn.setAttribute('aria-label', micBtn.title);
 
   // Abort in-flight generations (Issue #24). Hidden while idle; visibility is
   // driven by updateCompareFollowupState, which swaps it with the mic.
@@ -5381,6 +5498,7 @@ function createFollowupInput(instance, word) {
   stopBtn.className = 'ai-popup-followup-stop';
   stopBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
   stopBtn.title = 'Stop generating';
+  stopBtn.setAttribute('aria-label', stopBtn.title);
   stopBtn.style.display = 'none';
   stopBtn.addEventListener('click', (e) => {
     e.stopPropagation();

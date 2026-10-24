@@ -145,6 +145,10 @@ async function run() {
   assert.deepEqual(await evaluate('buttonLabels()'), ['Grammar', literalLabel], 'only valid, explicitly enabled prompts appear');
   assert.equal(await evaluate(`toolbar.popup.querySelector('#ai-open-button-popup').textContent`), 'Ask AI');
   assert.equal(await evaluate(`!!toolbar.popup.querySelector('#ai-clip-button-popup')`), true, 'Clip remains available');
+  assert.deepEqual(await evaluate(`(() => ({
+    role: toolbar.popup.getAttribute('role'),
+    unnamed: [...toolbar.popup.querySelectorAll('button')].filter(b => !b.getAttribute('aria-label') && !b.textContent.trim()).length
+  }))()`), { role: 'toolbar', unnamed: 0 }, 'the selection toolbar is a named toolbar of named buttons');
   assert.equal(await evaluate(`toolbar.popup.querySelectorAll('.ai-selection-prompt-button img').length`), 0, 'prompt labels are plain text');
   assert.equal(await evaluate('aiRequests().length'), 0, 'rendering buttons does not call a model');
 
@@ -168,6 +172,7 @@ async function run() {
   });
   assert.equal(await evaluate('toolbar.container.isConnected'), false, 'click replaces the toolbar with the answer popup');
   assert.equal(await evaluate(`activePopups.at(-1).popup.querySelector('#ai-popup-prompt-selector').value`), grammar.content, 'selector reflects the clicked prompt instead of the default');
+  assert.equal(await evaluate(`activePopups.at(-1).popup.querySelector('#ai-popup-selectors-container').classList.contains('prompt-compact')`), false, 'a custom prompt in effect shows the full Prompt field');
   await evaluate(`activePopups.at(-1).popup.querySelector('.ai-compare-card .ai-compare-actions button').click()`);
   await waitFor(`aiRequests().length === 2 && activePopups.at(-1).compareSlots[0].status === 'done'`, 'Retry finishes successfully');
   assert.equal(await evaluate('aiRequests()[1].customPrompt'), grammar.content, 'Retry retains the prompt');
@@ -182,6 +187,10 @@ async function run() {
   await evaluate(`(() => { const selector = activePopups.at(-1).popup.querySelector('#ai-popup-prompt-selector'); [...selector.querySelectorAll('.custom-option')].find(option => option.textContent.trim() === 'System Default').click(); })()`);
   await waitFor('aiRequests().length === 4', 'changing the prompt starts another lookup');
   assert.equal(await evaluate('aiRequests()[3].customPrompt'), '', 'System Default keeps its explicit empty-string override');
+  assert.deepEqual(await evaluate(`(() => {
+    const trigger = activePopups.at(-1).popup.querySelector('#ai-popup-prompt-selector .custom-select');
+    return { compact: activePopups.at(-1).popup.querySelector('#ai-popup-selectors-container').classList.contains('prompt-compact'), chip: trigger.querySelector('.ai-prompt-chip-text').textContent, valueShown: getComputedStyle(trigger.querySelector('.custom-select-value')).display !== 'none' };
+  })()`), { compact: true, chip: 'Prompt', valueShown: false }, 'System Default shrinks the picker to a Prompt chip');
 
   // Restored conversations can reference a prompt deleted from Settings.
   await evaluate(`createSelectors(activePopups.at(-1), syncData.models, [], 'first', ${JSON.stringify(grammar.content)}, selectedText, 'system')`);
@@ -191,6 +200,10 @@ async function run() {
   assert.equal(await evaluate('aiRequests()[4].customPrompt'), grammar.content, 'model changes retain an unmatched explicit prompt');
   await evaluate(`createSelectors(activePopups.at(-1), syncData.models, [], 'first', null, selectedText, 'system')`);
   assert.equal(await evaluate(`activePopups.at(-1).popup.querySelector('#ai-popup-prompt-selector .custom-select').classList.contains('disabled')`), true, 'no explicit or saved prompt leaves the empty selector disabled');
+  assert.deepEqual(await evaluate(`(() => {
+    const trigger = activePopups.at(-1).popup.querySelector('#ai-popup-prompt-selector .custom-select');
+    return { compact: activePopups.at(-1).popup.querySelector('#ai-popup-selectors-container').classList.contains('prompt-compact'), ariaDisabled: trigger.getAttribute('aria-disabled'), pointsToSettings: trigger.title.includes('Settings') };
+  })()`), { compact: true, ariaDisabled: 'true', pointsToSettings: true }, 'with no custom prompts the chip is disabled and says where to add them');
 
   await evaluate(`removeAllPopups(); window.toolbar = showOpenButtonPopup(selectionRect, selectedText, selectionContext); requests.length = 0;`);
   const renamed = { ...grammar, name: 'Proofread', content: 'Proofread this: {word}' };
@@ -280,6 +293,33 @@ async function run() {
   await waitFor(`requests.filter(request => request.type === 'saveToHistory').length === 2`, 'the first answer bookmark saves');
   assert.deepEqual(await savedRequest(1), { listId: 'two', word: 'She go to school every day.', definition: 'Short answer.' }, 'an earlier answer saves on its own');
   await waitFor(`${bookmark(0)}.classList.contains('is-saved')`, 'the first answer shows its saved state');
+
+  // Accessibility: every button (and div-based picker trigger) in the popup
+  // has an accessible name, the popup is a labelled dialog, the pager says
+  // which model each dot is and which is current, and pickers expose
+  // their open state.
+  assert.deepEqual(await evaluate(`(async () => {
+    const popup = activePopups.at(-1).popup;
+    const unnamed = [...popup.querySelectorAll('button, [role="button"]')].filter(b => !b.getAttribute('aria-label') && !b.textContent.trim()).map(b => b.className || b.id);
+    const trigger = popup.querySelector('#ai-popup-model-selector .custom-select');
+    trigger.click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const opened = trigger.getAttribute('aria-expanded');
+    trigger.click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const dots = [...popup.querySelectorAll('.ai-compare-dotnav')];
+    return {
+      unnamed, role: popup.getAttribute('role'), name: popup.getAttribute('aria-label'),
+      prev: popup.querySelector('.ai-compare-nav-prev').getAttribute('aria-label'), next: popup.querySelector('.ai-compare-nav-next').getAttribute('aria-label'),
+      firstDot: dots[0].getAttribute('aria-label'), current: dots.map(d => d.getAttribute('aria-current')),
+      modelName: trigger.getAttribute('aria-label'), opened, closed: trigger.getAttribute('aria-expanded'),
+      listbox: popup.querySelector('#ai-popup-model-selector .custom-options').getAttribute('role')
+    };
+  })()`), {
+    unnamed: [], role: 'dialog', name: 'AI explanation: She go to school every day.',
+    prev: 'Previous model', next: 'Next model', firstDot: 'First model — answered', current: ['true', null],
+    modelName: 'AI model: First model', opened: 'true', closed: 'false', listbox: 'listbox'
+  }, 'popup controls are named and expose their state');
   await evaluate(`removeAllPopups(); window.toolbar = showOpenButtonPopup(selectionRect, selectedText, selectionContext); requests.length = 0; toolbar.popup.querySelector('#ai-clip-button-popup').click();`);
   await waitFor(`requests.some(request => request.type === 'saveClip')`, 'Clip remains callable');
   assert.equal(await evaluate('aiRequests().length'), 0, 'Clip does not call AI');
