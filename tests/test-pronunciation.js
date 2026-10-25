@@ -91,9 +91,10 @@ const chromeStub = {
         query: (q, cb) => { if (typeof cb === 'function') cb([]); },
         sendMessage: (tabId, msg, cb) => { if (typeof cb === 'function') cb({}); },
         getCurrent: (cb) => { if (typeof cb === 'function') cb(undefined); },
+        onCreated: { addListener() {} },
         onRemoved: events.tabsOnRemoved
     },
-    webNavigation: { onBeforeNavigate: events.webNavigationOnBeforeNavigate },
+    webNavigation: { onBeforeNavigate: events.webNavigationOnBeforeNavigate, onCommitted: { addListener() {} } },
     webRequest: { onBeforeRequest: { addListener() {} }, onHeadersReceived: events.webRequestOnHeadersReceived },
     alarms: {
         create: () => {},

@@ -236,6 +236,11 @@ async function run() {
   const deferredNavigationCode = await new Promise(res => deferredNavigationProc.on('exit', code => res(code ?? 0)));
   if (deferredNavigationCode !== 0) throw new Error('Deferred navigation tests failed.');
 
+  console.log('Testing viewer tab titles...');
+  const viewerTitleProc = spawn(process.execPath, [path.join(__dirname, 'test-viewer-title.js')], { stdio: 'inherit' });
+  const viewerTitleCode = await new Promise(res => viewerTitleProc.on('exit', code => res(code ?? 0)));
+  if (viewerTitleCode !== 0) throw new Error('Viewer title tests failed.');
+
   console.log('Testing the FSRS scheduler and optimizer...');
   const fsrsProc = spawn(process.execPath, [path.join(__dirname, 'test-fsrs.js')], { stdio: 'inherit' });
   const fsrsCode = await new Promise(res => fsrsProc.on('exit', code => res(code ?? 0)));

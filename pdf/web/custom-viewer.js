@@ -303,6 +303,12 @@ if (!fileUrl && !hasChromeStorage()) {
     fileUrl = '../../test_highlight.pdf';
 }
 
+// Name the tab from the address straight away, so a slow or failed load
+// still says which PDF it is; applyDocumentTitle refines it after loading.
+if (fileUrl && /\.pdf$/i.test(urlFileName(fileUrl))) {
+    document.title = urlFileName(fileUrl);
+}
+
 function hasChromeStorage() {
     return typeof chrome !== 'undefined' && Boolean(chrome && chrome.storage && chrome.storage.local);
 }
@@ -2497,6 +2503,7 @@ async function loadPDF() {
         pdfDoc.getOutline().then(outline => {
             renderOutline(outline);
         }).catch(err => console.error("Error fetching outline", err));
+        applyDocumentTitle();
 
         // Deep link or auto-resume. A #page=N / named-destination fragment
         // forwarded from the original URL names a page explicitly and so
@@ -4683,6 +4690,54 @@ function documentBaseName() {
         return (/\.pdf$/i.test(name) ? name.slice(0, -4) : name) || 'document';
     } catch {
         return 'document';
+    }
+}
+
+// Tab title: the document's name, as Chrome's own PDF viewer shows it.
+// Every viewer tab used to keep the static page title, so a window of open
+// PDFs was a row of identical tabs with nothing to tell them apart. Order:
+// the server's download name, a .pdf name in the address, the title
+// embedded in the PDF, then whatever the address ends in. Endpoint
+// addresses (/download, /viewer/secure/pdf/<hash>) name nothing useful,
+// which is why the embedded title outranks them.
+function urlFileName(url) {
+    try {
+        const segment = new URL(url, window.location.href).pathname.split('/').pop() || '';
+        try {
+            return decodeURIComponent(segment).trim();
+        } catch {
+            return segment.trim();
+        }
+    } catch {
+        return '';
+    }
+}
+
+// Same screening as PDF.js's own viewer: Ghostscript writes "Untitled" or
+// mis-encoded dc:title entries, and those fall back to the Info title.
+function embeddedPdfTitle(info, metadata) {
+    const dcTitle = metadata && typeof metadata.get === 'function' ? metadata.get('dc:title') : null;
+    if (typeof dcTitle === 'string' && dcTitle.trim() && dcTitle !== 'Untitled' && !/[\uFFF0-\uFFFF]/.test(dcTitle)) {
+        return dcTitle.trim();
+    }
+    return info && typeof info.Title === 'string' ? info.Title.trim() : '';
+}
+
+function documentTitleFor(urlName, dispositionName, embeddedTitle) {
+    if (dispositionName) return dispositionName;
+    if (/\.pdf$/i.test(urlName)) return urlName;
+    return embeddedTitle || urlName;
+}
+
+async function applyDocumentTitle() {
+    try {
+        const { info, metadata, contentDispositionFilename } = await pdfDoc.getMetadata();
+        const title = documentTitleFor(urlFileName(fileUrl),
+            typeof contentDispositionFilename === 'string' ? contentDispositionFilename.trim() : '',
+            embeddedPdfTitle(info, metadata));
+        if (title) document.title = title;
+    } catch (e) {
+        // Unreadable metadata leaves the address-derived title in place.
     }
 }
 

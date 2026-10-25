@@ -2798,9 +2798,40 @@ function markRedirected(tabId, originalUrl, isBypass) {
   persistRedirectedTabs();
 }
 
+// Tabs opened for a PDF: a Drive download, a link opened in a new tab, a
+// local file double-clicked in Explorer. When that PDF is already open in a
+// viewer tab, such a tab is closed in favor of the open one instead of
+// stacking another identical copy (see switchToOpenViewer). A tab counts
+// as opened for the PDF until it commits a real page; about:blank and the
+// new-tab page don't count, so a PDF link clicked on a page the user was
+// reading keeps its tab and back history. Memory only: the onCreated event
+// keeps the worker alive through the navigation that follows it, and a
+// worker restarted in between just converts the tab as before.
+const FRESH_TAB_WINDOW_MS = 30000;
+const BLANK_TAB_URL = /^(about:blank|(chrome|brave|edge):\/\/(newtab|new-tab-page)\b|chrome-search:)/i;
+const freshTabs = new Map(); // tabId -> { ts, windowId, incognito }
+
+chrome.tabs.onCreated.addListener((tab) => {
+  const now = Date.now();
+  for (const [id, e] of freshTabs) {
+    if (now - e.ts >= FRESH_TAB_WINDOW_MS) freshTabs.delete(id);
+  }
+  freshTabs.set(tab.id, { ts: now, windowId: tab.windowId, incognito: Boolean(tab.incognito) });
+});
+
+chrome.webNavigation.onCommitted.addListener((details) => {
+  if (details.frameId === 0 && !BLANK_TAB_URL.test(details.url)) freshTabs.delete(details.tabId);
+});
+
+function freshTabEntry(tabId) {
+  const entry = freshTabs.get(tabId);
+  return entry && Date.now() - entry.ts < FRESH_TAB_WINDOW_MS ? entry : null;
+}
+
 // Closed tabs release their entries immediately instead of lingering to TTL.
 chrome.tabs.onRemoved.addListener((tabId) => {
   navFragments.delete(tabId);
+  freshTabs.delete(tabId);
   if (redirectedTabs.delete(tabId)) {
     persistRedirectedTabs();
   }
@@ -2896,7 +2927,61 @@ function buildViewerUrl(originalUrl, fragment) {
   return fragment ? viewerUrl + fragment : viewerUrl;
 }
 
+// The viewer tab already showing this document, or null. Prefers the new
+// tab's window, then the most recently used. Tabs of the other browsing
+// mode never match: an incognito PDF must not surface a normal window, nor
+// the reverse.
+async function findOpenViewerTab(excludeTabId, originalUrl, fresh) {
+  const documentUrl = urlWithoutFragment(originalUrl);
+  let tabs;
+  try {
+    tabs = await chrome.tabs.query({ url: chrome.runtime.getURL('pdf/web/custom-viewer.html') + '*' });
+  } catch (e) {
+    return null;
+  }
+  const matches = (tabs || []).filter((t) => {
+    if (t.id === excludeTabId || Boolean(t.incognito) !== fresh.incognito || typeof t.url !== 'string') return false;
+    try {
+      const file = new URL(t.url).searchParams.get('file');
+      return file !== null && urlWithoutFragment(file) === documentUrl;
+    } catch (e) {
+      return false;
+    }
+  });
+  matches.sort((a, b) => ((b.windowId === fresh.windowId) - (a.windowId === fresh.windowId)) ||
+    ((b.lastAccessed || 0) - (a.lastAccessed || 0)));
+  return matches[0] || null;
+}
+
+// Brings an already-open viewer of this PDF to the front and closes the tab
+// just opened for it. A deep link (#page=N) reaches the open viewer as a
+// hash change, which it follows without reloading. Resolves false, leaving
+// the new tab to convert as usual, when there is no such viewer or it could
+// not be shown.
+async function switchToOpenViewer(tabId, fresh, originalUrl, viewerUrl, hasFragment) {
+  const existing = await findOpenViewerTab(tabId, originalUrl, fresh);
+  if (!existing) return false;
+  const props = hasFragment ? { active: true, url: viewerUrl } : { active: true };
+  const shown = await new Promise((resolve) => {
+    chrome.tabs.update(existing.id, props, () => {
+      const err = chrome.runtime.lastError;
+      resolve(!err);
+    });
+  });
+  if (!shown) return false;
+  chrome.windows.update(existing.windowId, { focused: true }, () => {
+    void chrome.runtime.lastError;
+  });
+  chrome.tabs.remove(tabId, () => {
+    void chrome.runtime.lastError;
+  });
+  return true;
+}
+
 async function redirectToPdfViewer(tabId, originalUrl) {
+  // Read before the first await: the native PDF handling racing this
+  // takeover can commit in the tab meanwhile and end its freshness.
+  const fresh = freshTabEntry(tabId);
   await Promise.all([redirectedTabsLoaded, pdfViewerEnabledLoaded]);
   if (!pdfViewerEnabled) return;
   if (isAlreadyRedirected(tabId, originalUrl)) return; // dedupe across listeners
@@ -2911,6 +2996,7 @@ async function redirectToPdfViewer(tabId, originalUrl) {
     ? originalUrl.slice(hashIdx)
     : recallNavFragment(tabId, originalUrl);
   const viewerUrl = buildViewerUrl(originalUrl, fragment);
+  if (fresh && await switchToOpenViewer(tabId, fresh, originalUrl, viewerUrl, Boolean(fragment))) return;
   chrome.tabs.update(tabId, { url: viewerUrl }, () => {
     const err = chrome.runtime.lastError;
     if (err) {

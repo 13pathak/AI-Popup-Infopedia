@@ -38,8 +38,8 @@ function harness() {
     runtime: { lastError: null, id: 'test', getURL: p => p, onMessage: { addListener: fn => listeners.push(fn) }, onStartup: event(), onInstalled: event() },
     storage: { local: area(store), sync: area({}), session: area({}), onChanged: event() },
     commands: { onCommand: event() }, alarms: { create() {}, onAlarm: event() },
-    tabs: { onRemoved: event() }, downloads: { onChanged: event() },
-    webNavigation: { onBeforeNavigate: event() }, webRequest: { onBeforeRequest: event(), onHeadersReceived: event() },
+    tabs: { onCreated: event(), onRemoved: event() }, downloads: { onChanged: event() },
+    webNavigation: { onBeforeNavigate: event(), onCommitted: event() }, webRequest: { onBeforeRequest: event(), onHeadersReceived: event() },
     action: { setBadgeText() {}, setBadgeBackgroundColor() {} }
   };
   const worker = vm.createContext({ chrome, console, setTimeout, clearTimeout, URL, TextDecoder, TextEncoder, AbortController });

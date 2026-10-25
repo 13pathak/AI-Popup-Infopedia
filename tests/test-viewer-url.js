@@ -10,7 +10,11 @@ const path = require('path');
 const vm = require('vm');
 
 const EXT_ID = 'a'.repeat(32);
-const tabsUpdates = []; // { tabId, url } for every chrome.tabs.update call
+const tabsUpdates = []; // { tabId, url, active } for every chrome.tabs.update call
+const removedTabs = []; // tab ids passed to chrome.tabs.remove
+const focusedWindows = []; // window ids passed to chrome.windows.update
+let openTabs = []; // what chrome.tabs.query sees: { id, url, windowId, incognito, lastAccessed }
+const failingUpdates = new Set(); // tab ids whose tabs.update reports lastError
 
 // Event surfaces whose handlers the test fires: addListener captures them.
 function eventSurface() {
@@ -44,8 +48,10 @@ function storageArea() {
 
 const events = {
     webNavigationOnBeforeNavigate: eventSurface(),
+    webNavigationOnCommitted: eventSurface(),
     webRequestOnBeforeRequest: eventSurface(),
     webRequestOnHeadersReceived: eventSurface(),
+    tabsOnCreated: eventSurface(),
     tabsOnRemoved: eventSurface(),
     storageOnChanged: eventSurface(),
     runtimeOnInstalled: eventSurface(),
@@ -76,16 +82,34 @@ const chromeStub = {
     },
     tabs: {
         update: (tabId, props, cb) => {
-            tabsUpdates.push({ tabId, url: props.url });
+            tabsUpdates.push({ tabId, url: props.url, active: props.active });
+            if (failingUpdates.has(tabId)) chromeStub.runtime.lastError = { message: 'No tab with id: ' + tabId };
             if (typeof cb === 'function') cb();
+            chromeStub.runtime.lastError = null;
         },
         create: (props, cb) => { if (typeof cb === 'function') cb(); },
-        query: (q, cb) => { if (typeof cb === 'function') cb([]); },
+        // Match patterns here are only ever "<prefix>*".
+        query: (q, cb) => {
+            const result = openTabs.filter(t => !q.url || t.url.startsWith(q.url.slice(0, -1)));
+            if (typeof cb === 'function') cb(result);
+            return Promise.resolve(result);
+        },
+        remove: (tabId, cb) => {
+            removedTabs.push(tabId);
+            if (typeof cb === 'function') cb();
+        },
         sendMessage: (tabId, msg, cb) => { if (typeof cb === 'function') cb({}); },
         getCurrent: (cb) => { if (typeof cb === 'function') cb(undefined); },
+        onCreated: events.tabsOnCreated,
         onRemoved: events.tabsOnRemoved
     },
-    webNavigation: { onBeforeNavigate: events.webNavigationOnBeforeNavigate },
+    windows: {
+        update: (windowId, props, cb) => {
+            focusedWindows.push(windowId);
+            if (typeof cb === 'function') cb();
+        }
+    },
+    webNavigation: { onBeforeNavigate: events.webNavigationOnBeforeNavigate, onCommitted: events.webNavigationOnCommitted },
     webRequest: { onBeforeRequest: events.webRequestOnBeforeRequest, onHeadersReceived: events.webRequestOnHeadersReceived },
     alarms: {
         create: () => {},
@@ -304,6 +328,103 @@ async function main() {
         await settle();
         assert(updatesFor(tabId).length === 0, `${type} PDF requests do not redirect the tab`);
     }
+
+    // ---- Reusing an open viewer tab instead of stacking a duplicate ----
+    // A tab opened for a PDF that a viewer tab already shows is closed and
+    // the open viewer is brought forward; anything else converts in place.
+    const openTab = (tabId, windowId = 1, incognito = false) =>
+        events.tabsOnCreated._fire({ id: tabId, windowId, incognito });
+    const viewerTab = (id, url, extra = {}) => ({ id, url: fileOf(url), windowId: 1, incognito: false, lastAccessed: 1, ...extra });
+    openTabs = [viewerTab(100, 'https://example.com/dup.pdf'), viewerTab(101, 'https://example.com/other.pdf')];
+
+    openTab(60);
+    navigateGet({ frameId: 0, tabId: 60, url: 'https://example.com/dup.pdf' });
+    await settle();
+    assert(updatesFor(60).length === 0, 'a new tab for an already-open PDF is not converted into a second viewer', updatesFor(60));
+    assert(removedTabs.includes(60), 'the duplicate tab is closed', removedTabs);
+    ups = updatesFor(100);
+    assert(ups.length === 1 && ups[0].active === true && ups[0].url === undefined,
+        'the open viewer is activated without reloading it', ups);
+    assert(focusedWindows.includes(1), "the open viewer's window is focused", focusedWindows);
+
+    // A deep link reaches the open viewer as a hash change.
+    openTab(61);
+    navigateGet({ frameId: 0, tabId: 61, url: 'https://example.com/dup.pdf#page=7' });
+    await settle();
+    ups = updatesFor(100);
+    assert(removedTabs.includes(61) && ups.length === 2 && ups[1].url === fileOf('https://example.com/dup.pdf') + '#page=7',
+        'a deep link is handed to the open viewer on its hash', ups);
+
+    // The user's case: the same local file double-clicked again.
+    openTabs.push(viewerTab(102, 'file:///C:/Readers/C7A.pdf'));
+    openTab(62);
+    events.webNavigationOnBeforeNavigate._fire({ frameId: 0, tabId: 62, url: 'file:///C:/Readers/C7A.pdf' });
+    await settle();
+    assert(updatesFor(62).length === 0 && removedTabs.includes(62) && updatesFor(102).length === 1,
+        'a local PDF opened again switches to its open viewer', { tab: updatesFor(62), removedTabs });
+
+    // Viewer tabs from before ?file= went fragment-free still match.
+    openTabs.push({ ...viewerTab(103, 'x'), url: fileOf('https://example.com/legacy.pdf#page=3') });
+    openTab(63);
+    navigateGet({ frameId: 0, tabId: 63, url: 'https://example.com/legacy.pdf' });
+    await settle();
+    assert(removedTabs.includes(63) && updatesFor(103).length === 1, 'a legacy viewer URL with an encoded fragment still matches');
+
+    // A tab the user navigated in place keeps its page history: converted, never closed.
+    navigateGet({ frameId: 0, tabId: 64, url: 'https://example.com/dup.pdf' });
+    await settle();
+    assert(updatesFor(64).length === 1 && !removedTabs.includes(64), 'a PDF link followed in an existing tab still converts that tab');
+
+    openTab(65);
+    events.webNavigationOnCommitted._fire({ frameId: 0, tabId: 65, url: 'https://example.com/reading-list' });
+    navigateGet({ frameId: 0, tabId: 65, url: 'https://example.com/dup.pdf' });
+    await settle();
+    assert(updatesFor(65).length === 1 && !removedTabs.includes(65), 'a new tab that already showed a page is not closed');
+
+    // about:blank, the new-tab page and subframe commits don't count as a page.
+    openTab(66);
+    events.webNavigationOnCommitted._fire({ frameId: 0, tabId: 66, url: 'about:blank' });
+    events.webNavigationOnCommitted._fire({ frameId: 0, tabId: 66, url: 'chrome://newtab/' });
+    events.webNavigationOnCommitted._fire({ frameId: 3, tabId: 66, url: 'https://ads.example.com/frame' });
+    navigateGet({ frameId: 0, tabId: 66, url: 'https://example.com/dup.pdf' });
+    await settle();
+    assert(updatesFor(66).length === 0 && removedTabs.includes(66), 'a tab that only showed the new-tab page is still a duplicate');
+
+    // A different document opens normally.
+    openTab(67);
+    navigateGet({ frameId: 0, tabId: 67, url: 'https://example.com/fresh.pdf' });
+    await settle();
+    assert(updatesFor(67).length === 1 && !removedTabs.includes(67), 'a PDF that is not open yet opens in its new tab');
+
+    // Incognito and normal windows never surface each other.
+    openTab(68, 2, true);
+    navigateGet({ frameId: 0, tabId: 68, url: 'https://example.com/dup.pdf' });
+    await settle();
+    assert(updatesFor(68).length === 1 && !removedTabs.includes(68), 'an incognito tab does not switch to a normal-window viewer');
+
+    // Several matches: the new tab's own window wins over a more recent one elsewhere.
+    openTabs.push(viewerTab(104, 'https://example.com/both.pdf', { windowId: 9, lastAccessed: 50 }),
+        viewerTab(105, 'https://example.com/both.pdf', { windowId: 4, lastAccessed: 10 }));
+    openTab(69, 4);
+    navigateGet({ frameId: 0, tabId: 69, url: 'https://example.com/both.pdf' });
+    await settle();
+    assert(updatesFor(105).length === 1 && updatesFor(104).length === 0, "the match in the new tab's window is preferred");
+
+    // If the open viewer cannot be shown, the new tab converts instead.
+    openTabs.push(viewerTab(106, 'https://example.com/gone.pdf'));
+    failingUpdates.add(106);
+    openTab(70);
+    navigateGet({ frameId: 0, tabId: 70, url: 'https://example.com/gone.pdf' });
+    await settle();
+    assert(updatesFor(70).length === 1 && updatesFor(70)[0].url === fileOf('https://example.com/gone.pdf') && !removedTabs.includes(70),
+        'a viewer that vanished mid-switch falls back to converting the new tab', updatesFor(70));
+
+    // A closed tab stops counting as new (ids are not reused, but entries must not linger).
+    openTab(71);
+    events.tabsOnRemoved._fire(71);
+    navigateGet({ frameId: 0, tabId: 71, url: 'https://example.com/dup.pdf' });
+    await settle();
+    assert(!removedTabs.includes(71), 'a removed tab is forgotten');
 
     console.log(process.exitCode ? 'VIEWER-URL TEST FAILED' : 'VIEWER-URL TEST PASSED');
     process.exit(process.exitCode || 0);

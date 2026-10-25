@@ -104,6 +104,7 @@ function makeChromeStub({ local = {}, sync = {}, session = {} } = {}) {
       query: (q, cb) => cb([]),
       sendMessage: (id, msg, cb) => { if (cb) cb({}); },
       getCurrent: (cb) => cb(null),
+      onCreated: on('tabs.onCreated'),
       onRemoved: on('tabs.onRemoved'),
     },
     alarms: {
@@ -120,7 +121,7 @@ function makeChromeStub({ local = {}, sync = {}, session = {} } = {}) {
       download: (opts, cb) => { if (cb) cb(1); },
       onChanged: on('downloads.onChanged'),
     },
-    webNavigation: { onBeforeNavigate: on('webNavigation.onBeforeNavigate'), onHistoryStateUpdated: on('webNavigation.onHistoryStateUpdated') },
+    webNavigation: { onBeforeNavigate: on('webNavigation.onBeforeNavigate'), onCommitted: on('webNavigation.onCommitted'), onHistoryStateUpdated: on('webNavigation.onHistoryStateUpdated') },
     webRequest: { onBeforeRequest: on('webRequest.onBeforeRequest'), onHeadersReceived: on('webRequest.onHeadersReceived') },
     commands: { onCommand: on('commands.onCommand') },
     contextMenus: { onClicked: on('contextMenus.onClicked'), create: () => {} },

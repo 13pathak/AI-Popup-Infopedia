@@ -24,7 +24,7 @@ function harness({ hash = '', resumePage = 1, ratio = null, destination, pageInd
         window: { location: { hash }, addEventListener(type, listener) { if (type === 'hashchange') hashListener = listener; } },
         document: { querySelector: () => null, getElementById: () => container },
         pdfjsLib: { getDocument: () => ({ promise: loading ? loading.promise : Promise.resolve(doc) }) },
-        loadStorageData: async () => {}, recoverEmbeddedAnnotations: async () => {},
+        loadStorageData: async () => {}, recoverEmbeddedAnnotations: async () => {}, applyDocumentTitle() {},
         renderAllPages: () => build ? build.promise : Promise.resolve(),
         pageCountSpan: {}, renderOutline() {}, updatePageNumber() {},
         scrollToPage(page) { jumps.push(page); container.scrollTop = page * 100; },
