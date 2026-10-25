@@ -523,6 +523,34 @@ async function run() {
     return { restingGap, secondAligned, firstAligned: Math.abs(card(0).left - viewport().left) < 0.5 };
   })()`), { restingGap: 16, secondAligned: true, firstAligned: true }, 'cards sit a gap apart and slides land on them');
 
+  // Split Save button: the list arrow is visibly its own part in both
+  // themes (its own darker shade, a divider in the button's text colour),
+  // and it looks pressed with its chevron flipped while the list is open.
+  assert.deepEqual(await evaluate(`(async () => {
+    const instance = activePopups.at(-1), popup = instance.popup;
+    const arrow = popup.querySelector('.ai-save-split .custom-select');
+    const alpha = value => { const m = value.match(/rgba?\\(([^)]+)\\)/); const parts = m ? m[1].split(',').map(Number) : []; return parts.length === 4 ? parts[3] : (m ? 1 : 0); };
+    const out = {};
+    for (const theme of ['light', 'dark']) {
+      applyThemeToPopupContainer(instance.container, theme);
+      const style = getComputedStyle(arrow), divider = getComputedStyle(arrow, '::before');
+      out[theme] = { shaded: alpha(style.backgroundColor) >= 0.1, divider: divider.width === '1px' && Number(divider.opacity) >= 0.5 && divider.backgroundColor === style.color };
+    }
+    const chevron = () => getComputedStyle(arrow.querySelector(':scope > span:last-child')).transform;
+    const closedShade = alpha(getComputedStyle(arrow).backgroundColor);
+    arrow.click();
+    await new Promise(resolve => setTimeout(resolve, 200));
+    out.open = { expanded: arrow.getAttribute('aria-expanded'), flipped: chevron() !== 'none', darker: alpha(getComputedStyle(arrow).backgroundColor) > closedShade };
+    arrow.click();
+    await new Promise(resolve => setTimeout(resolve, 200));
+    out.closed = { expanded: arrow.getAttribute('aria-expanded'), flipped: chevron() !== 'none' };
+    applyThemeToPopupContainer(instance.container, 'dark');
+    return out;
+  })()`), {
+    light: { shaded: true, divider: true }, dark: { shaded: true, divider: true },
+    open: { expanded: 'true', flipped: true, darker: true }, closed: { expanded: 'false', flipped: false }
+  }, 'the list arrow reads as its own part of the Save button');
+
   // Resize: dragging the bottom-left grip grows the popup left and down
   // (right edge fixed), saves the size, new popups open at it, and a
   // double-click on the grip returns to the default size.

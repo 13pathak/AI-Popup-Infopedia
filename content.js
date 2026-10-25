@@ -1628,8 +1628,8 @@ const popupStyles = `
 
   /* Split Save button in the toolbar: the main part saves the answer on
      screen, the arrow picks the list (which the answers' bookmarks use too).
-     One accent pill divided by a hairline; the list panel anchors to the
-     whole group, not the arrow. */
+     One accent pill; the arrow is its own darker segment behind a divider,
+     and the list panel anchors to the whole group, not the arrow. */
   .ai-popup-actions .ai-save-split {
     position: relative;
     display: flex;
@@ -1670,18 +1670,40 @@ const popupStyles = `
     min-width: 0;
     margin: 0;
   }
+  /* The arrow segment: a darker shade of the pill, set off by a divider in
+     the button's own text colour (dark on the dark theme's mint, white on
+     the light theme's teal, so it shows in both), with its own hover, a
+     pressed look while the list is open, and a chevron that flips. */
   .ai-popup-actions .ai-save-split .custom-select {
+    position: relative;
     height: 100%;
-    padding: 0 10px 0 8px;
+    padding: 0 12px 0 10px;
     border: none;
-    border-left: 1px solid rgba(0, 0, 0, 0.2);
     border-radius: 0 999px 999px 0;
-    background: transparent;
+    background: rgba(0, 0, 0, 0.13);
     color: var(--popup-accent-btn-text);
+    transition: background-color 140ms ease;
   }
-  .ai-popup-actions .ai-save-split .custom-select:hover { background: var(--popup-accent-btn-hover); }
+  .ai-popup-actions .ai-save-split .custom-select::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 7px;
+    bottom: 7px;
+    width: 1px;
+    background: currentColor;
+    opacity: 0.5;
+  }
+  .ai-popup-actions .ai-save-split .custom-select:hover { background: rgba(0, 0, 0, 0.21); }
+  .ai-popup-actions .ai-save-split .custom-select[aria-expanded="true"] { background: rgba(0, 0, 0, 0.26); }
   .ai-popup-actions .ai-save-split .custom-select-value { display: none; }
-  .ai-popup-actions .ai-save-split .custom-select > span:last-child { margin-left: 0; display: inline-flex; }
+  .ai-popup-actions .ai-save-split .custom-select > span:last-child {
+    margin-left: 0;
+    display: inline-flex;
+    transition: transform 150ms ease;
+  }
+  .ai-popup-actions .ai-save-split .custom-select svg { width: 15px; height: 15px; stroke-width: 2.5; }
+  .ai-popup-actions .ai-save-split .custom-select[aria-expanded="true"] > span:last-child { transform: rotate(180deg); }
   .ai-popup-actions .ai-save-split .custom-options {
     left: auto;
     right: 0;
