@@ -2154,7 +2154,8 @@ async function renderPageContent(pageDiv) {
             viewport.width * viewport.height * outputScale * outputScale > 2 ** 28) {
             const sideFactor = 65535 / cssLongSide;
             const areaFactor = Math.sqrt((2 ** 28) / (viewport.width * viewport.height));
-            outputScale = Math.max(1, Math.min(sideFactor, areaFactor));
+            // Huge CSS viewports may require a backing scale below 1.
+            outputScale = Math.min(outputScale, sideFactor, areaFactor);
         }
 
         const canvas = document.createElement('canvas');

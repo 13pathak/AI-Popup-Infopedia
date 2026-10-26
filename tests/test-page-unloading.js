@@ -12,7 +12,7 @@ function deferred() {
     return { promise, resolve };
 }
 
-function harness() {
+function harness(devicePixelRatio = 1) {
     const canvases = [], errors = [];
     let observer, overlays = 0;
     function element(tagName) {
@@ -41,7 +41,7 @@ function harness() {
     const context = vm.createContext({
         console: { error(...args) { errors.push(args); } },
         document: { createElement: element, getElementById: () => ({}) },
-        window: { devicePixelRatio: 1 },
+        window: { devicePixelRatio },
         IntersectionObserver: class { constructor(callback) { observer = callback; } },
         getAnnotationRenderPage: async page => page,
         pdfjsLib: {
@@ -71,8 +71,8 @@ function harness() {
                 pageNumber: number, jobs: [],
                 getTextContent: async () => ({ items: [], styles: {} }),
                 getAnnotations: () => annotations,
-                render() {
-                    const job = { raster: deferred(), text: deferred() };
+                render(options) {
+                    const job = { raster: deferred(), text: deferred(), options };
                     this.jobs.push(job);
                     return { promise: job.raster.promise };
                 }
@@ -88,6 +88,31 @@ function harness() {
 }
 
 (async () => {
+    // CSS geometry stays exact even when a huge page requires less than
+    // one raster pixel per CSS pixel. Ordinary HiDPI pages remain sharp.
+    for (const [width, height, density] of [
+        [20000, 20000, 1], [20000, 20000, 2], [100000, 100, 1],
+        [100, 100000, 2], [800, 1200, 1.25], [800, 1200, 2], [800, 1200, 0]
+    ]) {
+        const sized = harness(density), page = sized.page();
+        page._viewport = { ...page._viewport, width, height };
+        sized.observe(page, true); await tick();
+        const canvas = sized.canvases[0];
+        assert.ok(canvas.width <= 65535 && canvas.height <= 65535, 'backing sides stay within browser limits');
+        assert.ok(canvas.width * canvas.height <= 2 ** 28, 'backing area stays within browser limits');
+        assert.equal(canvas.style.width, `${width}px`);
+        assert.equal(canvas.style.height, `${height}px`);
+        const { viewport, transform } = page._pdfPage.jobs[0].options;
+        assert.equal(viewport, page._viewport, 'PDF/text geometry is unchanged');
+        const rasterScale = transform ? transform[0] : 1;
+        assert.equal(canvas.width, Math.floor(width * rasterScale));
+        assert.equal(canvas.height, Math.floor(height * rasterScale));
+        if (width === 800) assert.equal(rasterScale, density || 1, 'ordinary pages use the display density');
+        else assert.ok(rasterScale < 1, 'oversized CSS pages can downsample below 1');
+        await sized.finish(page);
+        assert.equal(page.dataset.loaded, 'true');
+        assert.deepEqual(sized.errors, []);
+    }
     const h = harness();
     const page = h.page();
     h.observe(page, true);
