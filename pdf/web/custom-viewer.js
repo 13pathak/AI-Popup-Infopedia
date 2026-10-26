@@ -2775,10 +2775,10 @@ function showLoadError(err) {
 // only for visible pages), so Chrome's print of this page produces blank
 // paper — the offscreen page divs have nothing in them. Instead, render
 // every page from the already-loaded pdfDoc into the hidden #print-container
-// at a fixed print scale; @media print swaps it in for the viewer chrome.
-// Raster scale bounds in PDF points: 1.5x (~108dpi) is the legibility
-// floor, 3x (~216dpi) the crispness ceiling. Long documents step down
-// along a total-pixel budget: hundreds of full-resolution print canvases
+// at a bounded print scale; @media print swaps it in for the viewer chrome.
+// Raster scale is capped at 3x (~216dpi). Each page gets an equal share
+// of the total-pixel budget, even when page sizes differ. There is no
+// minimum scale overriding that budget: hundreds of full-resolution canvases
 // exceed Chrome's canvas memory, and evicted backing stores raster as
 // black boxes in the print preview.
 const PRINT_TOTAL_PIXEL_BUDGET = 2e8;
@@ -3002,7 +3002,7 @@ async function printPDF() {
     container.innerHTML = '';
     // Whatever sheet this wipe just detached is gone for good.
     printNoticeSheet = null;
-    let printScale = 3;
+    let printCompleted = false;
 
     try {
         const total = pdfDoc.numPages;
@@ -3011,10 +3011,10 @@ async function printPDF() {
             progress.textContent = `Preparing page ${pageNum} of ${total} for printing…`;
 
             const page = await pdfDoc.getPage(pageNum);
+            const base = page.getViewport({ scale: 1 });
 
             if (pageNum === 1) {
-                const base = page.getViewport({ scale: 1 });
-                // Paper declaration + scale budget, both derived from page 1.
+                // The paper declaration is derived from page 1.
                 // PDF points are 1/72in; .print-page wrappers are sized to
                 // exactly these values (clamped by the page box) and clip
                 // their canvases, which is what keeps pages whose sizes
@@ -3029,15 +3029,14 @@ async function printPDF() {
                 }
                 pageStyle.textContent = `@page { size: ${wIn}in ${hIn}in; margin: 0; }
 :root { --print-paper-w: ${wIn}in; --print-paper-h: ${hIn}in; }`;
-
-                printScale = Math.min(
-                    3,
-                    Math.max(1.5, Math.sqrt((PRINT_TOTAL_PIXEL_BUDGET / total) / (base.width * base.height))),
-                    65535 / Math.max(base.width, base.height),
-                    Math.sqrt((2 ** 28) / (base.width * base.height))
-                );
             }
 
+            const printScale = Math.min(
+                3,
+                Math.sqrt((PRINT_TOTAL_PIXEL_BUDGET / total) / (base.width * base.height)),
+                65535 / Math.max(base.width, base.height),
+                Math.sqrt((2 ** 28) / (base.width * base.height))
+            );
             const viewport = page.getViewport({ scale: printScale });
 
             const pageWrap = document.createElement('div');
@@ -3074,6 +3073,7 @@ async function printPDF() {
             printFromPipeline = true;
             try {
                 window.print();
+                printCompleted = true;
             } finally {
                 printFromPipeline = false;
             }
@@ -3085,8 +3085,8 @@ async function printPDF() {
         }
     } finally {
         overlay.classList.add('hidden');
-        if (printJobCancelled) container.innerHTML = '';
-        // The cancel branch above already wiped the whole container; on
+        if (!printCompleted) container.innerHTML = '';
+        // A cancelled or failed job already wiped the whole container; on
         // every other exit the sheet is either detached or was never
         // added, so dropping the reference here is always safe.
         printNoticeSheet = null;

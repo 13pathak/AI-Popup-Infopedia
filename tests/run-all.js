@@ -221,6 +221,11 @@ async function run() {
   const unloadingCode = await new Promise(res => unloadingProc.on('exit', code => res(code ?? 0)));
   if (unloadingCode !== 0) throw new Error('Page unloading tests failed.');
 
+  console.log('Testing PDF print memory limits...');
+  const printBudgetProc = spawn(process.execPath, [path.join(__dirname, 'test-print-budget.js')], { stdio: 'inherit' });
+  const printBudgetCode = await new Promise(res => printBudgetProc.on('exit', code => res(code ?? 0)));
+  if (printBudgetCode !== 0) throw new Error('Print budget tests failed.');
+
   console.log('Testing rotated-text search geometry...');
   const searchGeometryProc = spawn(process.execPath, [path.join(__dirname, 'test-search-geometry.js')], { stdio: 'inherit' });
   const searchGeometryCode = await new Promise(res => searchGeometryProc.on('exit', code => res(code ?? 0)));
