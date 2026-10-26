@@ -246,9 +246,12 @@ const sidebar = document.getElementById('sidebar');
 const tabComments = document.getElementById('icon-tab-comments');
 const tabOutline = document.getElementById('icon-tab-outline');
 const tabBookmarks = document.getElementById('icon-tab-bookmarks');
+const tabSearch = document.getElementById('icon-tab-search');
+const sidebarTabs = [tabComments, tabOutline, tabBookmarks, tabSearch];
 const contentComments = document.getElementById('sidebar-content-comments');
 const contentOutline = document.getElementById('sidebar-content-outline');
 const contentBookmarks = document.getElementById('sidebar-content-bookmarks');
+const contentSearch = document.getElementById('sidebar-content-search');
 const sidebarTitle = document.getElementById('sidebar-title');
 
 // Store highlights in memory: { id: 1, pageNum: 1, rects: [], color: '#FFFF98', text: '...' }
@@ -5286,6 +5289,10 @@ let currentSearchQuery = '';
 let searchResults = [];
 let activeMatchIndex = -1;
 let searchGeneration = 0;
+let searchInProgress = false;
+let searchError = '';
+let searchPanelStart = 0;
+const SEARCH_RESULTS_PER_PAGE = 100;
 
 const findInput = document.getElementById('findInput');
 const findResultsSpan = document.getElementById('findResults');
@@ -5299,7 +5306,16 @@ if (findInput) {
         if (!findInput.value) clearSearch();
     });
     findInput.addEventListener('keydown', (e) => {
+        if (e.isComposing) return;
+        if (e.key === 'ArrowDown' && !searchInProgress && searchResults.length) {
+            e.preventDefault();
+            switchTab('search');
+            updateSearchResultSelection();
+            document.querySelector('.search-result-card[aria-current="true"]')?.focus();
+            return;
+        }
         if (e.key === 'Enter') {
+            e.preventDefault();
             // Trim only to detect emptiness: leading/trailing spaces are
             // meaningful (whole-word queries like " the "), so the raw
             // value is what gets searched.
@@ -5312,6 +5328,16 @@ if (findInput) {
         }
     });
 }
+
+document.getElementById('search-results-previous').addEventListener('click', () => {
+    searchPanelStart = Math.max(0, searchPanelStart - SEARCH_RESULTS_PER_PAGE);
+    renderSearchResultsPanel();
+});
+document.getElementById('search-results-next').addEventListener('click', () => {
+    if (searchPanelStart + SEARCH_RESULTS_PER_PAGE >= searchResults.length) return;
+    searchPanelStart += SEARCH_RESULTS_PER_PAGE;
+    renderSearchResultsPanel();
+});
 
 // Reconstructs a page's text from a pdf.js text-content payload, shared
 // by search matching and the summarize feature so the two can never
@@ -5327,7 +5353,12 @@ function buildPageText(textContent) {
     let text = '';
     const items = [];
     for (const item of textContent.items) {
-        if (!item.str && item.width === 0) continue;
+        if (!item.str && item.width === 0) {
+            // PDF.js may put the line break in a separate empty item.
+            // Keep its spacing without treating it as drawable text.
+            if (item.hasEOL && text && !/\s$/.test(text)) text += ' ';
+            continue;
+        }
 
         items.push({
             ...item,
@@ -5343,6 +5374,88 @@ function buildPageText(textContent) {
     return { text, items };
 }
 
+function buildSearchSnippet(text, start, end) {
+    const from = Math.max(0, start - 65), to = Math.min(text.length, end + 85);
+    const compact = value => value.replace(/\s+/g, ' ');
+    return {
+        before: (from > 0 ? '…' : '') + compact(text.slice(from, start)),
+        match: compact(text.slice(start, Math.min(end, start + 160))) + (end - start > 160 ? '…' : ''),
+        after: compact(text.slice(end, to)) + (to < text.length ? '…' : '')
+    };
+}
+
+function renderSearchResultsPanel() {
+    const list = document.getElementById('search-result-list');
+    const status = document.getElementById('search-panel-status');
+    const total = searchResults.length;
+    const queryLabel = currentSearchQuery.length > 80 ? currentSearchQuery.slice(0, 80) + '…' : currentSearchQuery;
+    status.textContent = searchError || (searchInProgress ? `Searching for “${queryLabel}”…`
+        : !currentSearchQuery ? 'Enter a phrase in Find, then press Enter.'
+        : !total ? `No matches for “${queryLabel}”. Try another word or phrase.`
+        : `${total} ${total === 1 ? 'match' : 'matches'} for “${queryLabel}”`);
+    list.setAttribute('aria-busy', String(searchInProgress));
+    list.replaceChildren();
+    list.scrollTop = 0;
+    const end = Math.min(total, searchPanelStart + SEARCH_RESULTS_PER_PAGE);
+    for (let index = searchPanelStart; index < end; index++) {
+        const result = searchResults[index];
+        const item = document.createElement('li');
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'search-result-card';
+        button.dataset.matchIndex = index;
+        button.setAttribute('aria-current', String(index === activeMatchIndex));
+        const label = document.createElement('span');
+        label.className = 'search-result-label';
+        label.textContent = `Page ${result.pageNumber} · Match ${index + 1}`;
+        const snippet = document.createElement('span');
+        snippet.className = 'search-result-snippet';
+        const mark = document.createElement('mark');
+        mark.textContent = result.snippet.match;
+        // PDF text is untrusted. Append text nodes, never document HTML.
+        snippet.append(result.snippet.before, mark, result.snippet.after);
+        button.append(label, snippet);
+        button.addEventListener('click', () => selectSearchResult(index));
+        item.appendChild(button);
+        list.appendChild(item);
+    }
+    document.getElementById('search-result-pagination').hidden = total <= SEARCH_RESULTS_PER_PAGE;
+    document.getElementById('search-results-previous').disabled = searchPanelStart === 0;
+    document.getElementById('search-results-next').disabled = end >= total;
+    document.getElementById('search-result-range').textContent = total ? `${searchPanelStart + 1}–${end} of ${total}` : '';
+}
+
+function updateSearchResultSelection() {
+    if (activeMatchIndex >= 0 && (activeMatchIndex < searchPanelStart || activeMatchIndex >= searchPanelStart + SEARCH_RESULTS_PER_PAGE)) {
+        searchPanelStart = Math.floor(activeMatchIndex / SEARCH_RESULTS_PER_PAGE) * SEARCH_RESULTS_PER_PAGE;
+        renderSearchResultsPanel();
+    }
+    const list = document.getElementById('search-result-list');
+    for (const button of list.querySelectorAll('.search-result-card')) {
+        const active = Number(button.dataset.matchIndex) === activeMatchIndex;
+        button.setAttribute('aria-current', String(active));
+        if (active && !contentSearch.classList.contains('hidden') && !sidebar.classList.contains('hidden')) {
+            const bounds = button.getBoundingClientRect(), area = list.getBoundingClientRect();
+            if (bounds.top < area.top) list.scrollTop += bounds.top - area.top;
+            else if (bounds.bottom > area.bottom) list.scrollTop += bounds.bottom - area.bottom;
+        }
+    }
+}
+
+function selectSearchResult(index) {
+    if (!Number.isInteger(index) || !searchResults[index]) return;
+    activeMatchIndex = index;
+    updateSearchUI();
+    renderAllSearchHighlights();
+    // On narrow screens the panel covers the page; return to the passage.
+    if (focusModeActive) setFocusControlsVisible(false);
+    else if (window.matchMedia('(max-width: 980px)').matches) {
+        closeSidebar(false);
+        document.getElementById('viewerContainer').focus({ preventScroll: true });
+    }
+    scrollToActiveMatch();
+}
+
 async function performSearch(query) {
     if (!pdfDoc) return;
     if (!query) {
@@ -5356,128 +5469,146 @@ async function performSearch(query) {
     currentSearchQuery = query;
     searchResults = [];
     activeMatchIndex = -1;
-    findResultsSpan.textContent = "Searching...";
+    searchPanelStart = 0;
+    searchInProgress = true;
+    searchError = '';
+    switchTab('search');
+    updateSearchUI();
+    renderAllSearchHighlights();
 
     const lowerQuery = query.toLowerCase();
 
-    for (let i = 1; i <= pdfDoc.numPages; i++) {
-        const page = await pdfDoc.getPage(i);
-        const textContent = await page.getTextContent();
-        if (gen !== searchGeneration) return; // superseded or cleared
+    try {
+        for (let i = 1; i <= pdfDoc.numPages; i++) {
+            const page = await pdfDoc.getPage(i);
+            const textContent = await page.getTextContent();
+            if (gen !== searchGeneration) return; // superseded or cleared
 
-        const built = buildPageText(textContent);
-        const pageText = built.text;
-        const textItems = built.items;
-        
-        let lowerPageText = pageText.toLowerCase();
-        let lowerToOrigMap = null;
-        if (lowerPageText.length !== pageText.length) {
-            // Lowercasing expanded characters (e.g. 'İ' -> 'i\u0307'). Build
-            // a mapping from lowerPageText code-unit offsets to pageText
-            // offsets so highlights align with the original text geometry.
-            const map = [];
-            let lower = '';
-            for (let c = 0; c < pageText.length; ) {
-                const code = pageText.charCodeAt(c);
-                const charLen = (code >= 0xD800 && code <= 0xDBFF && c + 1 < pageText.length) ? 2 : 1;
-                const char = pageText.slice(c, c + charLen);
-                const lowerChar = char.toLowerCase();
-                for (let k = 0; k < lowerChar.length; k++) {
-                    map.push(c);
-                }
-                lower += lowerChar;
-                c += charLen;
-            }
-            map.push(pageText.length);
-            lowerPageText = lower;
-            lowerToOrigMap = map;
-        }
-        
-        let startIndex = 0;
-        let index;
-        while ((index = lowerPageText.indexOf(lowerQuery, startIndex)) > -1) {
-            let matchStart = index;
-            let matchEnd = index + lowerQuery.length;
-            if (lowerToOrigMap) {
-                matchStart = lowerToOrigMap[index];
-                matchEnd = lowerToOrigMap[index + lowerQuery.length];
-                if (matchEnd <= matchStart) {
-                    const code = pageText.charCodeAt(matchStart);
-                    const charLen = (code >= 0xD800 && code <= 0xDBFF && matchStart + 1 < pageText.length) ? 2 : 1;
-                    matchEnd = matchStart + charLen;
-                }
-            }
-            
-            const matchItems = textItems.filter(item => 
-                (matchStart < item.endIndex) && (matchEnd > item.startIndex)
-            );
-            
-            if (matchItems.length > 0) {
-                const rects = [];
-                for (const item of matchItems) {
-                    // Clip the item to the part actually covered by the
-                    // match and scale proportionally by character count.
-                    // Highlighting the whole overlapping item used to paint
-                    // entire runs for a partial query hit.
-                    const s = Math.max(matchStart, item.startIndex);
-                    const e = Math.min(matchEnd, item.endIndex);
-                    const chars = item.str.length || 1;
-                    const unitW = item.width / chars;
-                    const spanChars = e - s;
-                    if (spanChars <= 0 || unitW <= 0) continue;
-                    const t = item.transform;
-                    // Vertical extent via hypot(c,d): equals |d| (the old
-                    // baseline+height value) for upright text, but stays
-                    // correct when the run is rotated/skewed and |d| alone
-                    // collapses to 0.
-                    const height = Math.hypot(t[2], t[3]);
-                    const offset = (s - item.startIndex) * unitW;
-                    const rect = {
-                        pdfX: t[4] + offset,
-                        pdfY: t[5] + height,
-                        pdfWidth: spanChars * unitW,
-                        pdfHeight: height
-                    };
-                    if (t[1] !== 0 || t[2] !== 0 || t[0] < 0 || t[3] < 0) {
-                        // Non-upright runs carry their full matrix so the
-                        // draw step can place a rotated quad; upright text
-                        // keeps the axis-aligned fast path untouched.
-                        const advanceLength = Math.hypot(t[0], t[1]);
-                        if (!advanceLength) continue;
-                        rect.matrix = t.slice();
-                        // The draw step uses the matrix origin, not pdfX.
-                        // Move it to the matching substring along the run's
-                        // advance vector, without changing cached text data.
-                        rect.matrix[4] += offset * t[0] / advanceLength;
-                        rect.matrix[5] += offset * t[1] / advanceLength;
-                        rect.dirWidth = rect.pdfWidth;
-                        rect.dirHeight = height;
+            const built = buildPageText(textContent);
+            const pageText = built.text;
+            const textItems = built.items;
+
+            let lowerPageText = pageText.toLowerCase();
+            let lowerToOrigMap = null;
+            if (lowerPageText.length !== pageText.length) {
+                // Lowercasing expanded characters (e.g. 'İ' -> 'i\u0307'). Build
+                // a mapping from lowerPageText code-unit offsets to pageText
+                // offsets so highlights align with the original text geometry.
+                const map = [];
+                let lower = '';
+                for (let c = 0; c < pageText.length; ) {
+                    const code = pageText.charCodeAt(c);
+                    const charLen = (code >= 0xD800 && code <= 0xDBFF && c + 1 < pageText.length) ? 2 : 1;
+                    const char = pageText.slice(c, c + charLen);
+                    const lowerChar = char.toLowerCase();
+                    for (let k = 0; k < lowerChar.length; k++) {
+                        map.push(c);
                     }
-                    rects.push(rect);
+                    lower += lowerChar;
+                    c += charLen;
                 }
-
-                if (rects.length > 0) {
-                    searchResults.push({
-                        pageNumber: i,
-                        rects: rects
-                    });
-                }
+                map.push(pageText.length);
+                lowerPageText = lower;
+                lowerToOrigMap = map;
             }
-            startIndex = index + 1;
-        }
-    }
-    
-    if (gen !== searchGeneration) return;
 
-    if (searchResults.length > 0) {
-        activeMatchIndex = 0;
+            let startIndex = 0;
+            let index;
+            while ((index = lowerPageText.indexOf(lowerQuery, startIndex)) > -1) {
+                let matchStart = index;
+                let matchEnd = index + lowerQuery.length;
+                if (lowerToOrigMap) {
+                    matchStart = lowerToOrigMap[index];
+                    matchEnd = lowerToOrigMap[index + lowerQuery.length];
+                    if (matchEnd <= matchStart) {
+                        const code = pageText.charCodeAt(matchStart);
+                        const charLen = (code >= 0xD800 && code <= 0xDBFF && matchStart + 1 < pageText.length) ? 2 : 1;
+                        matchEnd = matchStart + charLen;
+                    }
+                }
+
+                const matchItems = textItems.filter(item =>
+                    (matchStart < item.endIndex) && (matchEnd > item.startIndex)
+                );
+
+                if (matchItems.length > 0) {
+                    const rects = [];
+                    for (const item of matchItems) {
+                        // Clip the item to the part actually covered by the
+                        // match and scale proportionally by character count.
+                        // Highlighting the whole overlapping item used to paint
+                        // entire runs for a partial query hit.
+                        const s = Math.max(matchStart, item.startIndex);
+                        const e = Math.min(matchEnd, item.endIndex);
+                        const chars = item.str.length || 1;
+                        const unitW = item.width / chars;
+                        const spanChars = e - s;
+                        if (spanChars <= 0 || unitW <= 0) continue;
+                        const t = item.transform;
+                        // Vertical extent via hypot(c,d): equals |d| (the old
+                        // baseline+height value) for upright text, but stays
+                        // correct when the run is rotated/skewed and |d| alone
+                        // collapses to 0.
+                        const height = Math.hypot(t[2], t[3]);
+                        const offset = (s - item.startIndex) * unitW;
+                        const rect = {
+                            pdfX: t[4] + offset,
+                            pdfY: t[5] + height,
+                            pdfWidth: spanChars * unitW,
+                            pdfHeight: height
+                        };
+                        if (t[1] !== 0 || t[2] !== 0 || t[0] < 0 || t[3] < 0) {
+                            // Non-upright runs carry their full matrix so the
+                            // draw step can place a rotated quad; upright text
+                            // keeps the axis-aligned fast path untouched.
+                            const advanceLength = Math.hypot(t[0], t[1]);
+                            if (!advanceLength) continue;
+                            rect.matrix = t.slice();
+                            // The draw step uses the matrix origin, not pdfX.
+                            // Move it to the matching substring along the run's
+                            // advance vector, without changing cached text data.
+                            rect.matrix[4] += offset * t[0] / advanceLength;
+                            rect.matrix[5] += offset * t[1] / advanceLength;
+                            rect.dirWidth = rect.pdfWidth;
+                            rect.dirHeight = height;
+                        }
+                        rects.push(rect);
+                    }
+
+                    if (rects.length > 0) {
+                        searchResults.push({
+                            pageNumber: i,
+                            snippet: buildSearchSnippet(pageText, matchStart, matchEnd),
+                            rects: rects
+                        });
+                    }
+                }
+                startIndex = index + 1;
+            }
+        }
+    } catch (error) {
+        if (gen !== searchGeneration) return;
+        searchInProgress = false;
+        searchResults = [];
+        activeMatchIndex = -1;
+        searchError = 'Could not search this document. Press Enter to try again.';
+        // Allow the same query to retry after a read failure.
+        currentSearchQuery = '';
+        renderSearchResultsPanel();
         updateSearchUI();
         renderAllSearchHighlights();
-        scrollToActiveMatch();
-    } else {
-        findResultsSpan.textContent = "0 / 0";
-        renderAllSearchHighlights();
+        console.error('PDF search failed:', error);
+        return;
     }
+
+    if (gen !== searchGeneration) return;
+
+    searchInProgress = false;
+    activeMatchIndex = searchResults.length ? 0 : -1;
+    renderSearchResultsPanel();
+    updateSearchUI();
+    renderAllSearchHighlights();
+    if (searchResults.length) scrollToActiveMatch();
 }
 
 function clearSearch() {
@@ -5485,12 +5616,16 @@ function clearSearch() {
     currentSearchQuery = '';
     searchResults = [];
     activeMatchIndex = -1;
-    findResultsSpan.textContent = "0 / 0";
+    searchInProgress = false;
+    searchError = '';
+    searchPanelStart = 0;
+    renderSearchResultsPanel();
+    updateSearchUI();
     renderAllSearchHighlights();
 }
 
 function navigateSearch(direction) {
-    if (searchResults.length === 0) return;
+    if (searchInProgress || searchResults.length === 0) return;
     
     activeMatchIndex += direction;
     if (activeMatchIndex >= searchResults.length) activeMatchIndex = 0;
@@ -5502,7 +5637,9 @@ function navigateSearch(direction) {
 }
 
 function updateSearchUI() {
-    findResultsSpan.textContent = `${activeMatchIndex + 1} / ${searchResults.length}`;
+    findResultsSpan.textContent = searchInProgress ? 'Searching…' : `${activeMatchIndex + 1} / ${searchResults.length}`;
+    findNextBtn.disabled = findPrevBtn.disabled = searchInProgress || searchResults.length === 0;
+    updateSearchResultSelection();
 }
 
 // Page jumps can arrive before any .page div exists: pdfDoc resolves
@@ -5553,6 +5690,10 @@ function requestDeferredScroll(pageNumber, onlyIfOutside) {
             container.scrollTop = ((pageNumber - 1) / pdfDoc.numPages) * container.scrollHeight;
             return;
         }
+        if (deferredScrollOnlyIfOutside && searchResults[activeMatchIndex]?.pageNumber === pageNumber) {
+            scrollToActiveMatch();
+            return;
+        }
         const containerRect = container.getBoundingClientRect();
         const pageRect = pageDiv.getBoundingClientRect();
         if (!deferredScrollOnlyIfOutside ||
@@ -5573,6 +5714,31 @@ function scrollToActiveMatch() {
         const container = document.getElementById('viewerContainer');
         const containerRect = container.getBoundingClientRect();
         const pageRect = pageDiv.getBoundingClientRect();
+        const r = match.rects?.[0];
+        if (r && pageDiv._viewport) {
+            let points;
+            if (r.matrix) {
+                const [a, b, , , x, y] = r.matrix;
+                const length = Math.hypot(a, b);
+                const dx = a / length * r.dirWidth, dy = b / length * r.dirWidth;
+                const nx = -b / length * r.dirHeight, ny = a / length * r.dirHeight;
+                points = [[x, y], [x + nx, y + ny], [x + dx, y + dy], [x + nx + dx, y + ny + dy]];
+            } else {
+                points = [[r.pdfX, r.pdfY], [r.pdfX + r.pdfWidth, r.pdfY - r.pdfHeight]];
+            }
+            const mapped = points.map(([x, y]) => pageDiv._viewport.convertToViewportPoint(x, y));
+            const top = pageRect.top + Math.min(...mapped.map(p => p[1]));
+            const bottom = pageRect.top + Math.max(...mapped.map(p => p[1]));
+            const left = pageRect.left + Math.min(...mapped.map(p => p[0]));
+            const right = pageRect.left + Math.max(...mapped.map(p => p[0]));
+            if (top < containerRect.top + 20 || bottom > containerRect.bottom - 20) {
+                container.scrollTop += top - containerRect.top - Math.min(80, container.clientHeight / 4);
+            }
+            if (left < containerRect.left + 20 || right > containerRect.right - 20) {
+                container.scrollLeft += left - containerRect.left - 20;
+            }
+            return;
+        }
         
         if (pageRect.top < containerRect.top || pageRect.bottom > containerRect.bottom) {
             container.scrollTop = container.scrollTop + (pageRect.top - containerRect.top) - 20;
@@ -5681,7 +5847,7 @@ document.addEventListener('keydown', (e) => {
     
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
         e.preventDefault();
-        if (focusModeActive) setFocusControlsVisible(true);
+        switchTab('search');
         const findInput = document.getElementById('findInput');
         if (findInput) {
             findInput.focus();
@@ -5996,8 +6162,9 @@ function scrollToPage(pageNumber) {
 // ==================== Sidebar & Outline Feature ====================
 function switchTab(tabName) {
     if (focusModeActive) setFocusControlsVisible(true);
-    for (const tab of [tabComments, tabOutline, tabBookmarks]) {
+    for (const tab of sidebarTabs) {
         tab.setAttribute('aria-expanded', String(tab.dataset.tab === tabName));
+        tab.classList.remove('active');
     }
     document.getElementById('sidebar-annotation-filters').hidden = tabName !== 'comments';
     if (sidebar.classList.contains('hidden')) {
@@ -6005,12 +6172,10 @@ function switchTab(tabName) {
         window.dispatchEvent(new Event('resize'));
     }
     
-    tabComments.classList.remove('active');
-    tabOutline.classList.remove('active');
-    tabBookmarks.classList.remove('active');
     contentComments.classList.add('hidden');
     contentOutline.classList.add('hidden');
     contentBookmarks.classList.add('hidden');
+    contentSearch.classList.add('hidden');
     
     const headerActions = document.getElementById('sidebar-header-actions');
     if (headerActions) headerActions.innerHTML = '';
@@ -6029,25 +6194,36 @@ function switchTab(tabName) {
         contentBookmarks.classList.remove('hidden');
         sidebarTitle.textContent = bookmarks.length > 0 ? `Bookmarks (${bookmarks.length})` : 'Bookmarks';
         renderBookmarks(); // re-render bookmarks
+    } else if (tabName === 'search') {
+        tabSearch.classList.add('active');
+        contentSearch.classList.remove('hidden');
+        sidebarTitle.textContent = 'Search results';
+        renderSearchResultsPanel();
     }
 }
 
 tabComments.addEventListener('click', () => switchTab('comments'));
 tabOutline.addEventListener('click', () => switchTab('outline'));
 tabBookmarks.addEventListener('click', () => switchTab('bookmarks'));
+tabSearch.addEventListener('click', () => {
+    switchTab('search');
+    findInput.focus();
+    findInput.select();
+});
 
-document.getElementById('close_sidebar').addEventListener('click', () => {
-    const activeTab = [tabComments, tabOutline, tabBookmarks].find(tab => tab.classList.contains('active'));
+function closeSidebar(returnFocus = true) {
+    const activeTab = sidebarTabs.find(tab => tab.classList.contains('active'));
     sidebar.classList.add('hidden');
-    for (const tab of [tabComments, tabOutline, tabBookmarks]) tab.setAttribute('aria-expanded', 'false');
-    tabComments.classList.remove('active');
-    tabOutline.classList.remove('active');
-    tabBookmarks.classList.remove('active');
+    for (const tab of sidebarTabs) {
+        tab.setAttribute('aria-expanded', 'false');
+        tab.classList.remove('active');
+    }
     const headerActions = document.getElementById('sidebar-header-actions');
     if (headerActions) headerActions.innerHTML = '';
     window.dispatchEvent(new Event('resize'));
-    if (activeTab) activeTab.focus();
-});
+    if (returnFocus && activeTab) activeTab.focus();
+}
+document.getElementById('close_sidebar').addEventListener('click', () => closeSidebar());
 
 // Adobe-style per-comment time: the creation stamp rendered as a coarse
 // relative age ("just now", "5m ago", "3h ago", "2d ago") that rolls over

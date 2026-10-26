@@ -975,7 +975,7 @@ body.focus-mode:not(.focus-controls-visible) #sidebar-icons { display: none; }
     box-shadow: var(--popup-shadow);
 }
 #focus-controls[hidden] { display: none; }
-#focus-controls button {
+#focus-controls button, #search-result-pagination button {
     border: 0;
     border-radius: 8px;
     padding: 9px 11px;
@@ -984,9 +984,34 @@ body.focus-mode:not(.focus-controls-visible) #sidebar-icons { display: none; }
     font-size: 12px;
     cursor: pointer;
 }
-#focus-controls button:hover { background: var(--accent-soft); }
+#focus-controls button:hover, #search-result-pagination button:hover:not(:disabled) { background: var(--accent-soft); }
 #focus-controls kbd { font: inherit; color: var(--text-faint); margin-left: 6px; }
 #focus-controls #focus-show-controls { background: var(--control-bg-2); }
+
+#sidebar-content-search { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+#search-panel-status { margin: 0; padding: 14px; font-size: 12px; color: var(--text-muted); line-height: 1.5; overflow-wrap: anywhere; }
+#search-result-list { margin: 0; padding: 0 12px 12px; overflow-y: auto; flex: 1; min-height: 0; list-style: none; }
+#search-result-list li + li { margin-top: 8px; }
+.search-result-card {
+    display: block;
+    width: 100%;
+    padding: 12px;
+    text-align: left;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface-raised);
+    color: var(--text);
+    cursor: pointer;
+}
+.search-result-card:hover { background: var(--surface-inset); }
+.search-result-card[aria-current="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.search-result-label { display: block; margin-bottom: 7px; font-size: 11px; color: var(--text-muted); font-weight: 600; }
+.search-result-snippet { display: block; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.search-result-snippet mark { background: rgba(var(--accent-rgb), .22); color: inherit; font-weight: 650; border-radius: 2px; }
+#search-result-pagination { display: flex; align-items: center; justify-content: space-between; gap: 4px; padding: 8px; border-top: 1px solid var(--border); }
+#search-result-pagination[hidden] { display: none; }
+#search-result-pagination button:disabled { opacity: .45; cursor: default; }
+#search-result-range { font-size: 11px; color: var(--text-muted); }
 
 /* Document outline */
 #sidebar-content-outline {

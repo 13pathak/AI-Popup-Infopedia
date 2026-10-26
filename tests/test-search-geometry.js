@@ -31,11 +31,13 @@ const close = (actual, expected, label) => assert.ok(Math.abs(actual - expected)
             pdfDoc: { numPages: pages.length, getPage: async n => ({ getTextContent: async () => content[n - 1] }) },
             document: { createElement: () => ({ style: {}, classList: { add() {} } }) },
             findResultsSpan: { textContent: '' },
-            updateSearchUI() {}, renderAllSearchHighlights() {}, scrollToActiveMatch() {}
+            updateSearchUI() {}, renderAllSearchHighlights() {}, scrollToActiveMatch() {},
+            switchTab() {}, renderSearchResultsPanel() {}
         });
         const run = code => vm.runInContext(code, context);
         run("let searchGeneration = 0, currentSearchQuery = '', searchResults = [], activeMatchIndex = -1;");
-        for (const name of ['buildPageText', 'performSearch', 'drawSearchHighlightsForPage']) {
+        run("let searchInProgress = false, searchError = '', searchPanelStart = 0;");
+        for (const name of ['buildPageText', 'buildSearchSnippet', 'performSearch', 'clearSearch', 'drawSearchHighlightsForPage']) {
             const start = source.search(new RegExp(`(?:async )?function ${name}\\(`));
             assert.ok(start >= 0, name);
             run(source.slice(start, source.indexOf('\n}', start) + 2));
@@ -135,6 +137,40 @@ const close = (actual, expected, label) => assert.ok(Math.abs(actual - expected)
         assert.equal(bcMatch.length, 1);
         close(bcMatch[0].pdfX, 70, 'BC match starts at B (offset 2 chars * 10)');
         close(bcMatch[0].pdfWidth, 20, 'BC match spans 2 chars (B and C)');
+
+        assert.equal(run('searchResults[0].snippet.match'), 'BC', 'snippet uses original document characters');
+        const lines = context.buildPageText({ items: [
+            { str: 'first', width: 30 }, { str: '', width: 0, hasEOL: true }, { str: 'second', width: 36 }
+        ] });
+        assert.equal(lines.text, 'first second', 'empty EOL items separate lines in search and snippets');
+        assert.equal(lines.items[1].startIndex, 6, 'geometry offsets include the line separator');
+        const snippet = context.buildSearchSnippet('x'.repeat(100) + '<b>needle</b>' + 'y'.repeat(100), 103, 109);
+        assert.equal(snippet.match, 'needle');
+        assert.ok(snippet.before.startsWith('…') && snippet.after.endsWith('…'), 'context stays bounded');
+        assert.ok(snippet.before.endsWith('<b>') && snippet.after.startsWith('</b>'), 'markup-like text stays literal');
+
+        // Delayed work must not replace newer results or reopen a cleared search.
+        const getPage = context.pdfDoc.getPage;
+        for (const clear of [false, true]) {
+            let release;
+            context.pdfDoc.getPage = () => new Promise(resolve => { release = resolve; });
+            const pending = context.performSearch('ABCDE');
+            context.pdfDoc.getPage = getPage;
+            if (clear) context.clearSearch();
+            else await context.performSearch('BC');
+            release(await getPage(1));
+            await pending;
+            assert.equal(run('currentSearchQuery'), clear ? '' : 'BC');
+            assert.equal(run('searchInProgress'), false);
+            assert.equal(run('searchResults.length'), clear ? 0 : 5);
+        }
+        context.pdfDoc.getPage = async () => { throw new Error('test read failure'); };
+        await context.performSearch('BC');
+        assert.match(run('searchError'), /Press Enter to try again/);
+        assert.equal(run('searchInProgress'), false);
+        context.pdfDoc.getPage = getPage;
+        await context.performSearch('BC');
+        assert.equal(run('searchError'), '', 'same query can recover after a read error');
 
         console.log('Search geometry: partial/full matches, rotated runs, Unicode lowercasing expansions, page rotations, zoom and transform immutability passed.');
     } finally {

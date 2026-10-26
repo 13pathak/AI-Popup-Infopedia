@@ -10,10 +10,10 @@ function harness() {
     const frames = new Map(), pages = new Map(), scrolls = [];
     let nextFrame = 0, scrollTop = 0;
     const container = {
-        scrollHeight: 10000, clientHeight: 800,
+        scrollHeight: 10000, clientHeight: 800, scrollLeft: 0,
         get scrollTop() { return scrollTop; },
         set scrollTop(value) { scrollTop = value; scrolls.push(value); },
-        getBoundingClientRect: () => ({ top: 0, bottom: 800 })
+        getBoundingClientRect: () => ({ top: 0, bottom: 800, left: 0, right: 600 })
     };
     const context = vm.createContext({
         document: {
@@ -39,7 +39,7 @@ function harness() {
             pages.set(number, {
                 offsetTop: top,
                 _viewport: { convertToViewportPoint: (x, y) => [x, y] },
-                getBoundingClientRect: () => ({ top: top - scrollTop, bottom: top + 600 - scrollTop }),
+                getBoundingClientRect: () => ({ top: top - scrollTop, bottom: top + 600 - scrollTop, left: -container.scrollLeft }),
                 querySelectorAll: () => []
             });
         },
@@ -113,6 +113,19 @@ for (const replace of [false, true]) {
     h.search(3); h.addPage(3, 100); h.frame();
     assert.deepEqual(h.scrolls, []);
     assert.equal(h.frames.size, 0);
+}
+
+// A result targets its passage on both axes, even after deferred layout.
+for (const deferred of [false, true]) {
+    const h = harness();
+    if (!deferred) h.addPage(2, 1000);
+    h.run('searchResults = [{ pageNumber: 2, rects: [{ pdfX: 800, pdfY: 900, pdfWidth: 50, pdfHeight: 10 }] }]; activeMatchIndex = 0; scrollToActiveMatch();');
+    if (deferred) { h.addPage(2, 1000); h.frame(); }
+    assert.equal(h.container.scrollTop, 1810, 'search lands on the passage within the page');
+    assert.equal(h.container.scrollLeft, 780, 'search brings an offscreen horizontal match into view');
+    const jumps = h.scrolls.length;
+    h.run('scrollToActiveMatch()');
+    assert.equal(h.scrolls.length, jumps, 'an already visible match stays still');
 }
 
 // The bounded fallback remains available if layout never materializes.

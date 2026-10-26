@@ -35,7 +35,7 @@
                 </div>
                 <div id="findbar" role="search" aria-label="Find in document">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>
-                    <input type="search" id="findInput" placeholder="Find in document" aria-label="Find in document" autocomplete="off">
+                    <input type="search" id="findInput" placeholder="Find in document" aria-label="Find in document" aria-description="Press Enter to search. Press Arrow Down to focus results." autocomplete="off">
                     <span id="findResults" role="status" aria-live="polite">0 / 0</span>
                     <button id="findPrevious" class="icon-button" type="button" title="Previous match" aria-label="Previous match"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 14 5-5 5 5"/></svg></button>
                     <button id="findNext" class="icon-button" type="button" title="Next match" aria-label="Next match"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg></button>
@@ -101,10 +101,20 @@
             <div id="sidebar-content-outline" class="hidden">
                 <!-- Outline will be dynamically injected here -->
             </div>
+            <section id="sidebar-content-search" class="hidden" aria-label="Search results">
+                <p id="search-panel-status" role="status" aria-live="polite">Enter a phrase in Find, then press Enter.</p>
+                <ol id="search-result-list" aria-label="Matching passages"></ol>
+                <div id="search-result-pagination" hidden>
+                    <button id="search-results-previous" type="button" aria-label="Previous group of search results">Previous</button>
+                    <span id="search-result-range"></span>
+                    <button id="search-results-next" type="button" aria-label="Next group of search results">Next</button>
+                </div>
+            </section>
         </aside>
         
         <!-- Sidebar Icons Strip (Always visible on the right) -->
         <nav id="sidebar-icons" aria-label="Document panels">
+            <button id="icon-tab-search" title="Search results" data-tab="search" type="button" aria-label="Search document and view results" aria-controls="sidebar" aria-expanded="false"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg><span>Search</span></button>
             <button id="icon-tab-bookmarks" title="Bookmarks" data-tab="bookmarks" type="button" aria-label="Bookmarks" aria-controls="sidebar" aria-expanded="false"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg><span>Saved</span></button>
             <button id="icon-tab-outline" title="Outline" data-tab="outline" type="button" aria-label="Document outline" aria-controls="sidebar" aria-expanded="false"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg><span>Outline</span></button>
             <button id="icon-tab-comments" title="Comments" data-tab="comments" type="button" aria-label="Comments and highlights" aria-controls="sidebar" aria-expanded="false"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span>Notes</span></button>

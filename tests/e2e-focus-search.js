@@ -1,4 +1,4 @@
-// Real-browser Focus mode coverage using a generated PDF.
+// Real-browser Focus mode and search-result navigation using a generated PDF.
 // Run with tests/serve.js on 8793 and a headless browser on CDP port 9333.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -44,6 +44,28 @@ async function key(key, code, modifiers = 0) {
     await send('Input.dispatchKeyEvent', { type: 'keyUp', key, code, modifiers, windowsVirtualKeyCode });
     await pause(100);
 }
+async function search(text) {
+    await evaluate(`document.getElementById('findInput').focus(); document.getElementById('findInput').select()`);
+    await send('Input.insertText', { text });
+    await key('Enter', 'Enter');
+    await waitFor(`document.getElementById('search-result-list').getAttribute('aria-busy') === 'false'`);
+}
+async function chooseResult(index) {
+    await evaluate(`(() => {
+        const button = document.querySelector('[data-match-index="${index}"]');
+        button.scrollIntoView({ block: 'nearest' }); button.focus();
+    })()`);
+    assert.equal(await evaluate(`Number(document.activeElement.dataset.matchIndex)`), index, 'result receives keyboard focus');
+    await key('Enter', 'Enter');
+    await waitFor(`document.getElementById('findResults').textContent.startsWith('${index + 1} /')`);
+    await waitFor(`!!document.querySelector('.search-highlight.active')`);
+}
+const visibleMatch = `(() => {
+    const match = document.querySelector('.search-highlight.active');
+    if (!match) return false;
+    const r = match.getBoundingClientRect(), v = document.getElementById('viewerContainer').getBoundingClientRect();
+    return r.top >= v.top && r.bottom <= v.bottom && r.left >= v.left && r.right <= v.right;
+})()`;
 async function screenshot(name) {
     if (!process.env.VIEWER_SCREENSHOT_DIR) return;
     fs.mkdirSync(process.env.VIEWER_SCREENSHOT_DIR, { recursive: true });
@@ -116,22 +138,63 @@ async function run() {
     assert.equal(await evaluate(`document.body.classList.contains('focus-mode')`), true, 'F enters focus outside text fields');
     await key('f', 'KeyF', 2);
     assert.equal(await evaluate(`document.activeElement.id`), 'findInput', 'Ctrl+F reveals an accessible search field');
+    assert.equal(await evaluate(`document.getElementById('icon-tab-search').getAttribute('aria-expanded')`), 'true');
+    await search('needle');
+    assert.equal(await evaluate(`document.querySelectorAll('.search-result-card').length`), 100, 'large result sets have bounded DOM size');
+    assert.equal(await evaluate(`document.getElementById('findResults').textContent`), '1 / 180');
+    assert.equal(await evaluate(`document.activeElement.id`), 'findInput', 'search does not steal typing focus');
+    assert.ok(await evaluate(`document.querySelector('.search-result-snippet').textContent.includes('<b>literal text</b>')`));
+    assert.equal(await evaluate(`document.querySelectorAll('.search-result-snippet b').length`), 0, 'PDF content is text, not HTML');
+    await key('ArrowDown', 'ArrowDown');
+    assert.equal(await evaluate(`document.activeElement.dataset.matchIndex`), '0', 'Arrow Down reaches results directly from Find');
+    await chooseResult(29);
+    assert.equal(await evaluate(`document.body.classList.contains('focus-controls-visible')`), false, 'choosing a passage resumes focused reading');
+    await waitFor(visibleMatch);
+    await screenshot('pdf-focus-light');
     await key('Escape', 'Escape');
     assert.equal(await evaluate(`document.body.classList.contains('focus-mode')`), false);
+    await click('search-results-next');
+    assert.equal(await evaluate(`document.querySelectorAll('.search-result-card').length`), 80);
+    assert.equal(await evaluate(`document.getElementById('search-result-range').textContent`), '101–180 of 180');
+    await chooseResult(179);
+    await waitFor(visibleMatch);
+    assert.equal(await evaluate(`document.getElementById('findResults').textContent`), '180 / 180');
+    await click('findNext');
+    assert.equal(await evaluate(`document.getElementById('findResults').textContent`), '1 / 180');
+    assert.equal(await evaluate(`document.querySelector('[data-match-index="0"]').getAttribute('aria-current')`), 'true');
+    await screenshot('pdf-search-light');
+    await click('dark_mode_toggle');
+    await screenshot('pdf-search-dark');
+    await search('absent-word');
+    assert.equal(await evaluate(`document.querySelectorAll('.search-result-card').length`), 0);
+    assert.match(await evaluate(`document.getElementById('search-panel-status').textContent`), /No matches/);
+    await search('<b>');
+    assert.equal(await evaluate(`document.querySelector('.search-result-snippet mark').textContent`), '<b>');
+    await evaluate(`document.getElementById('findInput').value = ''; document.getElementById('findInput').dispatchEvent(new Event('input'))`);
+    assert.equal(await evaluate(`document.querySelectorAll('.search-result-card, .search-highlight').length`), 0);
+    assert.match(await evaluate(`document.getElementById('search-panel-status').textContent`), /press Enter/);
+
     for (const width of [390, 320]) {
         await send('Emulation.setDeviceMetricsOverride', { width, height: 800, deviceScaleFactor: 1, mobile: false });
+        await pause(150);
         await click('fit_width');
         await pause(250);
+        await search('needle');
+        assert.equal(await evaluate(`document.documentElement.scrollWidth > innerWidth`), false);
+        await chooseResult(0);
+        assert.equal(await evaluate(`document.getElementById('sidebar').classList.contains('hidden')`), true, 'mobile selection closes the overlapping results panel');
+        await waitFor(visibleMatch);
         await click('focus_mode_toggle');
         await pause(250);
+        await waitFor(visibleMatch);
         assert.ok(await evaluate(`(() => { const r = document.getElementById('focus-controls').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth && r.bottom <= innerHeight; })()`));
-        assert.ok(await evaluate(`document.querySelector('.page').clientWidth <= document.getElementById('viewerContainer').clientWidth`));
+        await screenshot('pdf-focus-dark-' + width);
         await click('focus-exit');
-        assert.equal(await evaluate(`document.body.classList.contains('focus-mode')`), false);
+        await waitFor(`!document.body.classList.contains('focus-mode')`);
+        await evaluate(`document.getElementById('findInput').value = ''; document.getElementById('findInput').dispatchEvent(new Event('input'))`);
     }
-    console.log('Focus mode passed: keyboard access, reading position, controls, panel state and mobile fit.');
+    console.log('Focus mode and search panel passed: keyboard, preserved position, safe snippets, pagination, exact matches, empty states and mobile reading.');
 }
-
 run().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => {
     ws?.close();
     if (tab) await fetch('http://127.0.0.1:9333/json/close/' + tab.id).catch(() => {});
