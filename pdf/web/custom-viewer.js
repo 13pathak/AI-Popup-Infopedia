@@ -32,14 +32,19 @@ function viewerIconSvg(name, size = 14) {
 // markup identical to the static HTML in custom-viewer.html.
 function darkModeButtonHtml(isDark) {
   return isDark
-    ? `${viewerIconSvg('sun', 14)} Light Mode`
-    : `${viewerIconSvg('moon', 14)} Dark Mode`;
+    ? `${viewerIconSvg('sun', 18)}<span class="sr-only">Switch to light mode</span>`
+    : `${viewerIconSvg('moon', 18)}<span class="sr-only">Switch to dark mode</span>`;
 }
 
 function applyViewerDarkMode(isDark) {
   document.body.classList.toggle('dark-mode', isDark);
   const darkBtn = document.getElementById('dark_mode_toggle');
-  if (darkBtn) darkBtn.innerHTML = darkModeButtonHtml(isDark);
+  if (darkBtn) {
+    darkBtn.innerHTML = darkModeButtonHtml(isDark);
+    darkBtn.title = isDark ? 'Switch to light mode' : 'Switch to dark mode';
+    darkBtn.setAttribute('aria-label', darkBtn.title);
+    darkBtn.setAttribute('aria-pressed', String(isDark));
+  }
 }
 
 // uiTheme ('dark' | 'light' | 'auto') is the extension-wide theme from the
@@ -306,7 +311,7 @@ if (!fileUrl && !hasChromeStorage()) {
 // Name the tab from the address straight away, so a slow or failed load
 // still says which PDF it is; applyDocumentTitle refines it after loading.
 if (fileUrl && /\.pdf$/i.test(urlFileName(fileUrl))) {
-    document.title = urlFileName(fileUrl);
+    setDocumentTitle(urlFileName(fileUrl));
 }
 
 function hasChromeStorage() {
@@ -3335,7 +3340,7 @@ async function renderAllPages(focalClientX = null, focalClientY = null) {
 // now instead of waiting for the async storage read.
 const bootstrappedToggle = document.getElementById('dark_mode_toggle');
 if (bootstrappedToggle) {
-    bootstrappedToggle.innerHTML = darkModeButtonHtml(document.body.classList.contains('dark-mode'));
+    applyViewerDarkMode(document.body.classList.contains('dark-mode'));
 }
 
 // Same-document hash changes — editing #page=2 into #page=10 in the
@@ -3368,11 +3373,12 @@ let currentZoomMode = 'custom';
 // the one authoritative `scale`.
 function updateZoomLabel() {
     zoomLevelSpan.textContent = Math.round(scale * 100) + "%";
+    document.getElementById('fit_width').setAttribute('aria-pressed', String(currentZoomMode === 'page-width'));
+    document.getElementById('fit_page').setAttribute('aria-pressed', String(currentZoomMode === 'page-fit'));
 }
 
-// The static HTML placeholder reads 100% while the viewer actually starts
-// at the adjusted default above; sync immediately so the label matches
-// even before the first build lands (and permanently if loading fails).
+// Keep the percentage and fit states in sync before the first build lands
+// (including when loading fails or the default scale changes).
 updateZoomLabel();
 
 async function calculateScaleAndRender() {
@@ -3413,7 +3419,7 @@ document.getElementById('zoom_in').addEventListener('click', () => {
     if (!pdfDoc) return;
     currentZoomMode = 'custom';
     const newScale = Math.min(scale + 0.25, MAX_SCALE);
-    if (newScale === scale) return; // already at max, nothing to re-render
+    if (newScale === scale) { updateZoomLabel(); return; } // clear the fit state even at the limit
     scale = newScale;
     scheduleViewStateSave();
     renderAllPages();
@@ -3423,7 +3429,7 @@ document.getElementById('zoom_out').addEventListener('click', () => {
     if (!pdfDoc) return;
     currentZoomMode = 'custom';
     const newScale = Math.max(scale - 0.25, MIN_SCALE);
-    if (newScale === scale) return; // already at min, nothing to re-render
+    if (newScale === scale) { updateZoomLabel(); return; }
     scale = newScale;
     scheduleViewStateSave();
     renderAllPages();
@@ -3566,7 +3572,7 @@ function updatePageNumber() {
         }
     }
 
-    // The center fell between pages: .page has a 10px bottom margin, and a
+    // The center fell between pages: .page has a bottom margin, and a
     // stop inside that gap satisfies neither branch above. Attribute it to
     // the page the search narrowed to (lo - 1); the clamps also cover
     // centering above page 1 or below the last page.
@@ -3574,6 +3580,7 @@ function updatePageNumber() {
 
     const currentNum = parseInt(pages[idx].dataset.pageNumber, 10);
     document.getElementById('page_num').value = currentNum;
+    updatePageNavigation(currentNum);
 
     if (autoSavedLastPage !== currentNum) {
         autoSavedLastPage = currentNum;
@@ -3588,6 +3595,23 @@ function updatePageNumber() {
 
 // Handle page navigation via input
 const pageNumInput = document.getElementById('page_num');
+
+function updatePageNavigation(pageNumber) {
+    document.getElementById('previous_page').disabled = !pdfDoc || pageNumber <= 1;
+    document.getElementById('next_page').disabled = !pdfDoc || pageNumber >= pdfDoc.numPages;
+    if (pdfDoc) pageNumInput.max = pdfDoc.numPages;
+}
+
+for (const [id, step] of [['previous_page', -1], ['next_page', 1]]) {
+    document.getElementById(id).addEventListener('click', () => {
+        if (!pdfDoc) return;
+        const pageNumber = Math.min(pdfDoc.numPages, Math.max(1, (Number(pageNumInput.value) || 1) + step));
+        pageNumInput.value = pageNumber;
+        updatePageNavigation(pageNumber);
+        scrollToPage(pageNumber);
+    });
+}
+
 pageNumInput.addEventListener('change', () => {
     let num = parseInt(pageNumInput.value);
     if (isNaN(num)) return;
@@ -3595,6 +3619,7 @@ pageNumInput.addEventListener('change', () => {
     if (pdfDoc && num > pdfDoc.numPages) num = pdfDoc.numPages;
     
     pageNumInput.value = num;
+    updatePageNavigation(num);
     pageNumInput.blur(); // remove focus
     
     if (typeof scrollToPage === 'function') {
@@ -4729,13 +4754,22 @@ function documentTitleFor(urlName, dispositionName, embeddedTitle) {
     return embeddedTitle || urlName;
 }
 
+function setDocumentTitle(title) {
+    document.title = title;
+    const heading = document.getElementById('document-title');
+    if (heading) {
+        heading.textContent = title;
+        heading.title = title;
+    }
+}
+
 async function applyDocumentTitle() {
     try {
         const { info, metadata, contentDispositionFilename } = await pdfDoc.getMetadata();
         const title = documentTitleFor(urlFileName(fileUrl),
             typeof contentDispositionFilename === 'string' ? contentDispositionFilename.trim() : '',
             embeddedPdfTitle(info, metadata));
-        if (title) document.title = title;
+        if (title) setDocumentTitle(title);
     } catch (e) {
         // Unreadable metadata leaves the address-derived title in place.
     }
@@ -5200,6 +5234,9 @@ const findPrevBtn = document.getElementById('findPrevious');
 if (findNextBtn) findNextBtn.addEventListener('click', () => navigateSearch(1));
 if (findPrevBtn) findPrevBtn.addEventListener('click', () => navigateSearch(-1));
 if (findInput) {
+    findInput.addEventListener('input', () => {
+        if (!findInput.value) clearSearch();
+    });
     findInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
             // Trim only to detect emptiness: leading/trailing spaces are
@@ -5668,7 +5705,7 @@ document.addEventListener('keydown', (e) => {
         resetBrowserTabZoom();
         if (!pdfDoc) return;
         currentZoomMode = 'custom';
-        if (scale === 1) return; // already actual size, nothing to re-render
+        if (scale === 1) { updateZoomLabel(); return; }
         scale = 1;
         scheduleViewStateSave();
         renderAllPages();
@@ -5886,6 +5923,9 @@ function scrollToPage(pageNumber) {
 
 // ==================== Sidebar & Outline Feature ====================
 function switchTab(tabName) {
+    for (const tab of [tabComments, tabOutline, tabBookmarks]) {
+        tab.setAttribute('aria-expanded', String(tab.dataset.tab === tabName));
+    }
     document.getElementById('sidebar-annotation-filters').hidden = tabName !== 'comments';
     if (sidebar.classList.contains('hidden')) {
         sidebar.classList.remove('hidden');
@@ -5924,13 +5964,16 @@ tabOutline.addEventListener('click', () => switchTab('outline'));
 tabBookmarks.addEventListener('click', () => switchTab('bookmarks'));
 
 document.getElementById('close_sidebar').addEventListener('click', () => {
+    const activeTab = [tabComments, tabOutline, tabBookmarks].find(tab => tab.classList.contains('active'));
     sidebar.classList.add('hidden');
+    for (const tab of [tabComments, tabOutline, tabBookmarks]) tab.setAttribute('aria-expanded', 'false');
     tabComments.classList.remove('active');
     tabOutline.classList.remove('active');
     tabBookmarks.classList.remove('active');
     const headerActions = document.getElementById('sidebar-header-actions');
     if (headerActions) headerActions.innerHTML = '';
     window.dispatchEvent(new Event('resize'));
+    if (activeTab) activeTab.focus();
 });
 
 // Adobe-style per-comment time: the creation stamp rendered as a coarse

@@ -8,7 +8,8 @@ const vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname, '../pdf/web/custom-viewer.js'), 'utf8').replace(/\r\n/g, '\n');
 
 function harness(fileUrl, meta) {
-    const document = { title: 'AI Popup Infopedia - Custom Viewer' };
+    const heading = { textContent: '', title: '' };
+    const document = { title: 'AI Popup Infopedia - Custom Viewer', getElementById: id => id === 'document-title' ? heading : null };
     const context = vm.createContext({
         window: { location: { href: 'chrome-extension://abc/pdf/web/custom-viewer.html?file=x' } },
         document, URL,
@@ -16,7 +17,7 @@ function harness(fileUrl, meta) {
     });
     const run = code => vm.runInContext(code, context);
     run(`var fileUrl = ${JSON.stringify(fileUrl)};`);
-    for (const name of ['urlFileName', 'embeddedPdfTitle', 'documentTitleFor', 'applyDocumentTitle']) {
+    for (const name of ['urlFileName', 'embeddedPdfTitle', 'documentTitleFor', 'setDocumentTitle', 'applyDocumentTitle']) {
         const start = source.search(new RegExp(`(?:async )?function ${name}\\(`));
         assert.ok(start >= 0, name);
         run(source.slice(start, source.indexOf('\n}', start) + 2));
@@ -25,7 +26,7 @@ function harness(fileUrl, meta) {
     const initial = source.indexOf('if (fileUrl && /\\.pdf$/i.test(urlFileName(fileUrl))) {');
     assert.ok(initial >= 0, 'startup title block');
     run(source.slice(initial, source.indexOf('\n}', initial) + 2));
-    return { document, apply: () => context.applyDocumentTitle() };
+    return { document, heading, apply: () => context.applyDocumentTitle() };
 }
 
 const metadataWith = (dcTitle) => ({ get: (key) => (key === 'dc:title' ? dcTitle : null) });
@@ -34,6 +35,7 @@ const metadataWith = (dcTitle) => ({ get: (key) => (key === 'dc:title' ? dcTitle
     // Local file: named from the address before loading; nothing better arrives.
     let h = harness('file:///G:/My%20Drive/Readers/C7A.pdf', { info: { Title: 'Microsoft Word - C7A.docx' } });
     assert.equal(h.document.title, 'C7A.pdf', 'startup title comes from the address');
+    assert.equal(h.heading.textContent, 'C7A.pdf', 'the visible header names the open document');
     await h.apply();
     assert.equal(h.document.title, 'C7A.pdf', 'a .pdf name in the address outranks the embedded title');
 
@@ -43,6 +45,8 @@ const metadataWith = (dcTitle) => ({ get: (key) => (key === 'dc:title' ? dcTitle
     assert.equal(h.document.title, 'AI Popup Infopedia - Custom Viewer', 'no startup title from an endpoint address');
     await h.apply();
     assert.equal(h.document.title, 'Booklist 2026.pdf', 'the download name wins');
+    assert.equal(h.heading.textContent, 'Booklist 2026.pdf', 'metadata updates the visible header');
+    assert.equal(h.heading.title, 'Booklist 2026.pdf', 'truncated headings expose the full name');
 
     // Viewer endpoints with a hash path: the embedded title beats the hash.
     h = harness('https://doc-08.googleusercontent.com/viewer/secure/pdf/01fn17e44', { info: { Title: 'Info Title' }, metadata: metadataWith('Annual Report') });

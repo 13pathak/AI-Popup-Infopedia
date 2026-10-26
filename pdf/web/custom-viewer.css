@@ -24,34 +24,37 @@
    ============================================================ */
 :root {
     --viewer-font-family: 'Google Sans', 'Google Sans Text', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    --viewer-bg: #525659;              /* app background */
-    --viewer-canvas: #525659;          /* scrolling area behind pages */
-    --surface: #f5f5f5;                /* toolbar, sidebar header, icon strip */
+    --viewer-bg: #edf1f4;              /* app background */
+    --viewer-canvas: #edf1f4;          /* scrolling area behind pages */
+    --surface: #ffffff;                /* toolbar, sidebar header, icon strip */
     --surface-alt: #ffffff;            /* sidebar panel, active icon tab */
     --surface-raised: #ffffff;         /* cards: popups, sidebar items, error card, modal, findbar buttons */
-    --surface-inset: #f9f9f9;          /* quoted highlight text background */
+    --surface-inset: #f5f7f9;          /* quoted highlight text background */
     --field-bg: #ffffff;               /* textareas and note inputs */
-    --text: #333;                      /* primary text */
-    --text-muted: #555;                /* secondary text */
-    --text-faint: #666;                /* tertiary text, close buttons */
+    --text: #243341;                    /* primary text */
+    --text-muted: #5c6c7b;              /* secondary text */
+    --text-faint: #6a7987;              /* tertiary text, close buttons */
     --text-hover: #000;                /* text on hovered controls */
     --icon-muted: #999;                /* empty-state icons */
-    --text-hint: #888;                 /* empty-state hint lines */
-    --border: #ddd;                    /* surface and text-field borders */
+    --text-hint: #6a7987;              /* empty-state hint lines */
+    --border: #e4e9ed;                 /* surface and text-field borders */
     --border-input: #ccc;              /* note textarea, sidebar panel edge */
     --border-control: #ccc;            /* control borders (buttons, page input, findbar, password fields) */
     --border-control-strong: #bbb;     /* hovered control borders */
     --border-item: #e0e0e0;            /* sidebar item cards */
     --control-bg: #ffffff;             /* toolbar buttons, page input, modal input */
-    --control-bg-2: #e8e8e8;           /* findbar container */
-    --control-bg-3: #f0f0f0;           /* quiet buttons, edit-popup hover */
-    --control-bg-4: #e0e0e0;           /* markup-tool and icon-strip hover */
+    --control-bg-2: #f3f6f8;           /* findbar container */
+    --control-bg-3: #f0f4f6;           /* quiet buttons, edit-popup hover */
+    --control-bg-4: #e7eef1;           /* markup-tool and icon-strip hover */
     --control-bg-5: #e6f3ff;           /* outline row hover */
-    --control-hover-bg: #e2e6ea;       /* toolbar button hover */
+    --control-hover-bg: #edf2f5;       /* toolbar button hover */
     --findbar-btn-hover-bg: #d8d8d8;   /* findbar nav button hover */
     --btn-neutral-bg: #f1f3f4;         /* password cancel, modal secondary */
     --accent: #2dd4bf;                 /* signature mint accent matching popup */
     --accent-rgb: 45, 212, 191;        /* accent as RGB triplet for rgba() tints */
+    --accent-text: #087e70;            /* readable accent on light surfaces */
+    --accent-soft: #e6f6f2;
+    --focus-ring: #108b7e;
     --markup-active-bg: rgba(45, 212, 191, 0.2); /* active highlight tool */
     --danger: #ef4444;                 /* destructive actions */
     --toolbar-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
@@ -73,56 +76,126 @@ body, html {
     touch-action: pan-x pan-y; /* Disables browser pinch-to-zoom on touchscreens while allowing panning */
 }
 
+body {
+    display: flex;
+    flex-direction: column;
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+}
+
 button, input, textarea, select {
     font-family: inherit;
 }
 
+button:focus-visible, input:focus-visible, a:focus-visible, [tabindex]:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 3px;
+}
+
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+}
+
 #toolbar {
-    height: 46px;
+    flex: 0 0 auto;
     background-color: var(--surface);
     color: var(--text);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 0 16px;
     border-bottom: 1px solid var(--border);
-    box-shadow: var(--toolbar-shadow);
     z-index: 1000;
     position: relative;
     box-sizing: border-box;
 }
 
+.document-bar {
+    display: grid;
+    grid-template-columns: minmax(120px, 1fr) auto auto minmax(180px, 240px) auto;
+    align-items: center;
+    gap: 12px;
+    min-height: 64px;
+    padding: 0 16px;
+}
+
+.document-identity { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.document-icon {
+    display: grid;
+    place-items: center;
+    flex: 0 0 34px;
+    height: 38px;
+    border: 1px solid rgba(var(--accent-rgb), .2);
+    border-radius: 12px;
+    background: var(--accent-soft);
+    color: var(--accent-text);
+}
+.document-icon svg { width: 22px; height: 22px; }
+.document-heading { min-width: 0; }
+#document-title {
+    margin: 0 0 4px;
+    font-size: 14px;
+    font-weight: 650;
+    letter-spacing: -.2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.document-subtitle { display: block; font-size: 11px; color: var(--text-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.document-subtitle span { margin: 0 5px; color: var(--icon-muted); }
+.document-actions, #toolbar-left, #toolbar-center,
 #toolbar-right {
     display: flex;
     align-items: center;
     gap: 6px;
+    flex-shrink: 0;
 }
+.document-actions { gap: 6px; }
+#toolbar-right { min-width: 0; }
+.toolbar-divider { width: 1px; height: 20px; background: var(--border); margin: 0 6px; flex-shrink: 0; }
+.control-group { display: flex; align-items: center; gap: 2px; padding: 2px; border-radius: 10px; background: var(--control-bg-2); }
+.page-total { padding-right: 5px; color: var(--text-faint); font-size: 12px; white-space: nowrap; }
+#page_count { margin-left: 5px; font-variant-numeric: tabular-nums; }
+#zoom_level { min-width: 48px; text-align: center; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
 
 #toolbar button {
-    background: var(--control-bg);
-    border: 1px solid var(--border-control);
+    background: transparent;
+    border: 1px solid transparent;
     color: var(--text);
-    padding: 5px 12px;
+    padding: 0 12px;
+    height: 36px;
+    justify-content: center;
     cursor: pointer;
-    border-radius: 999px;
+    border-radius: 9px;
     font-family: inherit;
     font-size: 12px;
     font-weight: 550;
     display: inline-flex;
     align-items: center;
-    gap: 5px;
+    gap: 7px;
     transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
     white-space: nowrap;
 }
 
 #toolbar button:hover {
     background: var(--control-hover-bg);
-    border-color: var(--border-control-strong);
     color: var(--text-hover);
 }
 
+#toolbar .icon-button { width: 34px; padding: 0; flex-shrink: 0; }
+#toolbar .control-group .icon-button { height: 30px; width: 30px; border-radius: 7px; }
+#toolbar .secondary-button { border-color: var(--border); }
+#toolbar .ai-button { color: var(--accent-text); background: var(--accent-soft); }
+#toolbar .ai-button:hover { background: rgba(var(--accent-rgb), .23); }
+#toolbar .fit-button[aria-pressed="true"] { color: var(--accent-text); background: var(--accent-soft); }
+
 #toolbar button svg {
     flex-shrink: 0;
+    stroke-width: 1.7;
 }
 
 /* Undo/redo (and any other toolbar control awaiting a preconditions
@@ -134,18 +207,18 @@ button, input, textarea, select {
     pointer-events: none;
 }
 
-#save_pdf {
-    background: var(--accent) !important;
-    color: #072b2b !important;
-    font-weight: 600 !important;
-    border: 1px solid var(--accent) !important;
-    padding: 5px 14px !important;
+#toolbar #save_pdf {
+    background: var(--accent);
+    color: #072b2b;
+    font-weight: 650;
+    border: 1px solid var(--accent);
+    padding: 0 16px;
 }
 
-#save_pdf:hover {
-    background: #5eead4 !important;
-    border-color: #5eead4 !important;
-    color: #042020 !important;
+#toolbar #save_pdf:hover {
+    background: #5eead4;
+    border-color: #5eead4;
+    color: #042020;
 }
 
 /* Export format dropdown: anchored under the toolbar's Export button.
@@ -185,6 +258,7 @@ button, input, textarea, select {
     font-size: 12px;
     font-weight: 550;
     text-align: left;
+    justify-content: flex-start;
     padding: 7px 10px;
     border-radius: 8px;
     cursor: pointer;
@@ -198,18 +272,24 @@ button, input, textarea, select {
 }
 
 #page_num {
-    width: 44px;
+    box-sizing: border-box;
+    width: 40px;
+    height: 28px;
     text-align: center;
     background: var(--control-bg);
     color: var(--text);
-    border: 1px solid var(--border-control);
-    border-radius: 999px;
-    padding: 4px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0 2px;
     font-family: inherit;
     font-size: 12px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    appearance: textfield;
     outline: none;
     transition: border-color 0.2s, box-shadow 0.2s;
 }
+#page_num::-webkit-inner-spin-button, #page_num::-webkit-outer-spin-button { appearance: none; margin: 0; }
 
 #page_num:focus {
     border-color: var(--accent);
@@ -217,17 +297,16 @@ button, input, textarea, select {
 }
 
 #mainContainer {
-    position: absolute;
-    top: 46px;
-    bottom: 0;
-    left: 0;
-    right: 0;
+    position: relative;
+    flex: 1;
+    min-height: 0;
     display: flex;
     flex-direction: row;
 }
 
 #viewerContainer {
     flex: 1;
+    min-width: 0;
     position: relative;
     overflow: auto;
     background-color: var(--viewer-canvas);
@@ -235,8 +314,12 @@ button, input, textarea, select {
 
 #viewer {
     margin: 0 auto;
-    padding-top: 10px;
-    padding-bottom: 10px;
+    width: max-content;
+    min-width: 100%;
+    box-sizing: border-box;
+    padding-inline: 20px;
+    padding-top: 24px;
+    padding-bottom: 8px;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -245,9 +328,9 @@ button, input, textarea, select {
 .page {
     direction: ltr;
     position: relative;
-    box-shadow: 0px 0px 5px rgba(0,0,0,0.5);
+    box-shadow: 0 2px 4px rgba(28, 45, 61, .06), 0 10px 32px rgba(28, 45, 61, .1);
     background-color: white;
-    margin-bottom: 10px;
+    margin-bottom: 24px;
 }
 
 .textLayer{
@@ -356,7 +439,7 @@ button, input, textarea, select {
 .markup-tool-btn.active {
     background: var(--markup-active-bg);
     border: 1px solid var(--accent);
-    color: var(--accent);
+    color: var(--accent-text);
 }
 
 /* Rendering styles for markups */
@@ -613,32 +696,38 @@ button, input, textarea, select {
 #findbar {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    margin-right: 10px;
+    gap: 2px;
+    width: 100%;
+    box-sizing: border-box;
     background: var(--control-bg-2);
-    border: 1px solid var(--border-control);
-    padding: 3px 8px;
-    border-radius: 999px;
+    border: 1px solid transparent;
+    padding: 3px 6px 3px 10px;
+    border-radius: 10px;
     color: var(--text);
 }
+#findbar > svg { flex-shrink: 0; color: var(--text-faint); margin-right: 6px; width: 16px; }
+#findbar:focus-within { border-color: var(--focus-ring); box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .12); }
 
 #findbar input {
-    background: var(--surface-raised);
-    border: 1px solid var(--border-control);
-    border-radius: 999px;
-    padding: 3px 10px;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    padding: 5px 0;
     font-family: inherit;
     font-size: 12px;
-    width: 140px;
+    width: 0;
+    min-width: 0;
+    flex: 1;
     outline: none;
     color: var(--text);
     transition: border-color 0.2s, box-shadow 0.2s;
 }
 
 #findbar input:focus {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.25);
+    box-shadow: none;
+    outline: none;
 }
+#findbar input::placeholder { color: var(--text-faint); opacity: 1; }
 
 #findbar span {
     font-size: 11.5px;
@@ -647,26 +736,16 @@ button, input, textarea, select {
     color: var(--text-muted);
 }
 
-#findbar button {
-    background: var(--surface-raised) !important;
-    border: 1px solid var(--border-control) !important;
-    color: var(--text) !important;
-    padding: 0 !important;
-    border-radius: 50%;
-    width: 22px;
-    height: 22px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    font-size: 11px;
-    transition: background 0.15s, border-color 0.15s;
+#findbar .icon-button {
+    color: var(--text-muted);
+    border-radius: 6px;
+    width: 26px;
+    height: 26px;
 }
 
 #findbar button:hover {
-    background: var(--findbar-btn-hover-bg) !important;
-    border-color: var(--border-control-strong) !important;
-    color: var(--text-hover) !important;
+    background: var(--control-bg-4);
+    color: var(--text-hover);
 }
 
 /* Search Highlight Styles */
@@ -708,12 +787,13 @@ button, input, textarea, select {
 /* Sidebar Styles */
 #sidebar {
     width: 340px;
+    flex-shrink: 0;
     height: 100%;
     background: var(--surface-alt);
-    border-left: 1px solid var(--border-input);
+    border-left: 1px solid var(--border);
     display: flex;
     flex-direction: column;
-    box-shadow: var(--sidebar-shadow);
+    box-shadow: -4px 0 20px rgba(0, 0, 0, .025);
     z-index: 1000;
     overflow: hidden;
     box-sizing: border-box;
@@ -725,7 +805,11 @@ button, input, textarea, select {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 10px 15px;
+    min-height: 64px;
+    padding: 12px 16px;
+    box-sizing: border-box;
+    flex-wrap: wrap;
+    gap: 8px;
     background: var(--surface);
     border-bottom: 1px solid var(--border);
 }
@@ -744,6 +828,7 @@ button, input, textarea, select {
     align-items: center;
     gap: 6px;
     min-width: 0;
+    margin-left: auto;
 }
 
 #sidebar-header-actions button {
@@ -760,17 +845,23 @@ button, input, textarea, select {
 }
 
 #close_sidebar {
-    background: none !important;
+    background: var(--control-bg-2);
     border: none;
-    color: var(--text-faint) !important;
+    color: var(--text-faint);
     font-size: 16px;
     cursor: pointer;
-    padding: 0 !important;
-    margin-right: 10px;
+    padding: 0;
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    display: grid;
+    place-items: center;
+    order: 3;
 }
 
 #close_sidebar:hover {
-    color: var(--text-hover) !important;
+    color: var(--text-hover);
+    background: var(--control-hover-bg);
 }
 
 #sidebar-content-bookmarks,
@@ -819,13 +910,16 @@ button, input, textarea, select {
 
 /* Sidebar Icons Strip */
 #sidebar-icons {
-    width: 40px;
+    width: 64px;
+    flex: 0 0 64px;
+    box-sizing: border-box;
     background: var(--surface);
     border-left: 1px solid var(--border);
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding-top: 10px;
+    padding: 12px 6px;
+    gap: 8px;
     z-index: 1001;
 }
 
@@ -839,9 +933,14 @@ button, input, textarea, select {
     color: var(--text-muted);
     transition: background 0.2s, color 0.2s;
     display: flex;
+    flex-direction: column;
+    gap: 6px;
     align-items: center;
     justify-content: center;
+    border-radius: 10px;
 }
+#sidebar-icons button svg { width: 19px; height: 19px; stroke-width: 1.7; }
+#sidebar-icons button span { font-size: 10px; font-weight: 550; }
 
 #sidebar-icons button:hover {
     background: var(--control-bg-4);
@@ -849,14 +948,13 @@ button, input, textarea, select {
 }
 
 #sidebar-icons button.active {
-    background: var(--surface-alt);
-    border-left: 3px solid var(--accent);
-    color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--accent-text);
 }
 
-/* Outline List Styles (Adobe Reader Style) */
+/* Document outline */
 #sidebar-content-outline {
-    padding: 10px 0; /* less horizontal padding for full width items */
+    padding: 12px 8px;
 }
 
 .outline-item {
@@ -868,7 +966,8 @@ button, input, textarea, select {
 }
 
 .outline-item-title {
-    padding: 4px 10px;
+    padding: 9px 10px;
+    border-radius: 8px;
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -918,8 +1017,8 @@ button, input, textarea, select {
 .sidebar-item {
     background: var(--surface-raised);
     border: 1px solid var(--border-item);
-    border-radius: 6px;
-    padding: 10px 12px;
+    border-radius: 12px;
+    padding: 14px;
     margin-bottom: 10px;
     box-shadow: var(--item-shadow);
     cursor: pointer;
@@ -994,7 +1093,7 @@ button, input, textarea, select {
 
 #sidebar-header-actions .sidebar-filter-chip.active {
     border-color: var(--accent);
-    color: var(--accent);
+    color: var(--accent-text);
     background: rgba(var(--accent-rgb), 0.12);
     font-weight: 600;
 }
@@ -1006,7 +1105,7 @@ button, input, textarea, select {
 
 #sidebar-annotation-filters {
     flex-shrink: 0;
-    padding: 8px 14px 10px;
+    padding: 12px 14px;
     background: var(--surface);
     border-bottom: 1px solid var(--border);
 }
@@ -1040,25 +1139,26 @@ button, input, textarea, select {
     flex: 1;
     min-width: 0;
     width: 100%;
-    border: 1px solid var(--border-control);
-    border-radius: 6px;
-    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 9px 10px;
     font: inherit;
     font-size: 12px;
-    background: var(--surface-alt);
+    background: var(--control-bg-2);
     color: var(--text);
 }
 #sidebar-annotation-clear {
     flex-shrink: 0;
-    border: 1px solid var(--border-control);
-    border-radius: 6px;
-    padding: 6px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    padding: 9px 6px;
     font: inherit;
     font-size: 11px;
-    background: var(--surface-raised);
-    color: var(--text);
+    background: transparent;
+    color: var(--accent-text);
     cursor: pointer;
 }
+#sidebar-annotation-clear:hover:not(:disabled) { background: var(--accent-soft); }
 #sidebar-annotation-clear:disabled { opacity: .5; cursor: default; }
 .sidebar-color-chip:focus-visible,
 #sidebar-annotation-search:focus-visible,
@@ -1310,22 +1410,25 @@ div.sidebar-item-note-input u {
 .sidebar-empty-msg {
     color: var(--text-faint);
     text-align: center;
-    margin-top: 20px;
+    margin-top: 48px;
     font-size: 13px;
-    padding: 0 14px;
+    padding: 0 20px;
 }
 
 .sidebar-empty-msg svg {
     display: block;
-    margin: 0 auto 8px auto;
-    color: var(--icon-muted);
+    margin: 0 auto 16px;
+    padding: 16px;
+    border-radius: 18px;
+    background: var(--accent-soft);
+    color: var(--accent-text);
 }
 
 .sidebar-empty-msg .sidebar-empty-hint {
-    margin-top: 5px;
-    font-size: 11.5px;
+    margin-top: 8px;
+    font-size: 12px;
     color: var(--text-hint);
-    line-height: 1.45;
+    line-height: 1.65;
 }
 
 /* --- Lightweight modal dialogs (replace native alert/prompt) --- */
@@ -1618,6 +1721,7 @@ div.sidebar-item-note-input u {
        rendered into #print-container. */
     html,
     body {
+        display: block !important;
         overflow: visible !important;
         height: auto !important;
         width: auto !important;
@@ -1645,19 +1749,20 @@ div.sidebar-item-note-input u {
    the variables above, plus the page canvas filter inversion.
    ============================================================ */
 body.dark-mode {
-    --viewer-bg: #0b0f17;
-    --viewer-canvas: #0f172a;
-    --surface: #0f172a;
-    --surface-alt: #1e293b;
-    --surface-raised: #1e293b;
-    --surface-inset: #0b0f17;
-    --field-bg: #0b0f17;
+    color-scheme: dark;
+    --viewer-bg: #101820;
+    --viewer-canvas: #101820;
+    --surface: #18232e;
+    --surface-alt: #18232e;
+    --surface-raised: #202e3a;
+    --surface-inset: #141e28;
+    --field-bg: #141e28;
     --text: #f1f5f9;
     --text-muted: #94a3b8;
-    --text-faint: #64748b;
+    --text-faint: #9aaaba;
     --text-hover: #ffffff;
     --icon-muted: #64748b;
-    --text-hint: #64748b;
+    --text-hint: #9aaaba;
     --border: rgba(255, 255, 255, 0.08);
     --border-input: rgba(255, 255, 255, 0.12);
     --border-control: rgba(255, 255, 255, 0.12);
@@ -1673,6 +1778,9 @@ body.dark-mode {
     --btn-neutral-bg: rgba(255, 255, 255, 0.08);
     --accent: #2dd4bf;
     --accent-rgb: 45, 212, 191;
+    --accent-text: #5eead4;
+    --accent-soft: #203d3e;
+    --focus-ring: #5eead4;
     --markup-active-bg: rgba(45, 212, 191, 0.2);
     --danger: #ef4444;
     --toolbar-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
@@ -1686,8 +1794,54 @@ body.dark-mode {
 /* Invert the canvas and text layer, keeping colors mostly correct by hue-rotating 180deg */
 body.dark-mode .page {
     filter: invert(90%) hue-rotate(180deg);
-    box-shadow: 0px 0px 8px rgba(0,0,0,0.8);
-    border: 1px solid #333;
+    /* The page filter also inverts its shadow; a light source becomes dark. */
+    box-shadow: 0 2px 6px rgba(255,255,255,.25), 0 12px 32px rgba(255,255,255,.3);
+}
+
+/* Keep the document and reading controls on one row on desktop. Compact
+   labels before wrapping, so the PDF retains as much height as possible. */
+@media (max-width: 1600px) {
+    #toolbar .fit-button { width: 34px; padding: 0; }
+    .fit-button .button-label { display: none; }
+}
+
+@media (max-width: 1380px) {
+    #summarize_page .button-label, #export_toggle .button-label { display: none; }
+    #toolbar #summarize_page, #toolbar #export_toggle { width: 34px; padding: 0; }
+}
+
+@media (max-width: 1180px) {
+    .document-bar { grid-template-columns: minmax(90px, 1fr) auto auto minmax(150px, 180px) auto; gap: 8px; padding: 0 12px; }
+    .document-subtitle, .document-actions .button-label, .document-actions .toolbar-divider { display: none; }
+    .document-actions { gap: 3px; }
+    #toolbar .document-actions > button { width: 32px; padding: 0; }
+    #document-title { margin: 0; font-size: 13px; }
+    .document-icon { flex-basis: 30px; height: 34px; border-radius: 9px; }
+    .document-icon svg { width: 18px; height: 18px; }
+}
+
+@media (max-width: 980px) {
+    .document-bar { grid-template-columns: minmax(0, 1fr) minmax(180px, 240px) auto; padding-top: 10px; padding-bottom: 10px; }
+    .document-identity { grid-area: 1 / 1; }
+    #toolbar-right { grid-area: 1 / 2; }
+    .document-actions { grid-area: 1 / 3; }
+    #toolbar-left { grid-area: 2 / 1; }
+    #toolbar-center { grid-area: 2 / 2 / 3 / 4; justify-content: flex-end; }
+    #sidebar { position: absolute; top: 0; right: 64px; bottom: 0; width: min(340px, calc(100% - 64px)); box-shadow: var(--sidebar-shadow); }
+}
+
+@media (max-width: 640px) {
+    .document-bar { grid-template-columns: minmax(0, 1fr) auto; }
+    .document-identity { gap: 8px; }
+    .document-actions { grid-area: 1 / 2; }
+    #toolbar-left { grid-area: 2 / 1 / 3 / -1; justify-content: center; }
+    #toolbar-center { grid-area: 3 / 1 / 4 / -1; justify-content: center; gap: 4px; }
+    #toolbar-right { grid-area: 4 / 1 / 5 / -1; }
+    .toolbar-divider { margin: 0 3px; }
+    #sidebar-icons { width: 52px; flex-basis: 52px; padding: 10px 4px; }
+    #sidebar-icons button span { font-size: 9px; }
+    #sidebar { right: 52px; width: calc(100% - 52px); }
+    #viewer { padding-top: 16px; }
 }
 
 /* Zoom transition: while a page redraws at a new scale, its previous
@@ -1706,6 +1860,7 @@ body.dark-mode .page {
 
 /* Reduced motion: show modal and outline chevron at rest, no slide/spin */
 @media (prefers-reduced-motion: reduce) {
+    #toolbar button, #sidebar-icons button, .sidebar-item { transition: none; }
     .viewer-modal {
         animation: none;
     }

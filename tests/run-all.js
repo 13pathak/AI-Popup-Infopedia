@@ -280,6 +280,11 @@ async function run() {
     await pollEndpoint(`http://127.0.0.1:${CDP_PORT}/json`, 15000);
     console.log(`  CDP ready on port ${CDP_PORT}`);
 
+    console.log('Testing responsive PDF workspace and page navigation...');
+    const viewerLayoutProc = spawn(process.execPath, [path.join(__dirname, 'e2e-viewer-layout.js')], { stdio: 'inherit' });
+    const viewerLayoutCode = await new Promise(res => viewerLayoutProc.on('exit', code => res(code ?? 0)));
+    if (viewerLayoutCode !== 0) throw new Error('PDF workspace layout tests failed.');
+
     console.log('Testing annotation color and text filters...');
     const filtersProc = spawn(process.execPath, [path.join(__dirname, 'e2e-annotation-filters.js')], { stdio: 'inherit' });
     const filtersCode = await new Promise(res => filtersProc.on('exit', code => res(code ?? 0)));
