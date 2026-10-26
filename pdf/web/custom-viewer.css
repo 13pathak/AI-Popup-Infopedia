@@ -116,7 +116,7 @@ button:focus-visible, input:focus-visible, a:focus-visible, [tabindex]:focus-vis
 
 .document-bar {
     display: grid;
-    grid-template-columns: minmax(120px, 1fr) auto auto minmax(180px, 240px) auto;
+    grid-template-columns: minmax(120px, 1fr) minmax(290px, 380px) auto auto auto;
     align-items: center;
     gap: 12px;
     min-height: 64px;
@@ -147,16 +147,18 @@ button:focus-visible, input:focus-visible, a:focus-visible, [tabindex]:focus-vis
 }
 .document-subtitle { display: block; font-size: 11px; color: var(--text-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .document-subtitle span { margin: 0 5px; color: var(--icon-muted); }
-.document-actions, #toolbar-left, #toolbar-center,
-#toolbar-right {
+.document-actions, #toolbar-left, #toolbar-center, #toolbar-annotations {
     display: flex;
     align-items: center;
     gap: 6px;
     flex-shrink: 0;
 }
-.document-actions { gap: 6px; }
-#toolbar-right { min-width: 0; }
-.toolbar-divider { width: 1px; height: 20px; background: var(--border); margin: 0 6px; flex-shrink: 0; }
+#toolbar-left { min-width: 0; gap: 8px; }
+#toolbar-left .page-navigation { flex-shrink: 0; }
+#toolbar-center, #toolbar-annotations, .document-actions {
+    border-left: 1px solid var(--border);
+    padding-left: 12px;
+}
 .control-group { display: flex; align-items: center; gap: 2px; padding: 2px; border-radius: 10px; background: var(--control-bg-2); }
 .page-total { padding-right: 5px; color: var(--text-faint); font-size: 12px; white-space: nowrap; }
 #page_count { margin-left: 5px; font-variant-numeric: tabular-nums; }
@@ -698,6 +700,8 @@ button:focus-visible, input:focus-visible, a:focus-visible, [tabindex]:focus-vis
     align-items: center;
     gap: 2px;
     width: 100%;
+    min-width: 0;
+    flex: 1;
     box-sizing: border-box;
     background: var(--control-bg-2);
     border: 1px solid transparent;
@@ -1806,13 +1810,15 @@ body.dark-mode .page {
 }
 
 @media (max-width: 1380px) {
+    .document-bar { grid-template-columns: minmax(90px, 1fr) minmax(290px, 320px) auto auto auto; gap: 8px; padding: 0 12px; }
     #summarize_page .button-label, #export_toggle .button-label { display: none; }
     #toolbar #summarize_page, #toolbar #export_toggle { width: 34px; padding: 0; }
+    #toolbar-center, #toolbar-annotations, .document-actions { padding-left: 8px; }
 }
 
 @media (max-width: 1180px) {
-    .document-bar { grid-template-columns: minmax(90px, 1fr) auto auto minmax(150px, 180px) auto; gap: 8px; padding: 0 12px; }
-    .document-subtitle, .document-actions .button-label, .document-actions .toolbar-divider { display: none; }
+    .document-subtitle, .document-actions .button-label { display: none; }
+    #toolbar-center, #toolbar-annotations { gap: 4px; }
     .document-actions { gap: 3px; }
     #toolbar .document-actions > button { width: 32px; padding: 0; }
     #document-title { margin: 0; font-size: 13px; }
@@ -1821,23 +1827,25 @@ body.dark-mode .page {
 }
 
 @media (max-width: 980px) {
-    .document-bar { grid-template-columns: minmax(0, 1fr) minmax(180px, 240px) auto; padding-top: 10px; padding-bottom: 10px; }
+    .document-bar { grid-template-columns: auto minmax(0, 1fr) auto; padding-top: 10px; padding-bottom: 10px; }
     .document-identity { grid-area: 1 / 1; }
-    #toolbar-right { grid-area: 1 / 2; }
-    .document-actions { grid-area: 1 / 3; }
-    #toolbar-left { grid-area: 2 / 1; }
-    #toolbar-center { grid-area: 2 / 2 / 3 / 4; justify-content: flex-end; }
+    #toolbar-left { grid-area: 1 / 2 / 2 / 4; }
+    #toolbar-center { grid-area: 2 / 1; border-left: 0; padding-left: 0; }
+    #toolbar-annotations { grid-area: 2 / 2; justify-content: center; }
+    .document-actions { grid-area: 2 / 3; }
     #sidebar { position: absolute; top: 0; right: 64px; bottom: 0; width: min(340px, calc(100% - 64px)); box-shadow: var(--sidebar-shadow); }
 }
 
 @media (max-width: 640px) {
     .document-bar { grid-template-columns: minmax(0, 1fr) auto; }
     .document-identity { gap: 8px; }
-    .document-actions { grid-area: 1 / 2; }
+    .document-identity { grid-area: 1 / 1 / 2 / -1; }
     #toolbar-left { grid-area: 2 / 1 / 3 / -1; justify-content: center; }
     #toolbar-center { grid-area: 3 / 1 / 4 / -1; justify-content: center; gap: 4px; }
-    #toolbar-right { grid-area: 4 / 1 / 5 / -1; }
-    .toolbar-divider { margin: 0 3px; }
+    #toolbar-annotations { grid-area: 4 / 1; justify-content: flex-start; border-left: 0; padding-left: 0; }
+    .document-actions { grid-area: 4 / 2; }
+    #toolbar-left { flex-wrap: wrap; }
+    #findbar { min-width: 170px; }
     #sidebar-icons { width: 52px; flex-basis: 52px; padding: 10px 4px; }
     #sidebar-icons button span { font-size: 9px; }
     #sidebar { right: 52px; width: calc(100% - 52px); }
