@@ -354,6 +354,16 @@ const popupStyles = `
     display: inline-block;
   }
 
+  /* Keep the initial, single-line loader compact until the answer UI arrives.
+     User-resized popups retain their chosen dimensions. */
+  #ai-definition-popup:not(.is-resized):has(> #ai-popup-content > .ai-popup-loading:only-child) {
+    padding-block: 8px;
+    border-radius: 14px;
+  }
+  #ai-definition-popup:not(.is-resized):has(> #ai-popup-content > .ai-popup-loading:only-child) > #ai-popup-content > .ai-popup-loading {
+    padding-block: 0;
+  }
+
   /* Skeleton lines under the loading label: they hold the space the answer
      will fill, so the card does not jump from one line to a full answer.
      Clipped to the reserved height with a soft fade instead of a hard cut. */
