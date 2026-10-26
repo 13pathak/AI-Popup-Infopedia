@@ -3401,9 +3401,9 @@ function updateZoomLabel() {
 // (including when loading fails or the default scale changes).
 updateZoomLabel();
 
-async function calculateScaleAndRender() {
+async function calculateScaleAndRender(focalClientX = null, focalClientY = null) {
     if (currentZoomMode === 'custom') {
-        renderAllPages();
+        renderAllPages(focalClientX, focalClientY);
         return;
     }
     
@@ -3432,7 +3432,7 @@ async function calculateScaleAndRender() {
     if (scale > MAX_SCALE) scale = MAX_SCALE;
 
     scheduleViewStateSave();
-    renderAllPages();
+    renderAllPages(focalClientX, focalClientY);
 }
 
 document.getElementById('zoom_in').addEventListener('click', () => {
@@ -3468,14 +3468,49 @@ document.getElementById('fit_page').addEventListener('click', () => {
 });
 
 let resizeTimeout = null;
-window.addEventListener('resize', () => {
+function scheduleFitAfterLayout(preserveTop = false) {
     if (currentZoomMode !== 'custom') {
         if (resizeTimeout) clearTimeout(resizeTimeout);
         resizeTimeout = setTimeout(() => {
-            calculateScaleAndRender();
+            const top = document.getElementById('viewerContainer').getBoundingClientRect().top;
+            calculateScaleAndRender(null, preserveTop ? top + 1 : null);
         }, 100);
     }
-});
+}
+window.addEventListener('resize', () => scheduleFitAfterLayout());
+// Focus mode keeps the existing panel state while lending its space to the
+// document. Revealing controls restores the normal layout, including fit modes.
+let focusModeActive = false;
+const focusModeButton = document.getElementById('focus_mode_toggle');
+const focusControls = document.getElementById('focus-controls');
+const focusShowControls = document.getElementById('focus-show-controls');
+
+function setFocusControlsVisible(visible) {
+    document.body.classList.toggle('focus-controls-visible', focusModeActive && visible);
+    focusShowControls.textContent = visible ? 'Hide controls' : 'Show controls';
+    focusShowControls.setAttribute('aria-expanded', String(focusModeActive && visible));
+    if (!visible) document.getElementById('viewerContainer').focus({ preventScroll: true });
+    scheduleFitAfterLayout(true);
+}
+
+function setFocusMode(enabled) {
+    if (enabled === focusModeActive) return;
+    flushRichEditorSaves();
+    hidePopups();
+    setExportMenuOpen(false);
+    focusModeActive = enabled;
+    document.body.classList.toggle('focus-mode', enabled);
+    focusControls.hidden = !enabled;
+    focusModeButton.setAttribute('aria-pressed', String(enabled));
+    focusModeButton.setAttribute('aria-label', enabled ? 'Exit focus mode' : 'Enter focus mode');
+    setFocusControlsVisible(false);
+    if (!enabled) focusModeButton.focus({ preventScroll: true });
+}
+
+focusModeButton.addEventListener('click', () => setFocusMode(!focusModeActive));
+focusShowControls.addEventListener('click', () => setFocusControlsVisible(!document.body.classList.contains('focus-controls-visible')));
+document.getElementById('focus-exit').addEventListener('click', () => setFocusMode(false));
+
 // Update page number based on scroll
 const container = document.getElementById('viewerContainer');
 let pageNumberRafId = null;
@@ -5616,7 +5651,8 @@ function renderAllSearchHighlights() {
 // Intercept Keyboard Shortcuts
 document.addEventListener('keydown', (e) => {
     // Ignore if typing in input/textarea/contenteditable (except Escape)
-    const isInput = document.activeElement && (
+    const eventEditor = e.composedPath().some(el => el?.tagName === 'INPUT' || el?.tagName === 'TEXTAREA' || el?.isContentEditable);
+    const isInput = eventEditor || document.activeElement && (
         document.activeElement.tagName === 'INPUT' ||
         document.activeElement.tagName === 'TEXTAREA' ||
         document.activeElement.isContentEditable ||
@@ -5635,18 +5671,28 @@ document.addEventListener('keydown', (e) => {
         const popupWasOpen = ['color-picker-popup', 'edit-highlight-popup', 'note-editor-popup']
             .some(id => { const p = document.getElementById(id); return !!p && !p.classList.contains('hidden'); });
         hidePopups();
-        if (!popupWasOpen && currentSearchQuery !== '') clearSearch();
         if (isInput) document.activeElement.blur();
+        if (!popupWasOpen) {
+            if (focusModeActive) setFocusMode(false);
+            else if (currentSearchQuery !== '') clearSearch();
+        }
         return;
     }
     
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
         e.preventDefault();
+        if (focusModeActive) setFocusControlsVisible(true);
         const findInput = document.getElementById('findInput');
         if (findInput) {
             findInput.focus();
             findInput.select();
         }
+        return;
+    }
+
+    if (!isInput && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === 'f' && !viewerModalOpen()) {
+        e.preventDefault();
+        setFocusMode(!focusModeActive);
         return;
     }
 
@@ -5949,6 +5995,7 @@ function scrollToPage(pageNumber) {
 
 // ==================== Sidebar & Outline Feature ====================
 function switchTab(tabName) {
+    if (focusModeActive) setFocusControlsVisible(true);
     for (const tab of [tabComments, tabOutline, tabBookmarks]) {
         tab.setAttribute('aria-expanded', String(tab.dataset.tab === tabName));
     }

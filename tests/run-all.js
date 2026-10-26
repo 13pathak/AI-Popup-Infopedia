@@ -290,6 +290,11 @@ async function run() {
     const viewerLayoutCode = await new Promise(res => viewerLayoutProc.on('exit', code => res(code ?? 0)));
     if (viewerLayoutCode !== 0) throw new Error('PDF workspace layout tests failed.');
 
+    console.log('Testing PDF Focus mode...');
+    const focusSearchProc = spawn(process.execPath, [path.join(__dirname, 'e2e-focus-search.js')], { stdio: 'inherit' });
+    const focusSearchCode = await new Promise(res => focusSearchProc.on('exit', code => res(code ?? 0)));
+    if (focusSearchCode !== 0) throw new Error('PDF Focus mode tests failed.');
+
     console.log('Testing annotation color and text filters...');
     const filtersProc = spawn(process.execPath, [path.join(__dirname, 'e2e-annotation-filters.js')], { stdio: 'inherit' });
     const filtersCode = await new Promise(res => filtersProc.on('exit', code => res(code ?? 0)));

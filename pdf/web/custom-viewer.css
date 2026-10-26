@@ -956,6 +956,38 @@ button:focus-visible, input:focus-visible, a:focus-visible, [tabindex]:focus-vis
     color: var(--accent-text);
 }
 
+#sidebar-icons #focus_mode_toggle { margin-top: auto; }
+#focus_mode_toggle[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-text); }
+body.focus-mode:not(.focus-controls-visible) #toolbar,
+body.focus-mode:not(.focus-controls-visible) #sidebar,
+body.focus-mode:not(.focus-controls-visible) #sidebar-icons { display: none; }
+#focus-controls {
+    position: fixed;
+    right: 18px;
+    bottom: 18px;
+    z-index: 1002;
+    display: flex;
+    gap: 4px;
+    padding: 5px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--surface-raised);
+    box-shadow: var(--popup-shadow);
+}
+#focus-controls[hidden] { display: none; }
+#focus-controls button {
+    border: 0;
+    border-radius: 8px;
+    padding: 9px 11px;
+    background: transparent;
+    color: var(--text);
+    font-size: 12px;
+    cursor: pointer;
+}
+#focus-controls button:hover { background: var(--accent-soft); }
+#focus-controls kbd { font: inherit; color: var(--text-faint); margin-left: 6px; }
+#focus-controls #focus-show-controls { background: var(--control-bg-2); }
+
 /* Document outline */
 #sidebar-content-outline {
     padding: 12px 8px;
