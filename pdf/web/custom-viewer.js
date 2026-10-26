@@ -3486,15 +3486,20 @@ let pageNumberRafId = null;
 // dismissing them: the note editor can hold unsaved typed text, and
 // hidePopups() would silently discard it.
 let popupAnchorScrollTop = container.scrollTop;
+let popupAnchorScrollLeft = container.scrollLeft;
 function shiftPopupsWithScroll() {
-    const delta = container.scrollTop - popupAnchorScrollTop;
+    const deltaY = container.scrollTop - popupAnchorScrollTop;
+    const deltaX = container.scrollLeft - popupAnchorScrollLeft;
     popupAnchorScrollTop = container.scrollTop;
-    if (delta === 0) return;
+    popupAnchorScrollLeft = container.scrollLeft;
+    if (deltaX === 0 && deltaY === 0) return;
     ['color-picker-popup', 'edit-highlight-popup', 'note-editor-popup'].forEach(id => {
         const popup = document.getElementById(id);
         if (!popup || popup.classList.contains('hidden')) return;
         const top = parseFloat(popup.style.top);
-        if (!Number.isNaN(top)) popup.style.top = `${top - delta}px`;
+        const left = parseFloat(popup.style.left);
+        if (!Number.isNaN(top)) popup.style.top = `${top - deltaY}px`;
+        if (!Number.isNaN(left)) popup.style.left = `${left - deltaX}px`;
     });
 }
 

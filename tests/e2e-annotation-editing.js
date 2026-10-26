@@ -1,4 +1,4 @@
-// Real editor typing, autosave and reload persistence. Uses an isolated CDP tab
+// Real editor typing/reloads and popup anchoring. Uses an isolated CDP tab
 // and localStorage-backed extension storage on test ports 8793/9333.
 const assert = require('node:assert/strict');
 const key = 'pdf_highlights_/tests/test_highlight.pdf';
@@ -101,7 +101,31 @@ async function run() {
     assert.equal(await stored(), 'Hidden-tab draft', 'hidden-tab event flushes pending text');
     console.log('pass: sidebar autosave, focus, reload before debounce and visibility flush');
 
-
+    await evaluate(`document.getElementById('icon-tab-comments').click(); for (let i = 0; i < 5; i++) document.getElementById('zoom_in').click();`);
+    await waitFor(`document.getElementById('viewerContainer').scrollWidth > document.getElementById('viewerContainer').clientWidth + 150 && !!document.querySelector('.custom-highlight')`);
+    await pause(500);
+    for (const [popupId, buttonId] of [['edit-highlight-popup', null], ['color-picker-popup', 'edit-btn-color'], ['note-editor-popup', 'edit-btn-note']]) {
+        await evaluate(`document.getElementById('viewerContainer').scrollTo(0, 0); document.getElementById('note-btn-save').click()`);
+        await pause(100);
+        await evaluate(`(() => {
+            const hl = document.querySelector('.custom-highlight'), r = hl.getBoundingClientRect();
+            hl.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: r.left + 20, clientY: r.top + 10 }));
+            ${buttonId ? `document.getElementById('${buttonId}').click();` : ''}
+        })()`);
+        await waitFor(`!document.getElementById('${popupId}').classList.contains('hidden')`);
+        const position = () => evaluate(`(() => {
+            const p = document.getElementById('${popupId}').getBoundingClientRect();
+            const h = document.querySelector('.custom-highlight').getBoundingClientRect();
+            return { x: p.left - h.left, y: p.top - h.top };
+        })()`);
+        const before = await position();
+        await evaluate(`document.getElementById('viewerContainer').scrollBy(100, 40)`);
+        await pause(150);
+        const after = await position();
+        assert.ok(Math.abs(before.x - after.x) < 1, popupId + ' follows horizontal scrolling');
+        assert.ok(Math.abs(before.y - after.y) < 1, popupId + ' follows vertical scrolling');
+    }
+    console.log('pass: edit, color and note popups follow both scroll axes');
 }
 run().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => {
     if (tab) {
