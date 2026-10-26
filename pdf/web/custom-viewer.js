@@ -846,11 +846,19 @@ function tryAutoListOnBackspace(el) {
 // Save can commit a focused editor without moving its caret or ending the
 // current note undo session. Weak keys let removed sidebar cards be collected.
 const richEditorCommits = new WeakMap();
+const pendingRichEditorSaves = new Map();
 
-function attachRichEditor(el, { getInitial, onSave, onInput } = {}) {
+function flushRichEditorSaves() {
+    for (const commit of pendingRichEditorSaves.values()) commit();
+    const editor = document.activeElement?.closest('.sidebar-item-note-input');
+    richEditorCommits.get(editor)?.();
+}
+
+function attachRichEditor(el, { getInitial, onSave, onInput, autoSave = false } = {}) {
     if (!el) return;
 
     let initialContent = '';
+    let saveTimeout = null;
 
     const updateEmptyState = () => {
         const text = el.textContent.trim();
@@ -865,6 +873,11 @@ function attachRichEditor(el, { getInitial, onSave, onInput } = {}) {
         updateEmptyState();
         if (typeof onInput === 'function') {
             onInput(getRichNoteContent(el));
+        }
+        if (autoSave) {
+            clearTimeout(saveTimeout);
+            pendingRichEditorSaves.set(el, commit);
+            saveTimeout = setTimeout(commit, 300);
         }
     };
 
@@ -937,6 +950,12 @@ function attachRichEditor(el, { getInitial, onSave, onInput } = {}) {
     });
 
     const commit = () => {
+        clearTimeout(saveTimeout);
+        saveTimeout = null;
+        pendingRichEditorSaves.delete(el);
+        // A remote update, deletion or undo may have replaced this card.
+        // Its delayed callback must never write the detached editor's text.
+        if (autoSave && !el.isConnected) return;
         updateEmptyState();
         if (typeof onSave === 'function') {
             const currentClean = getRichNoteContent(el);
@@ -1199,8 +1218,8 @@ function pushHighlightEditUndo(hlId, before, after) {
 }
 
 // --- Note-edit sessions ---
-// Floating notes record history on input and autosave after ~300 ms of
-// pause; sidebar cards commit on save/blur. Recording each
+// Both note editors record history on input and autosave after ~300 ms of
+// pause, or immediately on save/blur. Recording each
 // commit would shatter one writing burst into a dozen undo steps.
 // Opening an editor for a highlight opens a session carrying the
 // pre-session note; every commit inside the session updates the top
@@ -4640,10 +4659,12 @@ document.getElementById('note-btn-save').addEventListener('click', () => {
 });
 
 window.addEventListener('beforeunload', () => {
+    flushRichEditorSaves();
     flushFloatingNoteSave();
 });
 document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') {
+        flushRichEditorSaves();
         flushFloatingNoteSave();
     }
 });
@@ -5011,8 +5032,7 @@ document.getElementById('save_pdf').addEventListener('click', async () => {
     try {
         // A shortcut/programmatic click does not blur the sidebar editor.
         // Commit its current rich text before taking the export snapshot.
-        const sidebarEditor = document.activeElement?.closest('.sidebar-item-note-input');
-        richEditorCommits.get(sidebarEditor)?.();
+        flushRichEditorSaves();
         // Replacement indices and geometry belong to this exact document.
         // Re-fetching a changed URL could remove unrelated annotations.
         const existingPdfBytes = await Promise.race([
@@ -6365,14 +6385,23 @@ function renderSidebar() {
         noteInput.dataset.placeholder = 'Add a comment...';
         setRichNoteContent(noteInput, hl);
 
+        const updateNote = (cleanedHtml) => {
+            if (!highlights.includes(hl)) return;
+            if (!noteUndoSession || noteUndoSession.hlId !== hl.id) beginNoteUndoSession(hl);
+            const hadNote = !!hl.note;
+            hl.note = cleanedHtml || null;
+            hl.noteFmt = cleanedHtml ? 'html' : undefined;
+            commitNoteUndoEntry(hl);
+            if (hadNote !== !!hl.note) updateHighlightIndicatorsOnPage(hl);
+        };
         attachRichEditor(noteInput, {
+            autoSave: true,
             getInitial: () => hl.noteFmt === 'html' ? (hl.note || '') : (hl.note ? escapeHtml(hl.note).replace(/\r\n|\r|\n/g, '<br>') : ''),
+            onInput: updateNote,
             onSave: (cleanedHtml) => {
-                hl.note = cleanedHtml || null;
-                hl.noteFmt = cleanedHtml ? 'html' : undefined;
-                saveHighlights(false); // Do NOT re-render sidebar on blur
-                updateHighlightIndicatorsOnPage(hl);
-                commitNoteUndoEntry(hl);
+                if (!highlights.includes(hl)) return;
+                updateNote(cleanedHtml);
+                saveHighlights(false); // Preserve the editor and caret during autosave.
             }
         });
 

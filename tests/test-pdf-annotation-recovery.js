@@ -157,6 +157,7 @@ function backupAndRestore(localData, type, includePdf = true, customInclude = nu
             let activeHighlightId = null, pendingFlashHighlightId = null, pendingFlashHighlightUntil = 0;
             let savePdfInProgress = false;
             const richEditorCommits = new WeakMap();
+            const pendingRichEditorSaves = new Map();
             const SAVE_FETCH_TIMEOUT_MS = 1000;
             const SYNC_KEYS = { highlights: 'highlights', annotationSource: 'annotationSource' };
             const ANNOTATION_UNDO_LIMIT = 100, annotationUndoStack = [], annotationRedoStack = [];
@@ -166,7 +167,7 @@ function backupAndRestore(localData, type, includePdf = true, customInclude = nu
             'drawHighlight', 'mergeHighlightRectangles', 'cloneAnnotationRecord', 'registerUndoEntry',
             'runAnnotationUndo', 'runAnnotationRedo', 'updateUndoRedoButtons', 'pushHighlightDeletedUndo',
             'deleteHighlightForUndo', 'restoreHighlightForUndo', 'removeHighlightOverlaysById',
-            'detachHighlightPopupsById', 'applyHighlightEditForUndo']) vm.runInContext(fn(name), context);
+            'detachHighlightPopupsById', 'applyHighlightEditForUndo', 'flushRichEditorSaves']) vm.runInContext(fn(name), context);
         const start = viewerSource.indexOf("document.getElementById('save_pdf').addEventListener");
         vm.runInContext(viewerSource.slice(start, viewerSource.indexOf('\n});', start) + 4), context);
         let shortcutHandler;
@@ -375,8 +376,13 @@ function backupAndRestore(localData, type, includePdf = true, customInclude = nu
     // shortcut listener and PDF Save handler. Only the DOM surface is mocked.
     const sidebar = await harness();
     await sidebar.recover();
+    const getSidebarElement = sidebar.context.document.getElementById;
+    const undoButton = {}, redoButton = {};
+    sidebar.context.document.getElementById = id => id === 'undo_annotation' ? undoButton
+        : id === 'redo_annotation' ? redoButton : getSidebarElement(id);
     const editorEvents = new Map();
     const noteInput = {
+        isConnected: true,
         innerHTML: 'Original sidebar note',
         get textContent() { return this.innerHTML.replace(/<[^>]*>/g, ''); },
         classList: { toggle() {} },
@@ -394,10 +400,28 @@ function backupAndRestore(localData, type, includePdf = true, customInclude = nu
     sidebar.run("let noteUndoSession = null; const hl = highlights[0]; hl.note = 'Original sidebar note'; hl.noteFmt = 'html';");
     for (const name of ['attachRichEditor', 'getRichNoteContent', 'beginNoteUndoSession',
         'commitNoteUndoEntry', 'applyNoteForUndo']) sidebar.run(fn(name));
-    const editorStart = viewerSource.indexOf('attachRichEditor(noteInput, {');
+    const editorStart = viewerSource.indexOf('const updateNote = (cleanedHtml) => {');
     sidebar.run(viewerSource.slice(editorStart, viewerSource.indexOf('\n        });', editorStart) + 12));
     editorEvents.get('focus').forEach(listener => listener());
     sidebar.run('beginNoteUndoSession(hl)');
+    const saveTimers = new Map();
+    let timerId = 0;
+    sidebar.context.setTimeout = callback => { saveTimers.set(++timerId, callback); return timerId; };
+    sidebar.context.clearTimeout = id => saveTimers.delete(id);
+    const storedBeforeTyping = sidebar.storage.highlights[0].note;
+    noteInput.innerHTML = 'Autosaved without blur';
+    editorEvents.get('input').forEach(listener => listener());
+    assert.equal(sidebar.run('highlights[0].note'), noteInput.innerHTML, 'input updates the live note immediately');
+    assert.equal(sidebar.run('annotationUndoStack.length'), 1, 'input records history before the save timer');
+    assert.equal(sidebar.storage.highlights[0].note, storedBeforeTyping, 'storage writes are debounced');
+    for (const callback of [...saveTimers.values()]) callback();
+    assert.equal(sidebar.storage.highlights[0].note, noteInput.innerHTML, 'autosave persists while the editor stays focused');
+    noteInput.innerHTML = 'Closing before autosave';
+    editorEvents.get('input').forEach(listener => listener());
+    sidebar.run('flushRichEditorSaves()');
+    assert.equal(sidebar.storage.highlights[0].note, noteInput.innerHTML, 'lifecycle flush saves without waiting for debounce');
+    assert.equal(saveTimers.size, 0, 'flush cancels pending timers');
+    assert.equal(sidebar.context.document.activeElement, noteInput, 'autosave preserves focus');
     async function checkSidebarSave(html, modifier) {
         noteInput.innerHTML = html;
         editorEvents.get('input').forEach(listener => listener());
@@ -419,6 +443,12 @@ function backupAndRestore(localData, type, includePdf = true, customInclude = nu
     assert.equal(sidebar.run('highlights[0].note'), 'Original sidebar note');
     sidebar.run('runAnnotationRedo()');
     assert.ok(!sidebar.run('highlights[0].note'), 'redo restores cleared note');
+    noteInput.innerHTML = 'Detached draft';
+    editorEvents.get('input').forEach(listener => listener());
+    noteInput.isConnected = false;
+    sidebar.run("highlights[0].note = 'Remote replacement'; saveHighlights(false)");
+    for (const callback of [...saveTimers.values()]) callback();
+    assert.equal(sidebar.storage.highlights[0].note, 'Remote replacement', 'detached editor cannot overwrite a replacement');
 
     // Imported comments have no HTML marker. Undo must restore that absence,
     // or literal tags are interpreted by the editor and stripped on export.
