@@ -37,6 +37,7 @@ When the primary model grounds its response with live web search results, the Ha
 
 ### ⚡ Core Features
 - **Instant Definitions:** Select 1-6 words on any webpage to get a concise, AI-powered explanation in a clean popup.
+- **Google Docs & Slides:** Selecting text in Google Docs or Slides shows the Ask AI and Clip buttons, and the hotkey looks up the selection, even though these editors draw text on a canvas instead of the page. The selection is read without touching your clipboard.
 - **Conversational Hotkey:** Press `Ctrl+Shift+Y` (customizable) to instantly open an empty conversational AI popup and ask any question, or trigger the AI on your current text selection.
 - **Conversation & Draft Recovery:** Unfinished questions survive dismissal during the same browser session, even before the first AI answer. Press the conversational hotkey with no text selected to resume the draft automatically, focused with the cursor at the end. Follow-up drafts also restore their conversation; submitting or erasing the question clears the saved draft. Completed conversations remain available through “Open last conversation.”
 - **Multiple AI Models:** Configure and switch between multiple AI backends (Ollama, Gemini API, OpenAI, etc.).

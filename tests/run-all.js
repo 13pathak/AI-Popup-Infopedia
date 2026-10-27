@@ -353,6 +353,11 @@ async function run() {
     const selectionButtonsProc = spawn(process.execPath, [path.join(__dirname, 'test-selection-buttons.js')], { stdio: 'inherit' });
     const selectionButtonsCode = await new Promise(res => selectionButtonsProc.on('exit', code => res(code ?? 0)));
     if (selectionButtonsCode !== 0) exitCode = selectionButtonsCode;
+
+    console.log('Testing selections in Google Docs and Slides...');
+    const googleDocsProc = spawn(process.execPath, [path.join(__dirname, 'e2e-google-docs-selection.js')], { stdio: 'inherit' });
+    const googleDocsCode = await new Promise(res => googleDocsProc.on('exit', code => res(code ?? 0)));
+    if (googleDocsCode !== 0) exitCode = googleDocsCode;
   } catch (err) {
     console.error('Test runner failed:', err.message);
     exitCode = 1;

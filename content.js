@@ -2297,6 +2297,79 @@ function extractImplicitContext(selection, selectedText) {
   return (context.sentence || context.pageTitle) ? context : null;
 }
 
+// --- Google Docs and Slides ---
+// These editors draw text on a canvas and keep the selection in their own
+// model, so window.getSelection() is empty there. Typing and copying go
+// through an offscreen "text event target" iframe instead; a synthetic copy
+// event sent to it makes the editor fill in the selected text. Untrusted
+// copy events never write to the system clipboard, so the user's clipboard
+// is left alone.
+const GOOGLE_EDITOR_EVENT_FRAME_SELECTOR = '.docs-texteventtarget-iframe';
+let googleEditorPointerDown = null;
+let googleEditorLastRect = null;
+const googleEditorKeyDocs = new WeakSet();
+
+function getGoogleEditorEventFrame() {
+  if (window.location.hostname !== 'docs.google.com') return null;
+  return document.querySelector(GOOGLE_EDITOR_EVENT_FRAME_SELECTOR);
+}
+
+// The content script also runs inside that offscreen iframe (all_frames +
+// match_about_blank). Popups opened there would be invisible, so it defers
+// to the editor's top frame.
+function isGoogleEditorEventFrame() {
+  try {
+    return !!(window.frameElement && window.frameElement.matches(GOOGLE_EDITOR_EVENT_FRAME_SELECTOR));
+  } catch (e) {
+    return false;
+  }
+}
+
+function readGoogleEditorSelection() {
+  const frame = getGoogleEditorEventFrame();
+  const doc = frame && frame.contentDocument;
+  if (!doc) return '';
+  // Keys typed in the editor land in this iframe, not in our document;
+  // listen there too so Escape still closes the top popup.
+  if (!googleEditorKeyDocs.has(doc)) {
+    googleEditorKeyDocs.add(doc);
+    doc.addEventListener('keydown', handlePopupEscapeKey);
+  }
+  try {
+    const clipboardData = new DataTransfer();
+    const copy = new ClipboardEvent('copy', { clipboardData, bubbles: true, cancelable: true });
+    (doc.activeElement || doc.body).dispatchEvent(copy);
+    return clipboardData.getData('text/plain');
+  } catch (e) {
+    return '';
+  }
+}
+
+// Only a drag, a double/triple click or a shift-click can change the
+// selection; plain clicks (toolbar buttons, placing the caret) are skipped.
+function isGoogleEditorSelectionGesture(event) {
+  if (!getGoogleEditorEventFrame()) return false;
+  if (event.target && event.target.closest && event.target.closest('#docs-chrome')) return false;
+  if (event.detail >= 2 || event.shiftKey) return true;
+  const down = googleEditorPointerDown;
+  return !!down && Math.hypot(event.clientX - down.x, event.clientY - down.y) > 3;
+}
+
+// The highlight is painted on the canvas, so the pointer path stands in for
+// the selection's bounds when placing the Ask AI button.
+function googleEditorPointerRect(event) {
+  const down = googleEditorPointerDown || { x: event.clientX, y: event.clientY };
+  const left = Math.min(down.x, event.clientX);
+  const right = Math.max(down.x, event.clientX);
+  const top = Math.min(down.y, event.clientY) - 10;
+  const bottom = Math.max(down.y, event.clientY) + 10;
+  return { left, right, top, bottom, width: right - left, height: bottom - top, x: left, y: top };
+}
+
+document.addEventListener('mousedown', (event) => {
+  googleEditorPointerDown = { x: event.clientX, y: event.clientY };
+}, true);
+
 // --- Main mouseup listener ---
 document.addEventListener('mouseup', (event) => {
   // 1. Check for selection inside existing popups (Nested Selection) FIRST
@@ -2347,10 +2420,17 @@ document.addEventListener('mouseup', (event) => {
   if (isInteractionBlocked) return;
 
   // 4. Check main window selection
-  const selection = window.getSelection();
+  let selection = window.getSelection();
   selectedText = selection.toString().trim();
   if (selectedText.length > 0) {
     selectionRect = selection.getRangeAt(0).getBoundingClientRect();
+  } else if (isGoogleEditorSelectionGesture(event)) {
+    selectedText = readGoogleEditorSelection().trim();
+    selectionRect = googleEditorPointerRect(event);
+    googleEditorLastRect = selectionRect;
+    selection = null; // no DOM range to take the surrounding sentence from
+  }
+  if (selectedText.length > 0) {
     const wordCount = selectedText.split(/\s+/).length;
     if (wordCount > 0 && wordCount <= MAX_FLOATING_BUTTON_WORDS) {
 
@@ -2387,6 +2467,20 @@ document.addEventListener('trigger-ai-popup', (e) => {
   }
 });
 
+// Hotkey commands reach every frame. Only the focused frame acts, with the
+// top frame as the fallback when no frame has focus. Google's editors keep
+// focus in their offscreen typing iframe, so their top frame acts for it.
+function shouldHandleHotkeyInThisFrame() {
+  if (isGoogleEditorEventFrame()) return false;
+  if (!document.hasFocus()) return window === window.top;
+  const active = document.activeElement;
+  if (active && active.tagName === 'IFRAME') {
+    // Focus is inside a child iframe. The child will handle it.
+    return active.matches(GOOGLE_EDITOR_EVENT_FRAME_SELECTOR) && !!getGoogleEditorEventFrame();
+  }
+  return true;
+}
+
 // --- NEW: Message Listener for activation ---
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // Live streamed answer deltas from the background for a request this popup
@@ -2399,32 +2493,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.type === "triggerPopup") {
-    let shouldHandle = false;
-
-    if (document.hasFocus()) {
-      if (document.activeElement && document.activeElement.tagName === 'IFRAME') {
-        // Focus is inside a child iframe. The child will handle it.
-        shouldHandle = false;
-      } else {
-        // This frame is the actually focused frame.
-        shouldHandle = true;
-      }
-    } else {
-      if (window === window.top) {
-        // Top frame without focus. Acts as fallback if NO frame has focus.
-        shouldHandle = true;
-      } else {
-        shouldHandle = false;
-      }
-    }
-
-    if (shouldHandle) {
+    if (shouldHandleHotkeyInThisFrame()) {
       const selection = window.getSelection();
       const selectedText = selection.toString().trim();
+      const editorText = selectedText ? '' : readGoogleEditorSelection().trim();
       if (selectedText.length > 0) {
         const rect = selection.getRangeAt(0).getBoundingClientRect();
         // For manual trigger, we skip the Open button and just show the popup.
         initiatePopupSequence(rect, selectedText, undefined, extractImplicitContext(selection, selectedText));
+      } else if (editorText.length > 0) {
+        const rect = googleEditorLastRect || { left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0 };
+        initiatePopupSequence(rect, editorText, undefined, extractImplicitContext(null, editorText));
       } else {
         // NEW: Trigger empty popup for questioning when no text is selected
         initiateEmptyPopupSequence();
@@ -2434,15 +2513,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   // --- Issue #26: reopen the stashed (accidentally dismissed) conversation ---
   if (request.type === "reopenLastConversation") {
-    // Same frame-selection rules as triggerPopup: only the actually-focused
-    // frame acts, with the top frame as the no-focus fallback.
-    let shouldHandle = false;
-    if (document.hasFocus()) {
-      shouldHandle = !(document.activeElement && document.activeElement.tagName === 'IFRAME');
-    } else {
-      shouldHandle = (window === window.top);
-    }
-    if (shouldHandle) {
+    if (shouldHandleHotkeyInThisFrame()) {
       const top = activePopups[activePopups.length - 1];
       if (popupHasConversation(top)) return; // already reading something — leave it be
       if (top) removePopupInstance(top); // an empty/greeting popup makes way
@@ -2903,14 +2974,15 @@ document.addEventListener('mousedown', (event) => {
 });
 
 // --- Keydown listener ---
-document.addEventListener('keydown', (event) => {
+function handlePopupEscapeKey(event) {
   if (event.key === 'Escape') {
     if (activePopups.length > 0) {
       // Close the most recently added popup (top-most)
       removeLastPopup();
     }
   }
-});
+}
+document.addEventListener('keydown', handlePopupEscapeKey);
 
 // Ctrl+S saves the top-most popup's conversation as a PDF — the same action
 // as the popup's Save-as-PDF button. While ANY popup is open the shortcut
