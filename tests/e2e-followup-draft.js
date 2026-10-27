@@ -96,7 +96,27 @@ async function run() {
   await evaluate('models = []');
   await open();
   assert.equal(await inputValue(), 'New text beats delayed recovery', 'deleted models do not lose drafts');
-  console.log('Draft hotkey recovery, dismissal, caret, clear/submit and delayed-response browser tests passed.');
+
+  // Real keystrokes in the question box never reach the page's own shortcut
+  // listeners: the shadow root hides the input, so sites like YouTube would
+  // take the keys for hotkeys.
+  await evaluate(`
+    window.pageKeys = [];
+    for (const type of ['keydown', 'keypress', 'keyup']) {
+      document.addEventListener(type, e => pageKeys.push(type + ':' + e.key));
+      window.addEventListener(type, e => pageKeys.push(type + ':' + e.key));
+    }
+    activePopups.at(-1).popup.querySelector('#ai-popup-followup-input').focus();
+  `);
+  for (const key of ' kmj') {
+    const code = key === ' ' ? 'Space' : 'Key' + key.toUpperCase();
+    const windowsVirtualKeyCode = key === ' ' ? 32 : key.toUpperCase().charCodeAt(0);
+    await send('Input.dispatchKeyEvent', { type: 'keyDown', key, code, text: key, windowsVirtualKeyCode });
+    await send('Input.dispatchKeyEvent', { type: 'keyUp', key, code, windowsVirtualKeyCode });
+  }
+  assert.equal(await inputValue(), 'New text beats delayed recovery kmj', 'keystrokes type into the question box');
+  assert.deepEqual(await evaluate('pageKeys'), [], 'page shortcut listeners see none of the keys');
+  console.log('Draft hotkey recovery, dismissal, caret, clear/submit, delayed-response and page-hotkey isolation browser tests passed.');
 }
 run().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => {
   if (ws) ws.close();

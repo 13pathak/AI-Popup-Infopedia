@@ -6135,8 +6135,13 @@ function createFollowupInput(instance, word) {
   // Interaction handlers to avoid popup closing while typing
   input.addEventListener('focus', () => { instance.isInteracting = true; });
   input.addEventListener('blur', () => { setTimeout(() => { instance.isInteracting = false; }, 200); });
+  // Avoid triggering page hotkeys. The shadow root hides this input from the
+  // page, which sees the keys as coming from a plain div and would treat
+  // them as shortcuts (typing "k" here used to pause YouTube videos).
+  input.addEventListener('keypress', (e) => e.stopPropagation());
+  input.addEventListener('keyup', (e) => e.stopPropagation());
   input.addEventListener('keydown', (e) => {
-    e.stopPropagation(); // Avoid triggering window hotkeys
+    e.stopPropagation();
     if (e.key === 'Escape') {
       input.blur();
       instance.isInteracting = false;
