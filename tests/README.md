@@ -1,10 +1,10 @@
-# Viewer Test Suite
+# Extension Test Suite
 
-This directory contains automated tests and fixtures for the PDF custom viewer (including annotation undo/redo, text selection, highlights, bookmarks, and notes).
+This directory contains automated tests for the PDF viewer, AI popup, settings, and spaced-repetition scheduler.
 
 ## Running Tests
 
-To run the entire test suite with a single command:
+Use Node.js 22 or newer (the browser tests use the built-in `fetch` and `WebSocket` APIs) and install Chrome, Edge, or Chromium. Run the command from the repository root, with ports 8793 and 9333 available:
 
 ```bash
 node tests/run-all.js
