@@ -1,35 +1,35 @@
 # AI Popup Infopedia
 
-A powerful browser extension to get instant AI explanations for any word or phrase you select. Features include multiple AI models, custom prompts, organized word lists, Anki integration, a built-in spaced repetition flashcard system, Speech-to-Text dictation, and built-in PDF support.
+A browser extension that explains selected words and phrases using your configured AI models. Features include multiple AI models, custom prompts, organized word lists, Anki integration, a built-in spaced repetition flashcard system, Speech-to-Text dictation, and built-in PDF support.
 
 #### Main Popup
-<img width="1888" height="908" alt="1" src="https://github.com/user-attachments/assets/2b781f8f-f5df-4784-b175-39734c9edd47" />
+<img width="1888" height="908" alt="AI explanation popup" src="https://github.com/user-attachments/assets/2b781f8f-f5df-4784-b175-39734c9edd47" />
 
 
 #### Settings Menu
-<img width="1892" height="921" alt="image" src="https://github.com/user-attachments/assets/fc9ffbdf-a505-4674-85cd-ef7d7ca61f0d" />
+<img width="1892" height="921" alt="Extension settings" src="https://github.com/user-attachments/assets/fc9ffbdf-a505-4674-85cd-ef7d7ca61f0d" />
 
 
-#### Hallucination Guard (Works only when AI bot used its trained data, not real time grounded data)
-A second model checks each answer. A clean result is a small **Verified** badge under the answer (click it for who checked and why); only **Possible errors found** opens a red box, with the suggested corrections first.
+#### Hallucination Guard
+For answers that did not use web search, a second model can check for possible errors. A **Verified** badge means the checking model found no issue; it is not a guarantee of accuracy. Click the badge for the model's reasoning. **Possible errors found** opens a box with suggested corrections.
 
-<img width="1119" height="579" alt="image" src="https://github.com/user-attachments/assets/e00681be-7473-4b5a-b7d1-179b378f7fb5" />
+<img width="1119" height="579" alt="Hallucination Guard result" src="https://github.com/user-attachments/assets/e00681be-7473-4b5a-b7d1-179b378f7fb5" />
 
 ---
-## Download From [Chrome Store]( https://chromewebstore.google.com/detail/ai-popup-infopedia/jejfdgeiihgomipkhjkbplikgkcjcpab)
+## Download from the [Chrome Web Store](https://chromewebstore.google.com/detail/ai-popup-infopedia/jejfdgeiihgomipkhjkbplikgkcjcpab)
 
 ## 🆕 What's New (v7.0)
 
 ### 🌐 Real-Time Web Search Grounding
-AI Popup Infopedia now supports **real-time web search grounding** through native tool calling. Instead of relying solely on static training data, each configured model can now **autonomously invoke a search tool mid-inference** to fetch live results when the query demands it. If the model's parametric knowledge is sufficient, it skips the search entirely, keeping responses fast. Powered by the [Tavily Search API](https://tavily.com/).
+Models with web search enabled can request current results through the [Tavily Search API](https://tavily.com/) while answering. Configure a Tavily key in Search API Settings and enable web search for a model that supports tool calling.
 
-- **Native Function Calling:** The extension injects an OpenAI-compatible `web_search` tool schema into API requests. The AI decides at inference time whether a web search is needed zero manual intervention.
-- **Universal Compatibility:** Works across all OpenAI-compatible endpoints, Gemini, OpenAI, Groq, Ollama, and more.
-- **Orchestrator Loop:** The background script acts as an AI orchestrator, handling multi-step tool calls (up to 3 search passes per query) with automatic forced-text fallback.
+- **Function Calling:** The extension includes an OpenAI-compatible `web_search` tool in enabled model requests. The model can request a search before answering.
+- **Compatibility:** Web search requires an endpoint and model that support OpenAI-style tool calls. Support varies by provider and model.
+- **Search Limit:** The background script allows up to three search passes per query, then requests a text answer.
 - **Groq Recovery:** If a Groq model fails to parse a follow-up tool call, the extension retries with the retrieved search results and requests a normal text answer instead of showing an error.
 
 ### 🛡️ Smart Hallucination Guard Bypass
-When the primary model grounds its response with live web search results, the Hallucination Guard is **automatically bypassed**, preventing the verification model from falsely flagging accurate, real-time answers using its outdated static knowledge. A blue 🌐 **"Search Grounded"** indicator is shown instead. The guard continues to run normally for non-searched responses.
+When the answering model uses web search, the Hallucination Guard is **automatically bypassed** and a blue 🌐 **"Search Grounded"** indicator is shown. This indicates that search results were used, not that the answer was independently verified. The guard remains available for answers that did not use search.
 
 ---
 
@@ -70,7 +70,7 @@ When the primary model grounds its response with live web search results, the Ha
 - **Settings Backup:** Export/import all models and prompts as JSON.
 
 ### 🎴 Flashcards (FSRS Spaced Repetition)
-Built-in flashcard system powered by the state-of-the-art **FSRS-6 algorithm**:
+Built-in flashcard scheduling using **FSRS-6**:
 - **Personalized Scheduling**: Memory stability and card difficulty dynamically adjust after every review.
 - **Focused Review Mode**: Distraction-free, keyboard-driven studying (`1`=Again, `2`=Hard, `3`=Good, `4`=Easy, `Space`=Flip).
 - **1-Click Memory Optimizer**: Directly personalizes all 21 FSRS parameters to your learning speed inside the browser.
@@ -80,7 +80,7 @@ Built-in flashcard system powered by the state-of-the-art **FSRS-6 algorithm**:
 
 ## 🧠 FSRS Spaced Repetition System & 1-Click Optimizer
 
-AI Popup Infopedia replaces legacy heuristic algorithms (like SM-2) with a dependency-free, high-fidelity implementation of the **Free Spaced Repetition Scheduler (FSRS-6)**—the same modern cognitive memory model used by Anki.
+AI Popup Infopedia includes a dependency-free implementation of the **Free Spaced Repetition Scheduler (FSRS-6)**.
 
 ### 1. How the FSRS Memory Model Works
 
@@ -120,7 +120,7 @@ Every review adjusts the card's state through structured learning phases:
 | **Easy** | `4` | Immediately **graduates** to Review | Applies easy bonus multiplier $w_{16}$ ($\ge 1.0$) and lowers card difficulty |
 
 * **Learning Steps:** New cards progress through short intervals (`1m` $\to$ `10m`) before graduating into day-level review.
-* **Review Logging & Telemetry:** Every rating automatically appends a snapshot to the card's `reviewLog` (timestamp, rating, state before review, elapsed days, pre-review stability, difficulty, and millisecond response duration).
+* **Local Review Log:** Every rating automatically appends a snapshot to the card's `reviewLog` (timestamp, rating, state before review, elapsed days, pre-review stability, difficulty, and millisecond response duration).
 
 ---
 
@@ -139,7 +139,7 @@ The default FSRS model uses global baseline parameters fitted on millions of rev
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-* **Zero-Setup Client-Side Machine Learning:** Runs entirely inside your browser via a dedicated Web Worker (`fsrs-optimizer.worker.js`). No Python, no CLI scripts, no Jupyter notebooks, and no external servers required.
+* **Browser-Based Optimization:** Runs in a dedicated Web Worker (`fsrs-optimizer.worker.js`) without a separate server or Python installation.
 * **Adam Optimization Engine:** Uses a multi-epoch Adam gradient descent optimizer with central difference numerical gradients to fit all **21 FSRS-6 parameters ($W_0$–$W_{20}$)** against your personal review history.
 * **Loss Metrics:** Minimizes binary cross-entropy Log Loss and Root Mean Square Error (RMSE) against your actual recall outcomes.
 * **Held-Out Check:** Every 5th card is held out of training. The fitted parameters are kept only if they predict those cards' reviews better than the defaults by at least two standard errors (compared card by card); otherwise the default model stays active. The error reduction shown is measured on the held-out reviews, not the ones the parameters were fitted to. Only cards whose review log starts at their first review are used, so cards carried over from the old scheduler don't skew the fit.
@@ -165,10 +165,10 @@ The default FSRS model uses global baseline parameters fitted on millions of rev
 
 ### 1. Installation (from Source)
 
-1. Download this project's folder.
+1. Download and extract this repository, or clone it with `git clone https://github.com/13pathak/AI-Popup-Infopedia.git`.
 2. Open your browser and navigate to `chrome://extensions`.
 3. Enable **"Developer mode"** (toggle in top-right corner).
-4. Click **"Load unpacked"** and select the folder containing this project.
+4. Click **"Load unpacked"** and select the repository folder containing `manifest.json`.
 
 ### 2. Configure AI Model (Required)
 
@@ -178,7 +178,7 @@ The default FSRS model uses global baseline parameters fitted on millions of rev
    - **Endpoint URL:**
      - *Google Gemini:* `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions`
      - *Ollama (local):* `http://localhost:11434/v1/chat/completions`
-   - **Model Name:** `gemini-2.0-flash`, `llama3`, `mistral`, etc.
+   - **Model Name:** Select a provider, use **Fetch Models**, and choose an available model, or enter an exact model ID supported by your endpoint.
    - **API Key:** Your API key (if required).
 3. Click **Save Model**.
 
@@ -213,6 +213,10 @@ The default FSRS model uses global baseline parameters fitted on millions of rev
 - **Spaced Repetition:** FSRS-6 engine with native Web Worker parameter optimizer.
 
 ---
+
+## Development Tests
+
+See [tests/README.md](tests/README.md) for the test runner and individual checks.
 
 ## 🤝 Contributing & License
 Feel free to open issues or submit pull requests for improvements!
