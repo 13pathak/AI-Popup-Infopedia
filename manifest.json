@@ -23,6 +23,9 @@
         "default": "Ctrl+Shift+U"
       },
       "description": "Open Last Conversation"
+    },
+    "toggle-word-cursor": {
+      "description": "Turn the word cursor on or off"
     }
   },
   "host_permissions": [

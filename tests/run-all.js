@@ -358,6 +358,11 @@ async function run() {
     const googleDocsProc = spawn(process.execPath, [path.join(__dirname, 'e2e-google-docs-selection.js')], { stdio: 'inherit' });
     const googleDocsCode = await new Promise(res => googleDocsProc.on('exit', code => res(code ?? 0)));
     if (googleDocsCode !== 0) exitCode = googleDocsCode;
+
+    console.log('Testing the full-screen word cursor...');
+    const wordCursorProc = spawn(process.execPath, [path.join(__dirname, 'e2e-word-cursor.js')], { stdio: 'inherit' });
+    const wordCursorCode = await new Promise(res => wordCursorProc.on('exit', code => res(code ?? 0)));
+    if (wordCursorCode !== 0) exitCode = wordCursorCode;
   } catch (err) {
     console.error('Test runner failed:', err.message);
     exitCode = 1;

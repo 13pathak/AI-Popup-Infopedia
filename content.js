@@ -5,7 +5,7 @@ let baseZIndex = 2100000000;
 // Build marker: the DevTools console of any page shows which content.js
 // build the tab is running — tabs opened before an extension reload keep the
 // previous script until the page is refreshed.
-console.log('[AI Popup] content script build 2026-08-27.1');
+console.log('[AI Popup] content script build 2026-11-20.1');
 
 // --- Theme Cache & Management ---
 let currentUiTheme = 'dark';
@@ -2419,6 +2419,13 @@ document.addEventListener('mouseup', (event) => {
 
   if (isInteractionBlocked) return;
 
+  // The word cursor keeps a whole word selected: a click or drag moves it
+  // instead of offering the Ask AI button.
+  if (wordCursor.active) {
+    handleWordCursorMouseUp(event);
+    return;
+  }
+
   // 4. Check main window selection
   let selection = window.getSelection();
   selectedText = selection.toString().trim();
@@ -2466,6 +2473,1010 @@ document.addEventListener('trigger-ai-popup', (e) => {
     initiatePopupSequence(e.detail.rect, e.detail.text, e.detail.prompt, extractImplicitContext(window.getSelection(), e.detail.text));
   }
 });
+
+// --- Word cursor (browser full screen) ---
+// While the browser is in full screen (F11) a whole word is always selected
+// and the keyboard moves it: ← → by word, ↑ ↓ by line, Ctrl+← → by
+// sentence. Enter explains the selected word; Esc closes the popup, then
+// turns the cursor off until full screen is entered again. It is opt-in
+// (Model Settings → Word Cursor in Full Screen) because those keys belong to
+// the page otherwise, and it stands down whenever focus is in a field, a
+// widget, a page dialog or the popup's own controls, and while a large
+// video plays. A shortcut (unassigned by default) toggles it on any page.
+//
+// Word boundaries come from Intl.Segmenter rather than Selection.modify:
+// native word steps differ by platform (on Windows they take the trailing
+// space) and the segmenter also splits languages written without spaces.
+// The cursor itself is the real selection, so it looks selected, copies
+// with Ctrl+C, and the Ctrl+Shift+Y shortcut reads it.
+//
+// Element full screen (a video or a slide deck) is not covered: there the
+// page owns the keys. In browser full screen Esc reaches the page and does
+// not leave full screen, so it is free to close popups and the cursor.
+const WORD_CURSOR_MIN_VISIBLE_WORDS = 30;
+const WORD_CURSOR_SCROLL_MARGIN = 48;
+const WORD_CURSOR_MAX_SCAN_NODES = 20000;
+const WORD_CURSOR_MAX_SCAN_WORDS = 5000;
+const WORD_CURSOR_MAX_BLOCK_CHARS = 20000;
+const WORD_CURSOR_HINT_MS = 4500;
+// Text inside these is never a stop: code, form fields, buttons, embedded
+// media, and anything the page hides or makes inert.
+const WORD_CURSOR_SKIP_SELECTOR = 'script, style, noscript, template, textarea, input, select, option, button, svg, math, iframe, object, embed, canvas, video, audio, [hidden], [inert]';
+// Site chrome the starting word avoids; moving can still reach it.
+const WORD_CURSOR_PAGE_CHROME_SELECTOR = 'nav, header, footer, aside, [role="navigation"], [role="banner"], [role="contentinfo"], [role="complementary"]';
+// Focus inside one of these keeps every key for the page.
+const WORD_CURSOR_WIDGET_ROLES = new Set(['textbox', 'searchbox', 'combobox', 'listbox', 'option', 'menu', 'menubar', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'radiogroup', 'radio', 'slider', 'spinbutton', 'scrollbar', 'tablist', 'tab', 'tree', 'treeitem', 'treegrid', 'grid', 'gridcell', 'application']);
+// Focus on one of these keeps Enter for the page, which activates it.
+const WORD_CURSOR_ACTIVATABLE_SELECTOR = 'a[href], button, summary, label, [role="button"], [role="link"], [role="checkbox"], [role="switch"]';
+const WORD_CURSOR_MOVES = new Set(['next', 'prev', 'up', 'down', 'nextSentence', 'prevSentence']);
+
+let wordCursorEnabledSetting = false;
+const wordCursor = {
+  active: false,
+  manual: false,    // turned on with the shortcut rather than by full screen
+  dismissed: false, // turned off with Esc; stays off until full screen is re-entered
+  sel: null,        // { first, last }, each word as { node, start, end }
+  goalX: null,      // column kept across consecutive ↑ / ↓ presses
+  popup: null,      // popup the last Enter opened
+  popupSel: null,   // the words that popup explains
+  swallowedCodes: new Set(), // consumed keydowns whose keypress/keyup the page must not see
+  hint: null,
+  hintTimer: 0
+};
+// Style and visibility answers last for one action (a key press, a click,
+// a start) and are recomputed on the next, since pages change.
+let wordCursorElementCache = new WeakMap();
+let wordCursorClipCache = new WeakMap();
+let wordCursorChromeCache = new WeakMap();
+const wordCursorWordCache = new WeakMap();
+const wordCursorSegmenters = {};
+let wordCursorRecheckTimer = 0;
+const wordCursorFullscreenQuery = typeof window.matchMedia === 'function'
+  ? window.matchMedia('(display-mode: fullscreen)')
+  : null;
+
+function isBrowserFullscreen() {
+  return !!(wordCursorFullscreenQuery && wordCursorFullscreenQuery.matches);
+}
+
+function beginWordCursorPass() {
+  wordCursorElementCache = new WeakMap();
+  wordCursorClipCache = new WeakMap();
+  wordCursorChromeCache = new WeakMap();
+}
+
+function wordCursorFrameAllowed(manual) {
+  if (!document.body || document.body.tagName !== 'BODY' || document.designMode === 'on') return false;
+  // Every frame sees the full-screen media query; only the page itself
+  // turns the cursor on, so a single word is selected at a time.
+  if (!manual && window !== window.top) return false;
+  // The PDF viewer and Google's canvas editors handle their own keys.
+  if (window.location.pathname.includes('custom-viewer.html')) return false;
+  if (isGoogleEditorEventFrame() || getGoogleEditorEventFrame()) return false;
+  return true;
+}
+
+function wordCursorSegmenter(granularity) {
+  if (granularity in wordCursorSegmenters) return wordCursorSegmenters[granularity];
+  let segmenter = null;
+  if (typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function') {
+    const lang = (document.documentElement.lang || '').trim() || undefined;
+    try {
+      segmenter = new Intl.Segmenter(lang, { granularity });
+    } catch (e) {
+      segmenter = new Intl.Segmenter(undefined, { granularity }); // malformed lang attribute
+    }
+  }
+  wordCursorSegmenters[granularity] = segmenter;
+  return segmenter;
+}
+
+function wordCursorElementUsable(el) {
+  const cached = wordCursorElementCache.get(el);
+  if (cached !== undefined) return cached;
+  let usable = !el.closest(WORD_CURSOR_SKIP_SELECTOR) && !el.isContentEditable;
+  if (usable && typeof el.checkVisibility === 'function') {
+    // Both option spellings: Chrome renamed checkOpacity/checkVisibilityCSS.
+    usable = el.checkVisibility({ opacityProperty: true, visibilityProperty: true, checkOpacity: true, checkVisibilityCSS: true });
+  }
+  if (usable) {
+    const style = getComputedStyle(el);
+    if (style.visibility !== 'visible' || style.userSelect === 'none' || style.webkitUserSelect === 'none') {
+      usable = false;
+    } else if (style.display !== 'contents') {
+      // A 1px box is a visually hidden label meant for screen readers.
+      const box = el.getBoundingClientRect();
+      if (box.width < 2 || box.height < 2) usable = false;
+    }
+  }
+  wordCursorElementCache.set(el, usable);
+  return usable;
+}
+
+function wordCursorTextNodeUsable(node) {
+  if (!node || node.nodeType !== Node.TEXT_NODE || !/\S/.test(node.data)) return false;
+  const parent = node.parentElement;
+  return !!parent && wordCursorElementUsable(parent);
+}
+
+function wordCursorWalker(root) {
+  return document.createTreeWalker(root || document.body, NodeFilter.SHOW_TEXT, {
+    acceptNode: (node) => (wordCursorTextNodeUsable(node) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP)
+  });
+}
+
+// Word offsets in one text node, cached until its text changes.
+function wordCursorWordsIn(node) {
+  const data = node.data;
+  const cached = wordCursorWordCache.get(node);
+  if (cached && cached.data === data) return cached.words;
+  const words = [];
+  const segmenter = wordCursorSegmenter('word');
+  if (segmenter) {
+    for (const part of segmenter.segment(data)) {
+      if (part.isWordLike) words.push({ start: part.index, end: part.index + part.segment.length });
+    }
+  } else {
+    const pattern = /[\p{L}\p{N}][\p{L}\p{N}\p{M}'’_-]*/gu;
+    let match;
+    while ((match = pattern.exec(data))) words.push({ start: match.index, end: match.index + match[0].length });
+  }
+  wordCursorWordCache.set(node, { data, words });
+  return words;
+}
+
+// Words in document order from a point onward (or backward). Text nodes the
+// walker rejects are skipped; whether a word is drawn is checked by callers.
+function* wordCursorWordsAfter(node, offset) {
+  if (node.nodeType === Node.TEXT_NODE && wordCursorTextNodeUsable(node)) {
+    for (const w of wordCursorWordsIn(node)) {
+      if (w.start >= offset) yield { node, start: w.start, end: w.end };
+    }
+  }
+  const walker = wordCursorWalker(document.body);
+  walker.currentNode = node;
+  let seen = 0;
+  for (let n = walker.nextNode(); n && seen < WORD_CURSOR_MAX_SCAN_NODES; n = walker.nextNode(), seen++) {
+    for (const w of wordCursorWordsIn(n)) yield { node: n, start: w.start, end: w.end };
+  }
+}
+
+function* wordCursorWordsBefore(node, offset) {
+  if (node.nodeType === Node.TEXT_NODE && wordCursorTextNodeUsable(node)) {
+    const words = wordCursorWordsIn(node);
+    for (let i = words.length - 1; i >= 0; i--) {
+      if (words[i].end <= offset) yield { node, start: words[i].start, end: words[i].end };
+    }
+  }
+  const walker = wordCursorWalker(document.body);
+  walker.currentNode = node;
+  let seen = 0;
+  for (let n = walker.previousNode(); n && seen < WORD_CURSOR_MAX_SCAN_NODES; n = walker.previousNode(), seen++) {
+    const words = wordCursorWordsIn(n);
+    for (let i = words.length - 1; i >= 0; i--) yield { node: n, start: words[i].start, end: words[i].end };
+  }
+}
+
+function wordCursorWordRect(word) {
+  const range = document.createRange();
+  range.setStart(word.node, word.start);
+  range.setEnd(word.node, word.end);
+  return range.getBoundingClientRect();
+}
+
+function wordCursorClips(el) {
+  let clips = wordCursorClipCache.get(el);
+  if (clips === undefined) {
+    const style = getComputedStyle(el);
+    clips = /hidden|clip/.test(style.overflowX) || /hidden|clip/.test(style.overflowY);
+    wordCursorClipCache.set(el, clips);
+  }
+  return clips;
+}
+
+// The word's box if it is drawn: not collapsed, and not cut away by an
+// overflow-hidden ancestor (a closed accordion, a clipped label).
+function wordCursorShownRect(word) {
+  if (!wordCursorTextNodeUsable(word.node)) return null;
+  const rect = wordCursorWordRect(word);
+  if (rect.width <= 0 || rect.height <= 0) return null;
+  for (let el = word.node.parentElement; el && el !== document.body && el !== document.documentElement; el = el.parentElement) {
+    if (!wordCursorClips(el)) continue;
+    const box = el.getBoundingClientRect();
+    const width = Math.min(rect.right, box.right) - Math.max(rect.left, box.left);
+    const height = Math.min(rect.bottom, box.bottom) - Math.max(rect.top, box.top);
+    if (width < 2 || height < 2) return null;
+  }
+  return rect;
+}
+
+function wordCursorFirstShown(words) {
+  let checked = 0;
+  for (const word of words) {
+    if (wordCursorShownRect(word)) return word;
+    if (++checked >= WORD_CURSOR_MAX_SCAN_WORDS) break;
+  }
+  return null;
+}
+
+function wordCursorSameWord(a, b) {
+  return !!a && !!b && a.node === b.node && a.start === b.start && a.end === b.end;
+}
+
+function wordCursorSameSel(a, b) {
+  return !!a && !!b && wordCursorSameWord(a.first, b.first) && wordCursorSameWord(a.last, b.last);
+}
+
+function wordCursorSelFromWord(word) {
+  return { first: word, last: word };
+}
+
+function wordCursorRangeOf(sel) {
+  const range = document.createRange();
+  range.setStart(sel.first.node, sel.first.start);
+  range.setEnd(sel.last.node, sel.last.end);
+  return range;
+}
+
+// Still on the page, still drawn, and still the same word (the text may
+// have been edited or replaced since it was selected).
+function wordCursorWordValid(word) {
+  return !!word && word.node.isConnected && document.body.contains(word.node)
+    && wordCursorTextNodeUsable(word.node)
+    && wordCursorWordsIn(word.node).some(w => w.start === word.start && w.end === word.end);
+}
+
+function wordCursorSelValid(sel) {
+  return !!sel && wordCursorWordValid(sel.first) && wordCursorWordValid(sel.last);
+}
+
+// The fixed or sticky element at a point, if any (a site header, a cookie
+// banner); the extension's own popups and hint do not count.
+function wordCursorBarAt(x, y) {
+  for (let el = document.elementFromPoint(x, y); el && el !== document.body && el !== document.documentElement; el = el.parentElement) {
+    if (el.hasAttribute('data-ai-word-cursor-hint') || activePopups.some(p => p.container === el)) return null;
+    const position = getComputedStyle(el).position;
+    if (position === 'fixed' || position === 'sticky') return el;
+  }
+  return null;
+}
+
+// How much of the top and bottom of the screen such bars cover. Words
+// under them are on screen but hidden, so the cursor keeps clear of them.
+function wordCursorViewInsets() {
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  let top = 0;
+  let bottom = 0;
+  for (const fraction of [0.2, 0.5, 0.8]) {
+    const topBar = wordCursorBarAt(vw * fraction, 1);
+    if (topBar) {
+      const rect = topBar.getBoundingClientRect();
+      if (rect.top <= 2 && rect.height > 0 && rect.height < vh / 2) top = Math.max(top, rect.bottom);
+    }
+    const bottomBar = wordCursorBarAt(vw * fraction, vh - 2);
+    if (bottomBar) {
+      const rect = bottomBar.getBoundingClientRect();
+      if (rect.bottom >= vh - 2 && rect.height > 0 && rect.height < vh / 2) bottom = Math.max(bottom, vh - rect.top);
+    }
+  }
+  return { top, bottom };
+}
+
+function wordCursorSelOnScreen(sel) {
+  const rect = wordCursorRangeOf(sel).getBoundingClientRect();
+  const insets = wordCursorViewInsets();
+  return rect.width > 0 && rect.bottom > insets.top && rect.top < window.innerHeight - insets.bottom
+    && rect.right > 0 && rect.left < window.innerWidth;
+}
+
+function wordCursorSelectionIsOurs() {
+  const selection = window.getSelection();
+  const sel = wordCursor.sel;
+  if (!selection || !sel || selection.rangeCount === 0) return false;
+  const range = selection.getRangeAt(0);
+  return range.startContainer === sel.first.node && range.startOffset === sel.first.start
+    && range.endContainer === sel.last.node && range.endOffset === sel.last.end;
+}
+
+function wordCursorApply(sel, { scroll = true } = {}) {
+  wordCursor.sel = sel;
+  const selection = window.getSelection();
+  if (!selection) return;
+  try {
+    selection.setBaseAndExtent(sel.first.node, sel.first.start, sel.last.node, sel.last.end);
+  } catch (e) {
+    return;
+  }
+  if (scroll) wordCursorScrollIntoView(sel);
+}
+
+// Brings the words on screen with some room around them: scrollable boxes
+// between the word and the page first, innermost out, then the page.
+function wordCursorScrollIntoView(sel) {
+  const target = () => wordCursorRangeOf(sel).getBoundingClientRect();
+  for (let el = sel.first.node.parentElement; el && el !== document.body && el !== document.documentElement; el = el.parentElement) {
+    const canScrollY = el.scrollHeight > el.clientHeight + 1;
+    const canScrollX = el.scrollWidth > el.clientWidth + 1;
+    if (!canScrollY && !canScrollX) continue;
+    const style = getComputedStyle(el);
+    const box = el.getBoundingClientRect();
+    const rect = target();
+    if (canScrollY && /auto|scroll|overlay/.test(style.overflowY)) {
+      if (rect.top < box.top) el.scrollTop -= box.top - rect.top + 8;
+      else if (rect.bottom > box.bottom) el.scrollTop += rect.bottom - box.bottom + 8;
+    }
+    if (canScrollX && /auto|scroll|overlay/.test(style.overflowX)) {
+      if (rect.left < box.left) el.scrollLeft -= box.left - rect.left + 8;
+      else if (rect.right > box.right) el.scrollLeft += rect.right - box.right + 8;
+    }
+  }
+  const rect = target();
+  const margin = Math.min(WORD_CURSOR_SCROLL_MARGIN, window.innerHeight / 4);
+  const insets = wordCursorViewInsets();
+  const clearTop = insets.top + margin;
+  const clearBottom = window.innerHeight - insets.bottom - margin;
+  let dy = 0;
+  if (rect.top < clearTop) dy = rect.top - clearTop;
+  else if (rect.bottom > clearBottom) dy = rect.bottom - clearBottom;
+  let dx = 0;
+  if (rect.left < 0) dx = rect.left - 16;
+  else if (rect.right > window.innerWidth) dx = rect.right - window.innerWidth + 16;
+  if (dy || dx) window.scrollBy({ left: dx, top: dy, behavior: 'instant' });
+}
+
+// The word on the next line down (direction 1) or up (-1) closest to the
+// column the cursor started from, so a run of ↓ presses keeps its column.
+function wordCursorLineNeighbor(word, direction) {
+  const current = wordCursorShownRect(word) || wordCursorWordRect(word);
+  const goalX = wordCursor.goalX ?? (current.left + current.right) / 2;
+  const candidates = direction > 0
+    ? wordCursorWordsAfter(word.node, word.end)
+    : wordCursorWordsBefore(word.node, word.start);
+  let line = null;
+  let best = null;
+  let bestDistance = Infinity;
+  let scanned = 0;
+  for (const candidate of candidates) {
+    if (++scanned > WORD_CURSOR_MAX_SCAN_WORDS) break;
+    const rect = wordCursorShownRect(candidate);
+    if (!rect) continue;
+    const middle = (rect.top + rect.bottom) / 2;
+    if (!line) {
+      // Still on the current line (or not past it yet): keep looking.
+      if (direction > 0 ? middle <= current.bottom : middle >= current.top) continue;
+      line = { top: rect.top, bottom: rect.bottom };
+    } else if (middle < line.top || middle > line.bottom) {
+      // Text runs line by line, so a word beyond the target line ends it.
+      if (direction > 0 ? middle > line.bottom : middle < line.top) break;
+      continue;
+    }
+    const distance = rect.right < goalX ? goalX - rect.right : rect.left > goalX ? rect.left - goalX : 0;
+    if (distance < bestDistance) {
+      best = candidate;
+      bestDistance = distance;
+    }
+  }
+  return best ? { word: best, goalX } : null;
+}
+
+// --- Sentences: a word's block (paragraph, list item, cell…) as one text ---
+function wordCursorBlockFor(node) {
+  for (let el = node.parentElement; el && el !== document.body; el = el.parentElement) {
+    const display = getComputedStyle(el).display;
+    if (display && !display.startsWith('inline') && display !== 'contents' && !display.startsWith('ruby')) return el;
+  }
+  return document.body;
+}
+
+function wordCursorBlockText(block) {
+  const parts = [];
+  let text = '';
+  const walker = wordCursorWalker(block);
+  for (let n = walker.nextNode(); n && text.length < WORD_CURSOR_MAX_BLOCK_CHARS; n = walker.nextNode()) {
+    parts.push({ node: n, offset: text.length });
+    text += n.data;
+  }
+  return { text, parts };
+}
+
+function wordCursorSentenceStarts(text) {
+  const segmenter = wordCursorSegmenter('sentence');
+  if (segmenter) return Array.from(segmenter.segment(text), part => part.index);
+  const starts = [0];
+  const pattern = /[.!?…]+["'”’)\]]*\s+/g;
+  let match;
+  while ((match = pattern.exec(text))) starts.push(match.index + match[0].length);
+  return starts;
+}
+
+// Where a word sits in its block's text, and which sentence holds it.
+function wordCursorSentenceInfo(word) {
+  const { text, parts } = wordCursorBlockText(wordCursorBlockFor(word.node));
+  const part = parts.find(p => p.node === word.node);
+  if (!part) return null;
+  const index = part.offset + word.start;
+  const starts = wordCursorSentenceStarts(text);
+  let sentence = 0;
+  for (let i = 0; i < starts.length && starts[i] <= index; i++) sentence = i;
+  return { text, parts, index, starts, sentence };
+}
+
+function wordCursorSentenceFirstWord(info, sentence) {
+  const target = info.starts[sentence];
+  let part = info.parts[0];
+  for (const p of info.parts) {
+    if (p.offset <= target) part = p;
+    else break;
+  }
+  return wordCursorFirstShown(wordCursorWordsAfter(part.node, Math.min(target - part.offset, part.node.data.length)));
+}
+
+function wordCursorNextSentenceWord(word) {
+  const info = wordCursorSentenceInfo(word);
+  if (info && info.sentence + 1 < info.starts.length) {
+    const next = wordCursorSentenceFirstWord(info, info.sentence + 1);
+    if (next) return next;
+  }
+  // The block's last sentence: go on to the first word after the block.
+  const lastNode = info && info.parts.length ? info.parts[info.parts.length - 1].node : word.node;
+  return wordCursorFirstShown(wordCursorWordsAfter(lastNode, lastNode.data.length));
+}
+
+// Like Ctrl+← in an editor: the start of this sentence, or the previous
+// sentence when already at the start.
+function wordCursorPrevSentenceWord(word) {
+  const info = wordCursorSentenceInfo(word);
+  if (info) {
+    const start = wordCursorSentenceFirstWord(info, info.sentence);
+    if (start && !wordCursorSameWord(start, word)) return start;
+  }
+  const previous = wordCursorFirstShown(wordCursorWordsBefore(word.node, word.start));
+  if (!previous) return null;
+  const previousInfo = wordCursorSentenceInfo(previous);
+  return (previousInfo && wordCursorSentenceFirstWord(previousInfo, previousInfo.sentence)) || previous;
+}
+
+// The exact sentence holding the selection, so the model sees the right
+// occurrence even when the word appears more than once in the paragraph.
+function wordCursorContext(sel, text) {
+  const context = { sentence: '', pageTitle: '' };
+  try {
+    context.pageTitle = normalizeContextText(document.title).slice(0, 200);
+  } catch (e) {
+    // No title: send none.
+  }
+  if (text.length <= IMPLICIT_CONTEXT_MAX_SELECTION_CHARS) {
+    try {
+      const info = wordCursorSentenceInfo(sel.first);
+      if (info) {
+        const start = info.starts[info.sentence];
+        const end = info.sentence + 1 < info.starts.length ? info.starts[info.sentence + 1] : info.text.length;
+        let sentence = normalizeContextText(info.text.slice(start, end));
+        if (sentence.length > 400) {
+          sentence = normalizeContextText(info.text.slice(Math.max(start, info.index - 200), Math.min(end, info.index + 200)));
+        }
+        context.sentence = sentence.slice(0, 400);
+      }
+    } catch (e) {
+      // Context is an enhancement; the lookup goes ahead without it.
+    }
+  }
+  return (context.sentence || context.pageTitle) ? context : null;
+}
+
+function wordCursorInPageChrome(el) {
+  if (!el || el === document.body || el === document.documentElement) return false;
+  const cached = wordCursorChromeCache.get(el);
+  if (cached !== undefined) return cached;
+  let result = el.matches(WORD_CURSOR_PAGE_CHROME_SELECTOR);
+  if (!result) {
+    const position = getComputedStyle(el).position;
+    result = position === 'fixed' || position === 'sticky';
+  }
+  if (!result) result = wordCursorInPageChrome(el.parentElement);
+  wordCursorChromeCache.set(el, result);
+  return result;
+}
+
+// The first word fully on screen, preferring the page's main content over
+// its navigation and fixed bars.
+function wordCursorFirstVisibleWord() {
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const insets = wordCursorViewInsets();
+  const nodeRange = document.createRange();
+  const scan = (root, avoidChrome) => {
+    const walker = wordCursorWalker(root);
+    let seen = 0;
+    for (let n = walker.nextNode(); n && seen < WORD_CURSOR_MAX_SCAN_NODES; n = walker.nextNode(), seen++) {
+      nodeRange.selectNodeContents(n);
+      const box = nodeRange.getBoundingClientRect();
+      if (box.bottom <= 0 || box.top >= vh || box.right <= 0 || box.left >= vw) continue;
+      if (avoidChrome && wordCursorInPageChrome(n.parentElement)) continue;
+      for (const w of wordCursorWordsIn(n)) {
+        const word = { node: n, start: w.start, end: w.end };
+        const rect = wordCursorShownRect(word);
+        if (rect && rect.top >= insets.top && rect.bottom <= vh - insets.bottom && rect.left >= 0 && rect.right <= vw) return word;
+      }
+    }
+    return null;
+  };
+  const main = document.querySelector('main, [role="main"]') || document.querySelector('article');
+  return (main && scan(main, true)) || scan(document.body, true) || scan(document.body, false);
+}
+
+// Enough words on screen to be reading, so a video page or a game with a
+// few labels is left alone.
+function wordCursorHasReadableText() {
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const nodeRange = document.createRange();
+  const walker = wordCursorWalker(document.body);
+  let count = 0;
+  let seen = 0;
+  for (let n = walker.nextNode(); n && seen < WORD_CURSOR_MAX_SCAN_NODES; n = walker.nextNode(), seen++) {
+    nodeRange.selectNodeContents(n);
+    const box = nodeRange.getBoundingClientRect();
+    if (box.width === 0 || box.bottom <= 0 || box.top >= vh || box.right <= 0 || box.left >= vw) continue;
+    count += wordCursorWordsIn(n).length;
+    if (count >= WORD_CURSOR_MIN_VISIBLE_WORDS) return true;
+  }
+  return false;
+}
+
+// A playing video covering a quarter of the screen owns the arrow keys
+// (seek, volume) and Enter.
+function wordCursorLargeVideoPlaying() {
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  for (const video of document.getElementsByTagName('video')) {
+    if (video.paused || video.ended) continue;
+    const rect = video.getBoundingClientRect();
+    const width = Math.min(rect.right, vw) - Math.max(rect.left, 0);
+    const height = Math.min(rect.bottom, vh) - Math.max(rect.top, 0);
+    if (width > 0 && height > 0 && width * height >= vw * vh * 0.25) return true;
+  }
+  return false;
+}
+
+// Focus can sit inside a shadow root: the popup's own question box is one.
+function wordCursorDeepActiveElement() {
+  let el = document.activeElement;
+  while (el && el.shadowRoot && el.shadowRoot.activeElement) el = el.shadowRoot.activeElement;
+  return el;
+}
+
+// True when the key or click belongs to something else: a field, a widget,
+// a page dialog, or (for Enter) the link or button that has focus. The
+// popup's question box and dropdowns count as a field and a widget, so
+// typing there, Enter to send and Esc to leave the box all work as before.
+function wordCursorShouldStandDown(kind) {
+  if (document.fullscreenElement) return true;
+  const el = wordCursorDeepActiveElement();
+  if (el && el !== document.body && el !== document.documentElement) {
+    if (el.isContentEditable || el.matches('input, textarea, select')) return true;
+    for (let n = el; n; n = n.parentElement || (n.getRootNode().host || null)) {
+      const role = n.getAttribute && n.getAttribute('role');
+      if (role && WORD_CURSOR_WIDGET_ROLES.has(role)) return true;
+    }
+    if (el.closest('dialog[open], [aria-modal="true"]')) return true;
+    if (kind === 'explain' && el.closest(WORD_CURSOR_ACTIVATABLE_SELECTOR)) return true;
+  }
+  if ((kind === 'move' || kind === 'explain') && wordCursorLargeVideoPlaying()) return true;
+  return false;
+}
+
+// After the cursor moves, Enter should explain the word rather than click
+// a link or popup button left focused by an earlier click.
+function wordCursorReleaseFocus() {
+  const el = wordCursorDeepActiveElement();
+  if (el && el !== document.body && el.closest && el.closest(WORD_CURSOR_ACTIVATABLE_SELECTOR) && typeof el.blur === 'function') {
+    el.blur();
+  }
+}
+
+function wordCursorKeyAction(event) {
+  const key = event.key;
+  if (key === 'ArrowRight' || key === 'ArrowLeft' || key === 'ArrowUp' || key === 'ArrowDown') {
+    // Native Shift+arrow would grow the selection letter by letter.
+    if (event.shiftKey) return 'swallow';
+    if (event.ctrlKey) {
+      if (key === 'ArrowRight') return 'nextSentence';
+      if (key === 'ArrowLeft') return 'prevSentence';
+      return null; // Ctrl+↑ / Ctrl+↓ stay with the page
+    }
+    return { ArrowRight: 'next', ArrowLeft: 'prev', ArrowDown: 'down', ArrowUp: 'up' }[key];
+  }
+  if ((key === 'Home' || key === 'End') && event.shiftKey) return 'swallow';
+  if (event.ctrlKey || event.shiftKey) return null;
+  if (key === 'Enter') return 'explain';
+  if (key === 'Escape') return 'escape';
+  return null;
+}
+
+function handleWordCursorKeydown(event) {
+  const code = event.code || event.key;
+  // A keyup that never arrived (focus left the window) must not leave its
+  // key marked: this press decides afresh.
+  wordCursor.swallowedCodes.delete(code);
+  if (!wordCursor.active || event.isComposing || event.keyCode === 229) return;
+  // Alt+← is Back, and Meta combinations belong to the system.
+  if (event.altKey || event.metaKey) return;
+  const action = wordCursorKeyAction(event);
+  if (!action) return;
+  if (wordCursorShouldStandDown(WORD_CURSOR_MOVES.has(action) ? 'move' : action)) return;
+
+  // Consumed in the capture phase, so neither the page nor the popup's own
+  // Escape handler also acts on this press.
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  wordCursor.swallowedCodes.add(code);
+
+  if (action === 'swallow') return;
+  if (action === 'escape') {
+    if (!event.repeat) wordCursorEscape(); // holding Esc must not run through popups and the cursor
+    return;
+  }
+  beginWordCursorPass();
+  if (action === 'explain') {
+    if (!event.repeat) explainWordCursorSelection();
+    return;
+  }
+  moveWordCursor(action);
+}
+
+function swallowWordCursorKeyEcho(event) {
+  const code = event.code || event.key;
+  if (!wordCursor.swallowedCodes.has(code)) return;
+  if (event.type === 'keyup') wordCursor.swallowedCodes.delete(code);
+  event.preventDefault();
+  event.stopImmediatePropagation();
+}
+
+// One action per press: close the top popup if there is one, otherwise
+// turn the cursor off.
+function wordCursorEscape() {
+  for (let i = activePopups.length - 1; i >= 0; i--) {
+    if (!activePopups[i].isPinned) {
+      removePopupInstance(activePopups[i]);
+      return;
+    }
+  }
+  stopWordCursor({ dismiss: true, announce: true });
+}
+
+function moveWordCursor(action) {
+  const sel = wordCursor.sel;
+  // The word was removed, hidden, or scrolled away: start again from the
+  // top of the screen instead of jumping back to it.
+  if (!wordCursorSelValid(sel) || !wordCursorSelOnScreen(sel)) {
+    wordCursor.goalX = null;
+    const first = wordCursorFirstVisibleWord();
+    if (first) wordCursorApply(wordCursorSelFromWord(first));
+    return;
+  }
+  let target = null;
+  let goalX = null;
+  if (action === 'next') {
+    target = wordCursorFirstShown(wordCursorWordsAfter(sel.last.node, sel.last.end));
+  } else if (action === 'prev') {
+    target = wordCursorFirstShown(wordCursorWordsBefore(sel.first.node, sel.first.start));
+  } else if (action === 'down' || action === 'up') {
+    const found = action === 'down' ? wordCursorLineNeighbor(sel.last, 1) : wordCursorLineNeighbor(sel.first, -1);
+    if (found) {
+      target = found.word;
+      goalX = found.goalX;
+    } else {
+      goalX = wordCursor.goalX;
+    }
+  } else if (action === 'nextSentence') {
+    target = wordCursorNextSentenceWord(sel.last);
+  } else if (action === 'prevSentence') {
+    target = wordCursorPrevSentenceWord(sel.first);
+  }
+  wordCursor.goalX = goalX;
+  wordCursorReleaseFocus();
+  // At either end of the text the word stays put, and stays selected.
+  wordCursorApply(target ? wordCursorSelFromWord(target) : sel);
+}
+
+function explainWordCursorSelection() {
+  const sel = wordCursor.sel;
+  if (!wordCursorSelValid(sel)) {
+    // The word is gone; select a fresh one rather than explain nothing.
+    const first = wordCursorFirstVisibleWord();
+    if (first) wordCursorApply(wordCursorSelFromWord(first));
+    return;
+  }
+  wordCursorApply(sel, { scroll: false }); // put it back if the page cleared it
+  const range = wordCursorRangeOf(sel);
+  const text = normalizeContextText(range.toString());
+  if (!text) return;
+  const open = wordCursor.popup && activePopups.includes(wordCursor.popup) ? wordCursor.popup : null;
+  // Already explaining these words: leave that popup alone (no repeat
+  // request, and Enter never closes anything).
+  if (open && wordCursorSameSel(wordCursor.popupSel, sel)) return;
+  // Stepping through words replaces the previous answer instead of stacking
+  // cards; a pinned popup stays.
+  if (open && !open.isPinned) removePopupInstance(open);
+  wordCursor.popup = initiatePopupSequence(range.getBoundingClientRect(), text, undefined, wordCursorContext(sel, text)) || null;
+  wordCursor.popupSel = sel;
+}
+
+// --- Clicks: snap to whole words ---
+// The first word at or after a selection boundary (forward), or the last
+// word at or before it; a boundary inside a word takes that whole word.
+function wordCursorSnapBoundary(container, offset, forward) {
+  if (container.nodeType === Node.TEXT_NODE) {
+    if (wordCursorTextNodeUsable(container)) {
+      const inside = wordCursorWordsIn(container).find(w => w.start < offset && offset < w.end);
+      if (inside) {
+        const word = { node: container, start: inside.start, end: inside.end };
+        if (wordCursorShownRect(word)) return word;
+      }
+    }
+    return wordCursorFirstShown(forward ? wordCursorWordsAfter(container, offset) : wordCursorWordsBefore(container, offset));
+  }
+  if (forward) {
+    let node = container.childNodes[offset];
+    if (!node) {
+      // After the element's last child: continue past its content.
+      node = container;
+      while (node.lastChild) node = node.lastChild;
+      return wordCursorFirstShown(wordCursorWordsAfter(node, node.nodeType === Node.TEXT_NODE ? node.data.length : 0));
+    }
+    return wordCursorFirstShown(wordCursorWordsAfter(node, 0));
+  }
+  const before = offset > 0 ? container.childNodes[offset - 1] : null;
+  if (!before) return wordCursorFirstShown(wordCursorWordsBefore(container, 0));
+  let node = before;
+  while (node.lastChild) node = node.lastChild;
+  return wordCursorFirstShown(wordCursorWordsBefore(node, node.nodeType === Node.TEXT_NODE ? node.data.length : 0));
+}
+
+function wordCursorSnapRange(range) {
+  const first = wordCursorSnapBoundary(range.startContainer, range.startOffset, true);
+  const last = wordCursorSnapBoundary(range.endContainer, range.endOffset, false);
+  if (!first || !last) return null;
+  const check = document.createRange();
+  check.setStart(first.node, first.start);
+  check.setEnd(last.node, last.end); // an end before the start collapses the range
+  return check.collapsed ? null : { first, last };
+}
+
+function wordCursorWordAtPoint(x, y) {
+  let node = null;
+  let offset = 0;
+  if (typeof document.caretPositionFromPoint === 'function') {
+    const position = document.caretPositionFromPoint(x, y);
+    if (position) {
+      node = position.offsetNode;
+      offset = position.offset;
+    }
+  } else if (typeof document.caretRangeFromPoint === 'function') {
+    const range = document.caretRangeFromPoint(x, y);
+    if (range) {
+      node = range.startContainer;
+      offset = range.startOffset;
+    }
+  }
+  if (!node || node.nodeType !== Node.TEXT_NODE || !document.body.contains(node) || !wordCursorTextNodeUsable(node)) return null;
+  for (const w of wordCursorWordsIn(node)) {
+    if (w.start > offset) break;
+    if (w.end < offset) continue;
+    // The caret lands on the nearest text even for a click in empty space,
+    // so the word must actually be under the pointer.
+    const word = { node, start: w.start, end: w.end };
+    const rect = wordCursorShownRect(word);
+    if (rect && x >= rect.left - 2 && x <= rect.right + 2 && y >= rect.top - 2 && y <= rect.bottom + 2) return word;
+  }
+  return null;
+}
+
+function handleWordCursorMouseUp(event) {
+  if (event.button !== 0 || wordCursorShouldStandDown('mouse')) return;
+  beginWordCursorPass();
+  wordCursor.goalX = null;
+  const selection = window.getSelection();
+  let next = null;
+  // Pressing on a link (or anything draggable) leaves the old selection in
+  // place, so an unchanged selection means a plain click, not a drag.
+  if (selection && selection.rangeCount > 0 && !selection.isCollapsed && !wordCursorSelectionIsOurs()) {
+    // A drag or double-click: widen to whole words.
+    const range = selection.getRangeAt(0);
+    if (document.body.contains(range.commonAncestorContainer)) next = wordCursorSnapRange(range);
+  } else {
+    const word = wordCursorWordAtPoint(event.clientX, event.clientY);
+    if (word) next = wordCursorSelFromWord(word);
+  }
+  // Nothing readable under the pointer: the current word stays selected.
+  if (!next && wordCursorSelValid(wordCursor.sel)) next = wordCursor.sel;
+  if (next) wordCursorApply(next, { scroll: false });
+}
+
+// --- Turning it on and off ---
+function startWordCursor(manual) {
+  beginWordCursorPass();
+  let start = null;
+  // A selection the user already made becomes the first stop.
+  const selection = window.getSelection();
+  if (selection && selection.rangeCount > 0 && !selection.isCollapsed) {
+    const range = selection.getRangeAt(0);
+    if (document.body.contains(range.commonAncestorContainer)) {
+      const snapped = wordCursorSnapRange(range);
+      if (snapped && wordCursorSelOnScreen(snapped)) start = snapped;
+    }
+  }
+  if (!start) {
+    const word = wordCursorFirstVisibleWord();
+    if (word) start = wordCursorSelFromWord(word);
+  }
+  if (!start) return false;
+  wordCursor.active = true;
+  wordCursor.manual = manual;
+  wordCursor.goalX = null;
+  wordCursorApply(start, { scroll: false });
+  showWordCursorHint('Word cursor', [['← →', 'word'], ['↑ ↓', 'line'], ['Ctrl+← →', 'sentence'], ['Enter', 'explain'], ['Esc', 'exit']]);
+  return true;
+}
+
+function stopWordCursor({ dismiss = false, announce = false } = {}) {
+  if (!wordCursor.active) return;
+  if (wordCursorSelectionIsOurs()) window.getSelection().removeAllRanges();
+  wordCursor.active = false;
+  wordCursor.manual = false;
+  wordCursor.sel = null;
+  wordCursor.goalX = null;
+  if (dismiss) wordCursor.dismissed = true;
+  if (announce) {
+    const note = isBrowserFullscreen() && wordCursorEnabledSetting ? 'Back the next time you enter full screen' : '';
+    showWordCursorHint('Word cursor off', [], note);
+  } else {
+    hideWordCursorHint();
+  }
+}
+
+function hideWordCursorHint() {
+  clearTimeout(wordCursor.hintTimer);
+  if (wordCursor.hint) wordCursor.hint.remove();
+  wordCursor.hint = null;
+}
+
+// A short status pill at the bottom of the screen. It is dark in every
+// theme, like the popup's toast, and solid so forced dark modes leave it be.
+function showWordCursorHint(title, keys, note) {
+  hideWordCursorHint();
+  ensurePopupFontsInjected();
+  const host = document.createElement('div');
+  host.style.all = 'initial';
+  host.style.position = 'fixed';
+  host.style.top = '0';
+  host.style.left = '0';
+  host.style.width = '0';
+  host.style.height = '0';
+  host.style.zIndex = String(baseZIndex + 1000);
+  host.style.pointerEvents = 'none';
+  host.setAttribute('data-ai-word-cursor-hint', '');
+  const shadow = host.attachShadow({ mode: 'open' });
+  const style = document.createElement('style');
+  style.textContent = `
+    .hint {
+      position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+      box-sizing: border-box; max-width: calc(100vw - 32px);
+      display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px 14px;
+      padding: 10px 18px; border-radius: 14px;
+      background: #0b1220; color: #f1f5f9; border: 1px solid #334155;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+      font: 13px/1.4 'Google Sans', 'Segoe UI', system-ui, sans-serif;
+      animation: word-cursor-hint-in 160ms ease-out;
+    }
+    strong { font-weight: 600; color: #5eead4; }
+    .note { color: #cbd5e1; }
+    kbd {
+      font: inherit; font-weight: 600; padding: 1px 6px; border-radius: 5px;
+      background: #1e293b; border: 1px solid #475569; color: #f8fafc;
+    }
+    @keyframes word-cursor-hint-in { from { opacity: 0; transform: translate(-50%, 6px); } }
+    @media (prefers-reduced-motion: reduce) { .hint { animation: none; } }
+  `;
+  const hint = document.createElement('div');
+  hint.className = 'hint';
+  hint.setAttribute('role', 'status');
+  const heading = document.createElement('strong');
+  heading.textContent = title;
+  hint.appendChild(heading);
+  keys.forEach(([key, label]) => {
+    const item = document.createElement('span');
+    const kbd = document.createElement('kbd');
+    kbd.textContent = key;
+    item.append(kbd, ` ${label}`);
+    hint.appendChild(item);
+  });
+  if (note) {
+    const noteEl = document.createElement('span');
+    noteEl.className = 'note';
+    noteEl.textContent = note;
+    hint.appendChild(noteEl);
+  }
+  shadow.append(style, hint);
+  document.documentElement.appendChild(host);
+  wordCursor.hint = host;
+  wordCursor.hintTimer = setTimeout(hideWordCursorHint, WORD_CURSOR_HINT_MS);
+}
+
+// Follows the full-screen state: on when the browser enters full screen
+// (setting on, enough text, no big video playing), off when it leaves.
+function syncWordCursorWithFullscreen() {
+  const browserFullscreen = isBrowserFullscreen();
+  if (!browserFullscreen) wordCursor.dismissed = false;
+  if (!browserFullscreen || document.fullscreenElement) {
+    if (wordCursor.active && !wordCursor.manual) stopWordCursor();
+    return;
+  }
+  if (wordCursor.active || wordCursor.dismissed || !wordCursorEnabledSetting) return;
+  if (document.visibilityState === 'hidden' || !wordCursorFrameAllowed(false)) return;
+  beginWordCursorPass();
+  if (wordCursorLargeVideoPlaying() || !wordCursorHasReadableText()) return;
+  startWordCursor(false);
+}
+
+// A page that had too little text or a playing video when full screen
+// began gets another look after scrolling or pausing, when it finishes
+// loading, and a few times in the first seconds (text that arrives late).
+function scheduleWordCursorRecheck() {
+  if (wordCursor.active || wordCursor.dismissed || !wordCursorEnabledSetting || !isBrowserFullscreen()) return;
+  clearTimeout(wordCursorRecheckTimer);
+  wordCursorRecheckTimer = setTimeout(syncWordCursorWithFullscreen, 400);
+}
+
+function wordCursorRecheckSoon() {
+  [1000, 2500, 5000].forEach(ms => setTimeout(scheduleWordCursorRecheck, ms));
+}
+
+function handleWordCursorFullscreenChange() {
+  syncWordCursorWithFullscreen();
+  wordCursorRecheckSoon();
+}
+
+chrome.storage.sync.get({ wordCursorInFullscreen: false }, (data) => {
+  wordCursorEnabledSetting = !!(data && data.wordCursorInFullscreen);
+  syncWordCursorWithFullscreen();
+  wordCursorRecheckSoon();
+});
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'sync' || !changes.wordCursorInFullscreen) return;
+  wordCursorEnabledSetting = !!changes.wordCursorInFullscreen.newValue;
+  if (!wordCursorEnabledSetting) {
+    if (wordCursor.active && !wordCursor.manual) stopWordCursor();
+  } else {
+    syncWordCursorWithFullscreen();
+  }
+});
+
+// The "Toggle word cursor" shortcut works on any page, full screen or not.
+chrome.runtime.onMessage.addListener((request) => {
+  if (!request || request.type !== 'toggleWordCursor' || !shouldHandleHotkeyInThisFrame()) return;
+  if (wordCursor.active) {
+    stopWordCursor({ dismiss: isBrowserFullscreen(), announce: true });
+  } else if (wordCursorFrameAllowed(true)) {
+    wordCursor.dismissed = false;
+    if (!startWordCursor(true)) showWordCursorHint('Word cursor: no text on screen to select', []);
+  }
+});
+
+if (wordCursorFullscreenQuery && typeof wordCursorFullscreenQuery.addEventListener === 'function') {
+  wordCursorFullscreenQuery.addEventListener('change', handleWordCursorFullscreenChange);
+}
+document.addEventListener('fullscreenchange', handleWordCursorFullscreenChange);
+window.addEventListener('load', scheduleWordCursorRecheck);
+document.addEventListener('visibilitychange', syncWordCursorWithFullscreen);
+document.addEventListener('scroll', scheduleWordCursorRecheck, { capture: true, passive: true });
+document.addEventListener('pause', scheduleWordCursorRecheck, true);
+window.addEventListener('keydown', handleWordCursorKeydown, true);
+window.addEventListener('keyup', swallowWordCursorKeyEcho, true);
+window.addEventListener('keypress', swallowWordCursorKeyEcho, true);
 
 // Hotkey commands reach every frame. Only the focused frame acts, with the
 // top frame as the fallback when no frame has focus. Google's editors keep
@@ -2944,6 +3955,8 @@ function initiatePopupSequence(rect, selectedText, customPrompt, implicitContext
 
     begin(models, customPrompts, defaultModelId);
   });
+
+  return popupInstance;
 }
 
 

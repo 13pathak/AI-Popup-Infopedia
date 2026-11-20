@@ -195,6 +195,7 @@ document.addEventListener('DOMContentLoaded', () => {
   loadReminderSettings(); // Load saved Reminder settings on page load
   loadFollowupSettings(); // Load follow-up custom message
   loadImplicitContextSetting(); // Load implicit context toggle
+  loadWordCursorSetting();
   loadHallucinationGuardSettings(); // Load Hallucination Guard settings
   loadSearchApiSettings(); // Load Search API settings
   loadUsageDashboard(); // Load usage & token tracking dashboard (Issue #28)
@@ -270,6 +271,9 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   safeAddListener('enable-implicit-context', 'change', (e) => {
     chrome.storage.sync.set({ enableImplicitContext: e.target.checked }, () => showSaved(e.target));
+  });
+  safeAddListener('word-cursor-fullscreen', 'change', (e) => {
+    chrome.storage.sync.set({ wordCursorInFullscreen: e.target.checked }, () => showSaved(e.target));
   });
   safeAddListener('clear-usage-btn', 'click', clearUsageData);
   safeAddListener('show-user-questions-checkbox', 'change', (e) => {
@@ -2069,6 +2073,15 @@ function loadImplicitContextSetting() {
   chrome.storage.sync.get({ 'enableImplicitContext': true }, (data) => {
     const toggle = document.getElementById('enable-implicit-context');
     if (toggle) toggle.checked = data.enableImplicitContext !== false;
+  });
+}
+
+// Off unless the user turns it on: the word cursor takes the arrow keys and
+// Enter from the page while the browser is in full screen.
+function loadWordCursorSetting() {
+  chrome.storage.sync.get({ wordCursorInFullscreen: false }, (data) => {
+    const toggle = document.getElementById('word-cursor-fullscreen');
+    if (toggle) toggle.checked = data.wordCursorInFullscreen === true;
   });
 }
 
@@ -4188,7 +4201,7 @@ function restoreBackup() {
             'enableModelFallback', 'enableImplicitContext',
             'ttsSettings', 'ankiSettings', 'backupReminderFrequency', 'backupSubfolder',
             'backupInclude', 'followupCustomMessage', 'showUserQuestions',
-            'followupChips', 'enableFollowupSuggestions',
+            'followupChips', 'enableFollowupSuggestions', 'wordCursorInFullscreen',
             'sttEngine', 'sttApiKey', 'sttApiUrl', 'sttModel', 'sttCustomHeaders',
             'sttCustomFormData', 'pdfViewerEnabled', 'uiTheme',
             'customFsrsWeights', 'customFsrsWeightsMeta', 'secretsLocalOnly'

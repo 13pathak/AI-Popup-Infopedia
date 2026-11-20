@@ -403,6 +403,9 @@ chrome.commands.onCommand.addListener((command) => {
   if (command === "open-last-conversation") {
     sendToActiveTab("reopenLastConversation");
   }
+  if (command === "toggle-word-cursor") {
+    sendToActiveTab("toggleWordCursor");
+  }
 });
 
 
@@ -2551,6 +2554,7 @@ function triggerBackup(type = "Auto", customBackupInclude = null) {
         if (syncData.followupCustomMessage !== undefined) backupData.followupCustomMessage = syncData.followupCustomMessage;
         if (syncData.showUserQuestions !== undefined) backupData.showUserQuestions = syncData.showUserQuestions;
         if (syncData.enableFollowupSuggestions !== undefined) backupData.enableFollowupSuggestions = syncData.enableFollowupSuggestions;
+        if (syncData.wordCursorInFullscreen !== undefined) backupData.wordCursorInFullscreen = syncData.wordCursorInFullscreen;
         if (syncData.followupChips !== undefined) backupData.followupChips = syncData.followupChips;
         if (syncData.backupReminderFrequency !== undefined) backupData.backupReminderFrequency = syncData.backupReminderFrequency;
         if (syncData.backupSubfolder !== undefined) backupData.backupSubfolder = syncData.backupSubfolder;
