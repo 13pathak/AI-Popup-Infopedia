@@ -39,12 +39,12 @@ async function press(key, modifiers = 0) {
   await send('Input.dispatchKeyEvent', { type: text ? 'keyDown' : 'rawKeyDown', ...base, ...(text ? { text, unmodifiedText: text } : {}) });
   await send('Input.dispatchKeyEvent', { type: 'keyUp', ...base });
 }
-async function mouse(type, point, clickCount = 1) {
-  await send('Input.dispatchMouseEvent', { type, button: 'left', buttons: type === 'mouseReleased' ? 0 : 1, clickCount, ...point });
+async function mouse(type, point, clickCount = 1, modifiers = 0) {
+  await send('Input.dispatchMouseEvent', { type, button: 'left', buttons: type === 'mouseReleased' ? 0 : 1, clickCount, modifiers, ...point });
 }
-async function clickAt(point, clickCount = 1) {
-  await mouse('mousePressed', point, clickCount);
-  await mouse('mouseReleased', point, clickCount);
+async function clickAt(point, clickCount = 1, modifiers = 0) {
+  await mouse('mousePressed', point, clickCount, modifiers);
+  await mouse('mouseReleased', point, clickCount, modifiers);
 }
 const wordPoint = (selector, word, nth = 0, frac = 0.5) => evaluate(`wordPoint(${JSON.stringify(selector)}, ${JSON.stringify(word)}, ${nth}, ${frac})`);
 const selected = () => evaluate('getSelection().toString()');
@@ -78,6 +78,7 @@ async function run() {
         <input id="field" value="type here">
         <div style="height: 1600px"></div>
         <p id="far">Faraway words wait at the bottom of the page.</p>
+        <p id="long">\${Array.from({ length: 90 }, (_, i) => 'w' + (i + 1)).join(' ')}</p>
       </main>\`;
 
     // Full screen is the (display-mode: fullscreen) media query, which
@@ -207,7 +208,7 @@ async function run() {
   await evaluate('setFullscreen(true)');
   await waitFor('wordCursor.active', 'full screen turns the word cursor on');
   assert.equal(await selected(), 'Alpha', 'the first word of the main content is selected');
-  assert.match(await evaluate('hintText()'), /Word cursor.*Enter.*explain.*Esc.*exit/, 'the key hint is shown');
+  assert.match(await evaluate('hintText()'), /Word cursor.*Shift\+arrows select more.*Enter.*explain.*Esc.*exit/, 'the key hint is shown');
   assert.equal(await evaluate(`document.querySelector('[data-ai-word-cursor-hint]').shadowRoot.querySelector('[role="status"]') !== null`), true, 'the hint is a status message');
   await pageKeys();
 
@@ -226,12 +227,33 @@ async function run() {
   assert.deepEqual(await pageKeys(), [], 'consumed keys never reach the page (keydown, keypress, keyup)');
   assert.equal(await evaluate('scrollY'), 0, 'arrow keys do not scroll the page');
 
-  // Shift+arrows would select letter by letter natively: blocked.
+  // Shift+arrows grow and shrink the selection by whole words from a fixed
+  // starting word; a plain arrow goes back to one word.
+  const selText = () => evaluate('wordCursorSelText(wordCursor.sel)');
   await press('ArrowRight', MOD.shift);
-  await press('ArrowRight', MOD.shift | MOD.ctrl);
+  assert.equal(await selected(), 'Epsilon zeta', 'Shift+→ adds the next word');
+  await press('ArrowRight', MOD.shift);
+  assert.equal(await selected(), 'Epsilon zeta eta', 'and the next');
+  await press('ArrowLeft', MOD.shift);
+  assert.equal(await selected(), 'Epsilon zeta', 'Shift+← takes one back');
+  await press('ArrowLeft', MOD.shift);
+  assert.equal(await selected(), 'Epsilon', 'back to the starting word');
+  await press('ArrowLeft', MOD.shift);
+  assert.equal(await selText(), 'delta. Epsilon', 'past the starting word it grows the other way, leaving hidden text out');
   await press('End', MOD.shift);
-  assert.equal(await selected(), 'Epsilon', 'Shift+arrows never select part of a word');
-  assert.deepEqual(await pageKeys(), [], 'blocked Shift keys stay away from the page');
+  await press('ArrowDown', MOD.shift | MOD.ctrl);
+  assert.equal(await selText(), 'delta. Epsilon', 'Shift+End and Ctrl+Shift+↓ never select part of a word');
+  await press('ArrowRight');
+  assert.equal(await selected(), 'zeta', '→ goes back to one word: the one after the selection');
+  await press('ArrowRight', MOD.ctrl | MOD.shift);
+  assert.match(await selText(), /^zeta eta theta .* psi omega$/, 'Ctrl+Shift+→ selects to the end of the sentence');
+  await press('ArrowRight', MOD.ctrl | MOD.shift);
+  assert.match(await selText(), /^zeta .* omega\. Second sentence starts here$/, 'again: to the end of the next sentence');
+  await press('ArrowLeft', MOD.ctrl | MOD.shift);
+  assert.match(await selText(), /^zeta .* omega\. Second$/, 'Ctrl+Shift+← takes it back to the start of that sentence');
+  await press('ArrowLeft');
+  assert.equal(await selected(), 'Epsilon', '← goes back to one word: the one before the selection');
+  assert.deepEqual(await pageKeys(), [], 'Shift keys stay away from the page');
   // Alt+← (Back) and Ctrl+↓ belong to the browser and the page.
   await press('ArrowDown', MOD.ctrl);
   assert.deepEqual((await pageKeys()).filter(k => k.startsWith('down:')), ['down:ArrowDown'], 'Ctrl+↓ is left to the page');
@@ -267,6 +289,11 @@ async function run() {
   await press('ArrowUp');
   await press('ArrowUp');
   assert.equal(await selected(), 'Alpha', '↑ ↑ returns to the starting word');
+  await press('ArrowDown', MOD.shift);
+  assert.equal(await evaluate('wordCursorRangeOf(wordCursorSelFromWord(wordCursor.sel.first)).toString()'), 'Alpha', 'Shift+↓ keeps the starting word');
+  assert.equal(await evaluate('wordCursorRangeOf(wordCursorSelFromWord(wordCursor.sel.last)).toString()'), lineBelow, 'and selects down to the closest word on the next line');
+  await press('ArrowUp', MOD.shift);
+  assert.equal(await selected(), 'Alpha', 'Shift+↑ takes the line back');
   assert.deepEqual(await pageKeys(), [], 'line moves stay away from the page');
 
   // Moving off screen scrolls the word into view; scrolling away and then
@@ -387,6 +414,10 @@ async function run() {
   await clickAt(await wordPoint('#p1', 'kappa'));
   assert.equal(await selected(), 'kappa', 'a click selects the word under the pointer');
   assert.notEqual(await evaluate('document.activeElement.id'), 'field', 'and focus left the field');
+  await clickAt(await wordPoint('#p1', 'omicron'), 1, MOD.shift);
+  assert.equal(await selected(), 'kappa lambda mu nu xi omicron', 'Shift+click selects from the current word to the clicked one');
+  await clickAt(await wordPoint('#p1', 'iota'), 1, MOD.shift);
+  assert.equal(await selected(), 'iota kappa', 'Shift+click before the starting word keeps that word');
   // Headless Chrome does not drag-select from CDP mouse moves, so the drag's
   // result (a selection from mid-word to mid-word) is set directly and the
   // mouseup that ends a drag is sent.
@@ -434,6 +465,36 @@ async function run() {
   await press('ArrowRight');
   assert.equal(await selected(), 'theta', 'with the video gone, → moves again');
 
+  // Enter explains a phrase as it reads: text hidden inside it is left out.
+  await clickAt(await wordPoint('#p1', 'delta'));
+  await press('ArrowRight', MOD.shift);
+  const lookupsBefore = await evaluate('aiRequests().length');
+  await press('Enter');
+  await waitFor(`aiRequests().length === ${lookupsBefore + 1}`, 'Enter sends one lookup for the phrase');
+  const phraseRequest = (await evaluate('aiRequests()')).at(-1);
+  assert.equal(phraseRequest.word, 'delta. Epsilon', 'the lookup is the phrase without the hidden text');
+  assert.equal(phraseRequest.context.sentence, 'Alpha beta, gamma delta.', 'with the sentence where it starts');
+  await press('Enter');
+  await sleep(100);
+  assert.equal(await evaluate('aiRequests().length'), lookupsBefore + 1, 'Enter on the same phrase sends nothing');
+  await press('Escape');
+
+  // Holding Shift+→ stops at the phrase limit; shrinking still works.
+  await evaluate(`document.getElementById('long').scrollIntoView({ block: 'center' })`);
+  await clickAt(await wordPoint('#long', 'w1 ', 0, 0.2));
+  assert.equal(await selected(), 'w1', 'start a phrase at w1');
+  for (let i = 0; i < 70; i++) await press('ArrowRight', MOD.shift);
+  assert.equal(await evaluate('wordCursorCountWords(wordCursor.sel, 1000)'), 60, 'the phrase stops at 60 words');
+  assert.match(await selText(), /^w1 w2 .* w60$/, 'w1 to w60');
+  assert.match(await evaluate('hintText()'), /Selection limit: 60 words/, 'the hint says why');
+  await press('ArrowLeft', MOD.shift);
+  assert.equal(await evaluate('wordCursorCountWords(wordCursor.sel, 1000)'), 59, 'Shift+← still shrinks it');
+  await press('ArrowDown', MOD.shift);
+  await press('ArrowDown', MOD.shift);
+  assert.equal(await evaluate('wordCursorCountWords(wordCursor.sel, 1000)'), 60, 'a line jump past the limit stops at it');
+  assert.deepEqual((await pageKeys()).filter(k => k.startsWith('down:')), [], 'none of it reached the page');
+  await evaluate('scrollTo(0, 0)');
+
   // A removed word: the next arrow restarts at the first word on screen.
   await clickAt(await wordPoint('#p2', 'muddy'));
   assert.equal(await selected(), 'muddy', 'select a word in #p2');
@@ -474,7 +535,7 @@ async function run() {
   await evaluate('setFullscreen(false)');
 
   assert.deepEqual(await evaluate('errors'), [], 'no page errors');
-  console.log('Word cursor passed: full-screen start, word/line/sentence moves, Shift and field keys, Enter with exact sentence, replace-not-stack, one-action Esc, clicks and drags snap to words, video and removed-word handling, sticky-header clearance, late text, setting and shortcut.');
+  console.log('Word cursor passed: full-screen start, word/line/sentence moves, phrase selection (Shift+arrows, Ctrl+Shift sentences, Shift+click, 60-word limit, hidden text left out), field keys, Enter with exact sentence, replace-not-stack, one-action Esc, clicks and drags snap to words, video and removed-word handling, sticky-header clearance, late text, setting and shortcut.');
 }
 
 run().then(async () => {

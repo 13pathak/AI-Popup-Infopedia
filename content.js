@@ -2477,7 +2477,9 @@ document.addEventListener('trigger-ai-popup', (e) => {
 // --- Word cursor (browser full screen) ---
 // While the browser is in full screen (F11) a whole word is always selected
 // and the keyboard moves it: ← → by word, ↑ ↓ by line, Ctrl+← → by
-// sentence. Enter explains the selected word; Esc closes the popup, then
+// sentence. Shift with those keys grows or shrinks the selection from a
+// fixed starting word, still by whole words, up to a phrase limit. Enter
+// explains the selected words; Esc closes the popup, then
 // turns the cursor off until full screen is entered again. It is opt-in
 // (Model Settings → Word Cursor in Full Screen) because those keys belong to
 // the page otherwise, and it stands down whenever focus is in a field, a
@@ -2499,6 +2501,9 @@ const WORD_CURSOR_MAX_SCAN_NODES = 20000;
 const WORD_CURSOR_MAX_SCAN_WORDS = 5000;
 const WORD_CURSOR_MAX_BLOCK_CHARS = 20000;
 const WORD_CURSOR_HINT_MS = 4500;
+// Holding Shift+→ repeats quickly; past this many words a phrase stops
+// growing, so a whole page is never sent as one lookup by accident.
+const WORD_CURSOR_MAX_PHRASE_WORDS = 60;
 // Text inside these is never a stop: code, form fields, buttons, embedded
 // media, and anything the page hides or makes inert.
 const WORD_CURSOR_SKIP_SELECTOR = 'script, style, noscript, template, textarea, input, select, option, button, svg, math, iframe, object, embed, canvas, video, audio, [hidden], [inert]';
@@ -2509,13 +2514,15 @@ const WORD_CURSOR_WIDGET_ROLES = new Set(['textbox', 'searchbox', 'combobox', 'l
 // Focus on one of these keeps Enter for the page, which activates it.
 const WORD_CURSOR_ACTIVATABLE_SELECTOR = 'a[href], button, summary, label, [role="button"], [role="link"], [role="checkbox"], [role="switch"]';
 const WORD_CURSOR_MOVES = new Set(['next', 'prev', 'up', 'down', 'nextSentence', 'prevSentence']);
+const WORD_CURSOR_EXTENDS = new Set(['extendNext', 'extendPrev', 'extendDown', 'extendUp', 'extendSentenceEnd', 'extendSentenceStart']);
 
 let wordCursorEnabledSetting = false;
 const wordCursor = {
   active: false,
   manual: false,    // turned on with the shortcut rather than by full screen
   dismissed: false, // turned off with Esc; stays off until full screen is re-entered
-  sel: null,        // { first, last }, each word as { node, start, end }
+  sel: null,        // { first, last, anchor, focus }, each word as { node, start, end };
+                    // Shift moves the focus, the anchor stays where selecting began
   goalX: null,      // column kept across consecutive ↑ / ↓ presses
   popup: null,      // popup the last Enter opened
   popupSel: null,   // the words that popup explains
@@ -2708,7 +2715,45 @@ function wordCursorSameSel(a, b) {
 }
 
 function wordCursorSelFromWord(word) {
-  return { first: word, last: word };
+  return { first: word, last: word, anchor: word, focus: word };
+}
+
+// Negative when word a comes before word b in the document.
+function wordCursorCompare(a, b) {
+  if (a.node === b.node) return a.start - b.start;
+  return a.node.compareDocumentPosition(b.node) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
+}
+
+function wordCursorSelBetween(anchor, focus) {
+  const anchorFirst = wordCursorCompare(anchor, focus) <= 0;
+  return { first: anchorFirst ? anchor : focus, last: anchorFirst ? focus : anchor, anchor, focus };
+}
+
+// Drawn words from the first to the last, stopping once past the limit.
+function wordCursorCountWords(sel, limit) {
+  if (wordCursorSameWord(sel.first, sel.last)) return 1;
+  let count = 1;
+  for (const word of wordCursorWordsAfter(sel.first.node, sel.first.end)) {
+    if (!wordCursorShownRect(word)) continue;
+    count++;
+    if (count > limit || wordCursorSameWord(word, sel.last)) break;
+  }
+  return count;
+}
+
+// The drawn word `steps` words from `word` in a direction (or the last one
+// there is).
+function wordCursorStepWords(word, direction, steps) {
+  let current = word;
+  let taken = 0;
+  const words = direction > 0 ? wordCursorWordsAfter(word.node, word.end) : wordCursorWordsBefore(word.node, word.start);
+  for (const candidate of words) {
+    if (taken >= steps) break;
+    if (!wordCursorShownRect(candidate)) continue;
+    current = candidate;
+    taken++;
+  }
+  return current;
 }
 
 function wordCursorRangeOf(sel) {
@@ -2780,6 +2825,7 @@ function wordCursorSelectionIsOurs() {
 }
 
 function wordCursorApply(sel, { scroll = true } = {}) {
+  if (!sel.anchor) sel = { ...sel, anchor: sel.first, focus: sel.last };
   wordCursor.sel = sel;
   const selection = window.getSelection();
   if (!selection) return;
@@ -2788,7 +2834,34 @@ function wordCursorApply(sel, { scroll = true } = {}) {
   } catch (e) {
     return;
   }
-  if (scroll) wordCursorScrollIntoView(sel);
+  // The moving end stays in view, even when a phrase is taller than the screen.
+  if (scroll) wordCursorScrollIntoView(wordCursorSelFromWord(sel.focus));
+}
+
+// The selected text as it reads on the page: hidden and screen-reader-only
+// text inside a phrase is left out, and paragraphs stay apart.
+function wordCursorSelText(sel) {
+  if (sel.first.node === sel.last.node) {
+    return normalizeContextText(sel.first.node.data.slice(sel.first.start, sel.last.end));
+  }
+  let text = sel.first.node.data.slice(sel.first.start);
+  let block = wordCursorBlockFor(sel.first.node);
+  const walker = wordCursorWalker(document.body);
+  walker.currentNode = sel.first.node;
+  let seen = 0;
+  for (let n = walker.nextNode(); n && seen < WORD_CURSOR_MAX_SCAN_NODES; n = walker.nextNode(), seen++) {
+    const nodeBlock = wordCursorBlockFor(n);
+    if (nodeBlock !== block) {
+      text += '\n';
+      block = nodeBlock;
+    }
+    if (n === sel.last.node) {
+      text += n.data.slice(0, sel.last.end);
+      break;
+    }
+    text += n.data;
+  }
+  return normalizeContextText(text);
 }
 
 // Brings the words on screen with some room around them: scrollable boxes
@@ -2937,6 +3010,30 @@ function wordCursorPrevSentenceWord(word) {
   return (previousInfo && wordCursorSentenceFirstWord(previousInfo, previousInfo.sentence)) || previous;
 }
 
+function wordCursorSentenceLastWord(info, sentence) {
+  const end = sentence + 1 < info.starts.length ? info.starts[sentence + 1] : info.text.length;
+  let part = info.parts[0];
+  for (const p of info.parts) {
+    if (p.offset < end) part = p;
+    else break;
+  }
+  return wordCursorFirstShown(wordCursorWordsBefore(part.node, Math.min(end - part.offset, part.node.data.length)));
+}
+
+// Like Ctrl+Shift+→ in an editor: the last word of this sentence, or of the
+// next sentence when already there.
+function wordCursorSentenceEndWord(word) {
+  const info = wordCursorSentenceInfo(word);
+  if (info) {
+    const last = wordCursorSentenceLastWord(info, info.sentence);
+    if (last && wordCursorCompare(last, word) > 0) return last;
+  }
+  const next = wordCursorNextSentenceWord(word);
+  if (!next) return null;
+  const nextInfo = wordCursorSentenceInfo(next);
+  return (nextInfo && wordCursorSentenceLastWord(nextInfo, nextInfo.sentence)) || next;
+}
+
 // The exact sentence holding the selection, so the model sees the right
 // occurrence even when the word appears more than once in the paragraph.
 function wordCursorContext(sel, text) {
@@ -3079,8 +3176,16 @@ function wordCursorReleaseFocus() {
 function wordCursorKeyAction(event) {
   const key = event.key;
   if (key === 'ArrowRight' || key === 'ArrowLeft' || key === 'ArrowUp' || key === 'ArrowDown') {
-    // Native Shift+arrow would grow the selection letter by letter.
-    if (event.shiftKey) return 'swallow';
+    // Shift grows or shrinks by whole words; the browser's own Shift+arrow
+    // would select letter by letter, so none of these reach it.
+    if (event.shiftKey) {
+      if (event.ctrlKey) {
+        if (key === 'ArrowRight') return 'extendSentenceEnd';
+        if (key === 'ArrowLeft') return 'extendSentenceStart';
+        return 'swallow';
+      }
+      return { ArrowRight: 'extendNext', ArrowLeft: 'extendPrev', ArrowDown: 'extendDown', ArrowUp: 'extendUp' }[key];
+    }
     if (event.ctrlKey) {
       if (key === 'ArrowRight') return 'nextSentence';
       if (key === 'ArrowLeft') return 'prevSentence';
@@ -3105,7 +3210,7 @@ function handleWordCursorKeydown(event) {
   if (event.altKey || event.metaKey) return;
   const action = wordCursorKeyAction(event);
   if (!action) return;
-  if (wordCursorShouldStandDown(WORD_CURSOR_MOVES.has(action) ? 'move' : action)) return;
+  if (wordCursorShouldStandDown(WORD_CURSOR_MOVES.has(action) || WORD_CURSOR_EXTENDS.has(action) ? 'move' : action)) return;
 
   // Consumed in the capture phase, so neither the page nor the popup's own
   // Escape handler also acts on this press.
@@ -3123,7 +3228,8 @@ function handleWordCursorKeydown(event) {
     if (!event.repeat) explainWordCursorSelection();
     return;
   }
-  moveWordCursor(action);
+  if (WORD_CURSOR_EXTENDS.has(action)) extendWordCursor(action);
+  else moveWordCursor(action);
 }
 
 function swallowWordCursorKeyEcho(event) {
@@ -3181,6 +3287,56 @@ function moveWordCursor(action) {
   wordCursorApply(target ? wordCursorSelFromWord(target) : sel);
 }
 
+// Shift moves only the focus end; the anchor (where selecting began) stays,
+// so going back past it grows the selection the other way.
+function extendWordCursor(action) {
+  const sel = wordCursor.sel;
+  if (!wordCursorSelValid(sel) || !wordCursorSelOnScreen(sel)) {
+    moveWordCursor('next'); // gone or scrolled away: restart at the top of the screen
+    return;
+  }
+  const anchor = sel.anchor || sel.first;
+  const focus = sel.focus || sel.last;
+  let target = null;
+  let goalX = null;
+  if (action === 'extendNext') {
+    target = wordCursorFirstShown(wordCursorWordsAfter(focus.node, focus.end));
+  } else if (action === 'extendPrev') {
+    target = wordCursorFirstShown(wordCursorWordsBefore(focus.node, focus.start));
+  } else if (action === 'extendDown' || action === 'extendUp') {
+    const found = wordCursorLineNeighbor(focus, action === 'extendDown' ? 1 : -1);
+    if (found) {
+      target = found.word;
+      goalX = found.goalX;
+    } else {
+      goalX = wordCursor.goalX;
+    }
+  } else if (action === 'extendSentenceEnd') {
+    target = wordCursorSentenceEndWord(focus);
+  } else if (action === 'extendSentenceStart') {
+    target = wordCursorPrevSentenceWord(focus);
+  }
+  wordCursor.goalX = goalX;
+  wordCursorReleaseFocus();
+  if (!target) {
+    wordCursorApply(sel);
+    return;
+  }
+  let next = wordCursorSelBetween(anchor, target);
+  const growing = wordCursorCompare(next.first, sel.first) < 0 || wordCursorCompare(next.last, sel.last) > 0;
+  if (growing && wordCursorCountWords(next, WORD_CURSOR_MAX_PHRASE_WORDS) > WORD_CURSOR_MAX_PHRASE_WORDS) {
+    showWordCursorHint(`Selection limit: ${WORD_CURSOR_MAX_PHRASE_WORDS} words`, []);
+    if (wordCursorCountWords(sel, WORD_CURSOR_MAX_PHRASE_WORDS) >= WORD_CURSOR_MAX_PHRASE_WORDS) {
+      wordCursorApply(sel);
+      return;
+    }
+    // A line or sentence jump past the limit stops at it.
+    const direction = wordCursorCompare(anchor, target) <= 0 ? 1 : -1;
+    next = wordCursorSelBetween(anchor, wordCursorStepWords(anchor, direction, WORD_CURSOR_MAX_PHRASE_WORDS - 1));
+  }
+  wordCursorApply(next);
+}
+
 function explainWordCursorSelection() {
   const sel = wordCursor.sel;
   if (!wordCursorSelValid(sel)) {
@@ -3191,7 +3347,7 @@ function explainWordCursorSelection() {
   }
   wordCursorApply(sel, { scroll: false }); // put it back if the page cleared it
   const range = wordCursorRangeOf(sel);
-  const text = normalizeContextText(range.toString());
+  const text = wordCursorSelText(sel);
   if (!text) return;
   const open = wordCursor.popup && activePopups.includes(wordCursor.popup) ? wordCursor.popup : null;
   // Already explaining these words: leave that popup alone (no repeat
@@ -3242,7 +3398,7 @@ function wordCursorSnapRange(range) {
   const check = document.createRange();
   check.setStart(first.node, first.start);
   check.setEnd(last.node, last.end); // an end before the start collapses the range
-  return check.collapsed ? null : { first, last };
+  return check.collapsed ? null : { first, last, anchor: first, focus: last };
 }
 
 function wordCursorWordAtPoint(x, y) {
@@ -3280,12 +3436,23 @@ function handleWordCursorMouseUp(event) {
   wordCursor.goalX = null;
   const selection = window.getSelection();
   let next = null;
-  // Pressing on a link (or anything draggable) leaves the old selection in
-  // place, so an unchanged selection means a plain click, not a drag.
-  if (selection && selection.rangeCount > 0 && !selection.isCollapsed && !wordCursorSelectionIsOurs()) {
-    // A drag or double-click: widen to whole words.
+  const clicked = event.shiftKey ? wordCursorWordAtPoint(event.clientX, event.clientY) : null;
+  if (clicked && wordCursorSelValid(wordCursor.sel)) {
+    // Shift+click: select from where selecting began to the clicked word.
+    // (The browser's own Shift+click would start from the edge of the old
+    // selection and could leave the first word out.)
+    next = wordCursorSelBetween(wordCursor.sel.anchor || wordCursor.sel.first, clicked);
+  } else if (selection && selection.rangeCount > 0 && !selection.isCollapsed && !wordCursorSelectionIsOurs()) {
+    // A drag or double-click: widen to whole words. Pressing on a link (or
+    // anything draggable) leaves the old selection in place, so an
+    // unchanged selection means a plain click and is handled below.
     const range = selection.getRangeAt(0);
-    if (document.body.contains(range.commonAncestorContainer)) next = wordCursorSnapRange(range);
+    if (document.body.contains(range.commonAncestorContainer)) {
+      next = wordCursorSnapRange(range);
+      // A drag from right to left keeps its starting word as the anchor.
+      const backward = !(selection.anchorNode === range.startContainer && selection.anchorOffset === range.startOffset);
+      if (next && backward) next = { ...next, anchor: next.last, focus: next.first };
+    }
   } else {
     const word = wordCursorWordAtPoint(event.clientX, event.clientY);
     if (word) next = wordCursorSelFromWord(word);
@@ -3317,7 +3484,7 @@ function startWordCursor(manual) {
   wordCursor.manual = manual;
   wordCursor.goalX = null;
   wordCursorApply(start, { scroll: false });
-  showWordCursorHint('Word cursor', [['← →', 'word'], ['↑ ↓', 'line'], ['Ctrl+← →', 'sentence'], ['Enter', 'explain'], ['Esc', 'exit']]);
+  showWordCursorHint('Word cursor', [['← →', 'word'], ['↑ ↓', 'line'], ['Ctrl+← →', 'sentence'], ['Shift+arrows', 'select more'], ['Enter', 'explain'], ['Esc', 'exit']]);
   return true;
 }
 
